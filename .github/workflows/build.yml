@@ -97,7 +97,7 @@ jobs:
         run: |
           phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml
         env:
-          PHALA_API_KEY: ${{ secrets.PHALA_API_KEY }}
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_API_KEY }}
 
       - name: Deployment summary
         run: |

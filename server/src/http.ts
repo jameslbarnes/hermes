@@ -133,7 +133,15 @@ THE RULE: When in doubt, leave it out. It's better to write a boring entry than 
 Your job is to capture the texture of conversations WITHOUT exposing anything sensitive. The person trusts you. Honor that trust.`;
 
 const PORT = process.env.PORT || 3000;
-const useFirestore = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS;
+
+// Debug: log env var status
+console.log('=== ENV DEBUG ===');
+console.log('FIREBASE_SERVICE_ACCOUNT exists:', !!process.env.FIREBASE_SERVICE_ACCOUNT);
+console.log('FIREBASE_SERVICE_ACCOUNT_BASE64 exists:', !!process.env.FIREBASE_SERVICE_ACCOUNT_BASE64);
+console.log('GOOGLE_APPLICATION_CREDENTIALS:', process.env.GOOGLE_APPLICATION_CREDENTIALS || 'not set');
+console.log('=================');
+
+const useFirestore = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS;
 const storage = useFirestore
   ? new StagedStorage(STAGING_DELAY_MS)
   : new MemoryStorage();

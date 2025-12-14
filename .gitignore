@@ -7,6 +7,9 @@ node_modules/
 .env.*.local
 .env.production
 
+# Phala deploy file (contains secrets)
+docker-compose.phala.yml
+
 # Secrets
 firebase-credentials.json
 *-credentials.json

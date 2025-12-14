@@ -96,9 +96,16 @@ export class FirestoreStorage implements Storage {
     // Initialize Firebase if not already initialized
     if (getApps().length === 0) {
       const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+      const serviceAccountBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
       const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
-      if (serviceAccountJson) {
+      if (serviceAccountBase64) {
+        // Base64-encoded JSON in env var
+        const decoded = Buffer.from(serviceAccountBase64, 'base64').toString('utf-8');
+        initializeApp({
+          credential: cert(JSON.parse(decoded)),
+        });
+      } else if (serviceAccountJson) {
         // JSON string in env var
         initializeApp({
           credential: cert(JSON.parse(serviceAccountJson)),

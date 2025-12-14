@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl:*)",
+      "Bash(pkill:*)",
+      "Bash(npm run dev:http:*)",
+      "Bash(cat:*)",
+      "Bash(timeout 3 curl:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npm run dev:tunnel:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -318,6 +318,15 @@
     <script>
         let currentKey = null;
         let currentPseudonym = null;
+        const baseUrl = window.location.origin;
+
+        // Set initial URLs on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('claude-code-cmd').textContent =
+                `claude mcp add hermes ${baseUrl}/mcp/sse?key=YOUR_KEY`;
+            document.getElementById('desktop-url').textContent =
+                `${baseUrl}/mcp/sse?key=YOUR_KEY`;
+        });
 
         async function generateKey() {
             const btn = document.getElementById('generate-btn');
@@ -348,9 +357,9 @@
 
         function updateCommands(key) {
             document.getElementById('claude-code-cmd').textContent =
-                `claude mcp add hermes https://hermes.ing/mcp/sse?key=${key}`;
+                `claude mcp add hermes ${baseUrl}/mcp/sse?key=${key}`;
             document.getElementById('desktop-url').textContent =
-                `https://hermes.ing/mcp/sse?key=${key}`;
+                `${baseUrl}/mcp/sse?key=${key}`;
         }
 
         function copyKey() {

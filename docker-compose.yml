@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  hermes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - STAGING_DELAY_MS=3600000
+      # Firebase credentials injected as secret in Phala Cloud
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/firebase-credentials.json
+    secrets:
+      - firebase-credentials.json
+    restart: unless-stopped
+
+secrets:
+  firebase-credentials.json:
+    file: ./firebase-credentials.json

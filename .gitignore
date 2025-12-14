@@ -6,6 +6,10 @@ node_modules/
 .env.local
 .env.*.local
 
+# Secrets
+firebase-credentials.json
+*-credentials.json
+
 # Build output
 dist/
 

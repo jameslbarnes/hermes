@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  hermes:
+    image: docker.io/generalsemantics/hermes:master
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - STAGING_DELAY_MS=3600000
+      - FIREBASE_SERVICE_ACCOUNT_BASE64=${FIREBASE_SERVICE_ACCOUNT_BASE64}
+    restart: unless-stopped

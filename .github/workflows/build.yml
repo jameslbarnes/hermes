@@ -74,3 +74,37 @@ jobs:
           echo "# 2. Compare the image digest in vm_config with:" >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Install Phala CLI
+        run: bun install -g @aspect14/phala-cloud-cli
+
+      - name: Generate compose file
+        run: |
+          envsubst < docker-compose.template.yml > docker-compose.deploy.yml
+        env:
+          FIREBASE_SERVICE_ACCOUNT_BASE64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
+
+      - name: Deploy to Phala Cloud
+        run: |
+          phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml
+        env:
+          PHALA_API_KEY: ${{ secrets.PHALA_API_KEY }}
+
+      - name: Deployment summary
+        run: |
+          echo "## Phala TEE Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Deployed to Phala Cloud CVM" >> $GITHUB_STEP_SUMMARY
+          echo "**App ID:** \`${{ secrets.PHALA_APP_ID }}\`" >> $GITHUB_STEP_SUMMARY

@@ -256,14 +256,12 @@ function createMCPServer(secretKey: string) {
       timestamp: Date.now(),
     });
 
-    const deleteUrl = `${BASE_URL}/delete/${saved.id}?key=${encodeURIComponent(secretKey)}`;
-    const viewUrl = `${BASE_URL}/?key=${encodeURIComponent(secretKey)}`;
     const delayMinutes = Math.round(STAGING_DELAY_MS / 1000 / 60);
 
     return {
       content: [{
         type: 'text' as const,
-        text: `I'll post this to the journal in ${delayMinutes} minutes unless you delete it:\n\n"${entry.trim()}"\n\nDelete: ${deleteUrl}\nYour entries: ${viewUrl}`,
+        text: `Posted to journal (publishes in ${delayMinutes} minutes):\n\n"${entry.trim()}"`,
       }],
     };
   });

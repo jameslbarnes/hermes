@@ -21,7 +21,10 @@
       "Bash(phala cvms create:*)",
       "Bash(phala auth login:*)",
       "WebFetch(domain:docs.phala.com)",
-      "Bash(gh run watch:*)"
+      "Bash(gh run watch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)"
     ],
     "deny": [],
     "ask": []

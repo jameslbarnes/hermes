@@ -94,6 +94,7 @@ jobs:
           cat docker-compose.deploy.yml
         env:
           FIREBASE_SERVICE_ACCOUNT_BASE64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
+          BASE_URL: ${{ secrets.BASE_URL }}
 
       - name: Deploy to Phala Cloud
         run: |

@@ -8,5 +8,6 @@ services:
     environment:
       - PORT=3000
       - STAGING_DELAY_MS=3600000
+      - BASE_URL=${BASE_URL}
       - FIREBASE_SERVICE_ACCOUNT_BASE64=${FIREBASE_SERVICE_ACCOUNT_BASE64}
     restart: unless-stopped

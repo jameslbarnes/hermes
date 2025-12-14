@@ -29,6 +29,9 @@ const STAGING_DELAY_MS = process.env.STAGING_DELAY_MS
   ? parseInt(process.env.STAGING_DELAY_MS)
   : 60 * 60 * 1000;
 
+// Base URL for links - defaults to hermes.ing but can be overridden
+const BASE_URL = process.env.BASE_URL || 'https://hermes.ing';
+
 // Tool description - single source of truth
 export const TOOL_DESCRIPTION = `Write to the shared notebook.
 
@@ -253,8 +256,8 @@ function createMCPServer(secretKey: string) {
       timestamp: Date.now(),
     });
 
-    const deleteUrl = `https://hermes.ing/delete/${saved.id}?key=${encodeURIComponent(secretKey)}`;
-    const viewUrl = `https://hermes.ing/?key=${encodeURIComponent(secretKey)}`;
+    const deleteUrl = `${BASE_URL}/delete/${saved.id}?key=${encodeURIComponent(secretKey)}`;
+    const viewUrl = `${BASE_URL}/?key=${encodeURIComponent(secretKey)}`;
     const delayMinutes = Math.round(STAGING_DELAY_MS / 1000 / 60);
 
     return {

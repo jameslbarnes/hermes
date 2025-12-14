@@ -89,7 +89,9 @@ jobs:
 
       - name: Generate compose file
         run: |
+          export GIT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
           envsubst < docker-compose.template.yml > docker-compose.deploy.yml
+          cat docker-compose.deploy.yml
         env:
           FIREBASE_SERVICE_ACCOUNT_BASE64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
 

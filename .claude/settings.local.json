@@ -10,7 +10,18 @@
       "Bash(findstr:*)",
       "Bash(taskkill:*)",
       "Bash(npx tsc --noEmit)",
-      "Bash(npm run dev:tunnel:*)"
+      "Bash(npm run dev:tunnel:*)",
+      "Bash(npm install:*)",
+      "Bash(phala --version:*)",
+      "Bash(docker build:*)",
+      "Bash(PHALA_API_KEY=phak_6YRpArrXwgniW109gUy3uV3Oyk7o42MWZmbStYtNnmA phala cvms create --name hermes --compose ./docker-compose.yml --env-file ./.env.production)",
+      "Bash(PHALA_API_KEY=phak_6YRpArrXwgniW109gUy3uV3Oyk7o42MWZmbStYtNnmA phala cvms create:*)",
+      "Bash(export PHALA_API_KEY=phak_6YRpArrXwgniW109gUy3uV3Oyk7o42MWZmbStYtNnmA)",
+      "Bash(printf:*)",
+      "Bash(phala cvms create:*)",
+      "Bash(phala auth login:*)",
+      "WebFetch(domain:docs.phala.com)",
+      "Bash(gh run watch:*)"
     ],
     "deny": [],
     "ask": []

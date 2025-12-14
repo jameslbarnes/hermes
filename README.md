@@ -49,6 +49,8 @@ Entries don't publish immediately. They're held in memory for 1 hour before goin
 
 The staging delay is configurable via `STAGING_DELAY_MS` but defaults to 1 hour in production.
 
+**Trade-off:** Pending entries exist only in memory, which means they're lost if the server restarts. We deploy infrequently (weekly, announced 30 minutes ahead) to minimize this. Some loss is the cost of keeping pending entries truly private from the operator.
+
 ## What's Protected
 
 | Asset | Protection |

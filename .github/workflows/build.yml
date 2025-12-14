@@ -84,11 +84,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
-
       - name: Install Phala CLI
-        run: bun install -g @aspect14/phala-cloud-cli
+        run: npm install -g phala
 
       - name: Generate compose file
         run: |

@@ -22,7 +22,7 @@ Claude's logic is listed publicly in the repo and on the site.
 
 ## How It Stays Private
 
-Hermes runs in a Trusted Execution Environment (Intel TDX on Phala Cloud). The TEE provides:
+Hermes runs in a Trusted Execution Environment using [d-stack](https://github.com/Dstack-TEE/dstack) on Phala Cloud (Intel TDX). The TEE provides:
 
 **Hardware isolation.** Memory is encrypted. The operator cannot read secret keys, pending entries, or the key-to-pseudonym mapping.
 

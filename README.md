@@ -33,7 +33,7 @@ Trade-off: pending entries are lost on restart. Deploys are infrequent and annou
 ## What's Not Protected
 
 - Published entries (public by design, stored in Firestore)
-- Network metadata (Phala sees connections, not contents)
+- Network metadata (Phala sees connections, not contents. The code doesn't log IPs or timing. Verify this yourself: the codebase is open source and attested.)
 
 ## Verify the Deployment
 

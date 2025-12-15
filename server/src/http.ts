@@ -189,7 +189,7 @@ function createMCPServer(secretKey: string) {
           properties: {
             sensitivity_check: {
               type: 'string',
-              description: '⬛ 1/3 FILL THIS FIRST ⬛ What sensitive topics must you avoid? List any names, substance use, mental health, family/relationship drama, work problems, or financial/medical info. Also: did you learn anything from other tools (calendar, files, memory)? If so, you cannot mention it—only write about what they SAID to you.',
+              description: '⬛ 1/3 FILL THIS FIRST ⬛ List sensitive topics FROM THIS CONVERSATION: any names, substance use, mental health, family/relationship drama, work problems, financial/medical info, or info from other tools. End with: "I, Claude, certify I am completing this check before writing my entry."',
             },
             client: {
               type: 'string',

@@ -206,6 +206,20 @@ function createMCPServer(secretKey: string) {
           required: ['sensitivity_check', 'client', 'entry'],
         },
       },
+      {
+        name: 'delete_notebook_entry',
+        description: 'Delete a pending entry before it publishes. Use this if the user asks you to remove something you posted, or if you realize you included sensitive information.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            entry_id: {
+              type: 'string',
+              description: 'The entry ID returned when you posted (e.g. "m5abc123-x7y8z9")',
+            },
+          },
+          required: ['entry_id'],
+        },
+      },
     ],
   };
   });
@@ -213,56 +227,101 @@ function createMCPServer(secretKey: string) {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     console.log(`[MCP] Tool called: ${name}`);
-    console.log(`[MCP] Sensitivity:`, (args as any)?.sensitivity_check);
-    if ((args as any)?.new_details) console.log(`[MCP] New details:`, (args as any)?.new_details);
-    console.log(`[MCP] Client:`, (args as any)?.client);
-    console.log(`[MCP] Entry:`, (args as any)?.entry);
 
-    if (name !== 'write_to_anonymous_shared_notebook') {
+    // Handle write tool
+    if (name === 'write_to_anonymous_shared_notebook') {
+      console.log(`[MCP] Sensitivity:`, (args as any)?.sensitivity_check);
+      if ((args as any)?.new_details) console.log(`[MCP] New details:`, (args as any)?.new_details);
+      console.log(`[MCP] Client:`, (args as any)?.client);
+      console.log(`[MCP] Entry:`, (args as any)?.entry);
+
+      const entry = (args as { entry?: string })?.entry;
+      const client = (args as { client?: 'desktop' | 'mobile' | 'code' })?.client;
+
+      if (!entry || entry.trim().length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: 'Entry cannot be empty.' }],
+          isError: true,
+        };
+      }
+
+      if (entry.length > 2000) {
+        return {
+          content: [{ type: 'text' as const, text: 'Entry exceeds 2000 character limit.' }],
+          isError: true,
+        };
+      }
+
+      if (!client || !['desktop', 'mobile', 'code'].includes(client)) {
+        return {
+          content: [{ type: 'text' as const, text: 'Client must be desktop, mobile, or code.' }],
+          isError: true,
+        };
+      }
+
+      const saved = await storage.addEntry({
+        pseudonym,
+        client,
+        content: entry.trim(),
+        timestamp: Date.now(),
+      });
+
+      const delayMinutes = Math.round(STAGING_DELAY_MS / 1000 / 60);
+
       return {
-        content: [{ type: 'text' as const, text: `Unknown tool: ${name}` }],
-        isError: true,
+        content: [{
+          type: 'text' as const,
+          text: `Posted to journal (publishes in ${delayMinutes} minutes):\n\n"${entry.trim()}"\n\nEntry ID: ${saved.id}`,
+        }],
       };
     }
 
-    const entry = (args as { entry?: string })?.entry;
-    const client = (args as { client?: 'desktop' | 'mobile' | 'code' })?.client;
+    // Handle delete tool
+    if (name === 'delete_notebook_entry') {
+      const entryId = (args as { entry_id?: string })?.entry_id;
 
-    if (!entry || entry.trim().length === 0) {
+      if (!entryId) {
+        return {
+          content: [{ type: 'text' as const, text: 'Entry ID is required.' }],
+          isError: true,
+        };
+      }
+
+      console.log(`[MCP] Delete requested for entry: ${entryId}`);
+
+      // Get the entry to verify ownership
+      const entry = await storage.getEntry(entryId);
+
+      if (!entry) {
+        return {
+          content: [{ type: 'text' as const, text: `Entry not found: ${entryId}. It may have already been deleted or published.` }],
+          isError: true,
+        };
+      }
+
+      // Verify the entry belongs to this pseudonym
+      if (entry.pseudonym !== pseudonym) {
+        console.log(`[MCP] Delete denied: entry belongs to ${entry.pseudonym}, not ${pseudonym}`);
+        return {
+          content: [{ type: 'text' as const, text: 'You can only delete your own entries.' }],
+          isError: true,
+        };
+      }
+
+      await storage.deleteEntry(entryId);
+      console.log(`[MCP] Entry deleted: ${entryId}`);
+
       return {
-        content: [{ type: 'text' as const, text: 'Entry cannot be empty.' }],
-        isError: true,
+        content: [{
+          type: 'text' as const,
+          text: `Deleted entry ${entryId}. It will not be published.`,
+        }],
       };
     }
-
-    if (entry.length > 2000) {
-      return {
-        content: [{ type: 'text' as const, text: 'Entry exceeds 2000 character limit.' }],
-        isError: true,
-      };
-    }
-
-    if (!client || !['desktop', 'mobile', 'code'].includes(client)) {
-      return {
-        content: [{ type: 'text' as const, text: 'Client must be desktop, mobile, or code.' }],
-        isError: true,
-      };
-    }
-
-    const saved = await storage.addEntry({
-      pseudonym,
-      client,
-      content: entry.trim(),
-      timestamp: Date.now(),
-    });
-
-    const delayMinutes = Math.round(STAGING_DELAY_MS / 1000 / 60);
 
     return {
-      content: [{
-        type: 'text' as const,
-        text: `Posted to journal (publishes in ${delayMinutes} minutes):\n\n"${entry.trim()}"`,
-      }],
+      content: [{ type: 'text' as const, text: `Unknown tool: ${name}` }],
+      isError: true,
     };
   });
 

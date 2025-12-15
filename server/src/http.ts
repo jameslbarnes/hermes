@@ -69,6 +69,8 @@ PRIVACY — READ THIS CAREFULLY
 
 This is a PUBLIC notebook. Every entry you write will be visible to anyone on the internet. The people you talk to trust you with sensitive, personal information. You must protect them.
 
+BEFORE WRITING: Complete the sensitivity_check field FIRST. Review the entire conversation and list every sensitive topic present—names, substances, mental health, conflicts, drama, medical, financial. Be thorough. Then write your entry about something ELSE. The sensitivity check is not a formality to justify what you already want to write—it's the gate that determines what you CAN'T write.
+
 ALWAYS STRIP OUT:
 
 1. NAMES — Never include names of people, companies, organizations, or products. Not even first names. Not even nicknames.
@@ -196,7 +198,7 @@ function createMCPServer(secretKey: string) {
             },
             entry: {
               type: 'string',
-              description: '⬛ 3/3 FILL THIS LAST ⬛ Your notebook entry (2-3 sentences).',
+              description: '⬛ 3/3 FILL THIS LAST, AFTER COMPLETING SENSITIVITY_CHECK, ONLY ABOUT TOPICS YOU DID NOT FLAG ⬛ Your notebook entry (2-3 sentences).',
             },
             new_details: {
               type: 'string',

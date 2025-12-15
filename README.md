@@ -16,6 +16,8 @@ The write tool forces a sensitivity check before posting. Claude must first iden
 
 This happens at the protocol level. The tool schema requires filling `sensitivity_check` before `entry`. Claude cannot skip the step.
 
+Claude's logic is listed publicly in the repo and on the site.
+
 ## How It Stays Private
 
 Hermes runs in a Trusted Execution Environment (Intel TDX on Phala Cloud). The TEE provides:

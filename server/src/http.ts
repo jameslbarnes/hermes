@@ -640,6 +640,108 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // POST /api/backfill-summaries - One-time backfill of summaries
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/backfill-summaries') {
+      if (!anthropic || !(storage instanceof StagedStorage)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Summaries not enabled' }));
+        return;
+      }
+
+      console.log('[Backfill] Starting summary backfill...');
+
+      // Get all entries
+      const allEntries = await storage.getEntries(1000);
+      console.log(`[Backfill] Found ${allEntries.length} entries`);
+
+      // Group by pseudonym
+      const byPseudonym = new Map<string, JournalEntry[]>();
+      for (const entry of allEntries) {
+        const entries = byPseudonym.get(entry.pseudonym) || [];
+        entries.push(entry);
+        byPseudonym.set(entry.pseudonym, entries);
+      }
+
+      const results: { pseudonym: string; sessions: number; summaries: number }[] = [];
+
+      for (const [pseudonym, entries] of byPseudonym) {
+        // Sort by timestamp ascending
+        entries.sort((a, b) => a.timestamp - b.timestamp);
+
+        // Find sessions (clusters with <30 min gaps)
+        const sessions: JournalEntry[][] = [];
+        let currentSession: JournalEntry[] = [];
+
+        for (const entry of entries) {
+          if (currentSession.length === 0) {
+            currentSession.push(entry);
+          } else {
+            const lastEntry = currentSession[currentSession.length - 1];
+            const gap = entry.timestamp - lastEntry.timestamp;
+
+            if (gap > SUMMARY_GAP_MS) {
+              // Gap detected - save current session and start new one
+              sessions.push(currentSession);
+              currentSession = [entry];
+            } else {
+              currentSession.push(entry);
+            }
+          }
+        }
+
+        // Don't add the last session - it's still "active" (no gap after it yet)
+        // sessions.push(currentSession) - intentionally omitted
+
+        console.log(`[Backfill] ${pseudonym}: ${entries.length} entries, ${sessions.length} completed sessions`);
+
+        // Generate summaries for each completed session
+        let summariesCreated = 0;
+        for (const session of sessions) {
+          if (session.length === 0) continue;
+
+          // Check if we already have a summary covering this time range
+          const existingSummaries = await storage.getSummaries(100);
+          const alreadySummarized = existingSummaries.some(s =>
+            s.pseudonym === pseudonym &&
+            s.startTime <= session[0].timestamp &&
+            s.endTime >= session[session.length - 1].timestamp
+          );
+
+          if (alreadySummarized) {
+            console.log(`[Backfill] Skipping already-summarized session for ${pseudonym}`);
+            continue;
+          }
+
+          try {
+            const summaryContent = await generateSummary(session);
+            if (summaryContent) {
+              await storage.addSummary({
+                pseudonym,
+                content: summaryContent,
+                timestamp: Date.now(),
+                entryIds: session.map(e => e.id),
+                startTime: session[0].timestamp,
+                endTime: session[session.length - 1].timestamp,
+              });
+              summariesCreated++;
+              console.log(`[Backfill] Created summary for ${pseudonym} session (${session.length} entries)`);
+            }
+          } catch (err) {
+            console.error(`[Backfill] Error creating summary:`, err);
+          }
+        }
+
+        results.push({ pseudonym, sessions: sessions.length, summaries: summariesCreated });
+      }
+
+      console.log('[Backfill] Complete!');
+      res.writeHead(200);
+      res.end(JSON.stringify({ success: true, results }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // GET /api/summaries - Get all summaries
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/summaries') {

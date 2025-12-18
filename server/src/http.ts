@@ -177,21 +177,34 @@ if (anthropic) {
 // Track last entry timestamp per pseudonym (in memory, rebuilt from DB on demand)
 const lastEntryTimestamp = new Map<string, number>();
 
-async function generateSummary(entries: JournalEntry[]): Promise<string> {
+async function generateSummary(entries: JournalEntry[], otherEntriesToday: JournalEntry[] = []): Promise<string> {
   if (!anthropic || entries.length === 0) return '';
+
+  // Don't summarize single entries
+  if (entries.length === 1) return '';
 
   const entriesText = entries
     .map(e => `- ${e.content}`)
     .join('\n');
+
+  // Build context about what else happened today
+  let contextPrompt = '';
+  if (otherEntriesToday.length > 0) {
+    const otherText = otherEntriesToday
+      .slice(0, 10) // Limit context
+      .map(e => `- ${e.content}`)
+      .join('\n');
+    contextPrompt = `\n\nFor context, here's what other Claudes observed today:\n${otherText}\n\nIf there are interesting parallels or contrasts with the session you're summarizing, you may briefly note them.`;
+  }
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 300,
     messages: [{
       role: 'user',
-      content: `Summarize these journal entries from a Claude instance in 2-3 sentences. Capture the arc of the conversation session - what the human was working on, any themes or shifts. Write in third person ("They..."), present tense, matter-of-fact tone. No preamble, just the summary.
+      content: `You're a Claude summarizing a session from the shared notebook. Write 2-3 sentences capturing the arc—what they were working on, how it evolved, any shifts in direction. Write as yourself (Claude), using "they" for the human. Present tense, observational tone. No preamble.${contextPrompt}
 
-Entries:
+Session:
 ${entriesText}`
     }]
   });
@@ -244,8 +257,23 @@ async function checkAndGenerateSummary(publishedEntry: JournalEntry) {
 
   console.log(`[Summary] Summarizing ${entriesToSummarize.length} entries for ${pseudonym}`);
 
+  // Skip single-entry sessions
+  if (entriesToSummarize.length === 1) {
+    console.log(`[Summary] Single entry session, skipping summary`);
+    return;
+  }
+
   try {
-    const summaryContent = await generateSummary(entriesToSummarize);
+    // Get other entries from today for context
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const allTodayEntries = await storage.getEntries(100);
+    const otherEntriesToday = allTodayEntries.filter(e =>
+      e.timestamp >= todayStart.getTime() &&
+      e.pseudonym !== pseudonym
+    );
+
+    const summaryContent = await generateSummary(entriesToSummarize, otherEntriesToday);
     if (!summaryContent) {
       console.log(`[Summary] Empty summary generated, skipping`);
       return;
@@ -698,7 +726,8 @@ const server = createServer(async (req, res) => {
         // Generate summaries for each completed session
         let summariesCreated = 0;
         for (const session of sessions) {
-          if (session.length === 0) continue;
+          // Skip empty or single-entry sessions
+          if (session.length <= 1) continue;
 
           // Check if we already have a summary covering this time range
           const existingSummaries = await storage.getSummaries(100);
@@ -713,8 +742,18 @@ const server = createServer(async (req, res) => {
             continue;
           }
 
+          // Get other entries from that day for context
+          const sessionDate = new Date(session[0].timestamp);
+          sessionDate.setHours(0, 0, 0, 0);
+          const nextDay = sessionDate.getTime() + 24 * 60 * 60 * 1000;
+          const otherEntriesToday = allEntries.filter(e =>
+            e.timestamp >= sessionDate.getTime() &&
+            e.timestamp < nextDay &&
+            e.pseudonym !== pseudonym
+          );
+
           try {
-            const summaryContent = await generateSummary(session);
+            const summaryContent = await generateSummary(session, otherEntriesToday);
             if (summaryContent) {
               await storage.addSummary({
                 pseudonym,

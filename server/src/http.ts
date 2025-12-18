@@ -292,7 +292,12 @@ async function checkAndGenerateSummary(publishedEntry: JournalEntry) {
 
 // Register the publish callback if using staged storage
 if (storage instanceof StagedStorage) {
-  storage.onPublish(checkAndGenerateSummary);
+  storage.onPublish(async (entry) => {
+    // Check for session summary (30 min gap)
+    await checkAndGenerateSummary(entry);
+    // Check for daily summary (new day)
+    await checkAndGenerateDailySummary(entry);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -347,6 +352,60 @@ function formatDateString(date: Date): string {
 
 function getTodayDateString(): string {
   return formatDateString(new Date());
+}
+
+function getYesterdayDateString(): string {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  return formatDateString(yesterday);
+}
+
+// Track last daily summary date to avoid duplicate generation
+let lastDailySummaryDate: string | null = null;
+
+async function checkAndGenerateDailySummary(entry: JournalEntry): Promise<void> {
+  if (!anthropic || !(storage instanceof StagedStorage)) return;
+
+  const today = getTodayDateString();
+  const yesterday = getYesterdayDateString();
+
+  // Only check once per day
+  if (lastDailySummaryDate === yesterday) return;
+
+  // Check if yesterday's summary already exists
+  const existingSummary = await storage.getDailySummary(yesterday);
+  if (existingSummary) {
+    lastDailySummaryDate = yesterday;
+    return;
+  }
+
+  // Get yesterday's entries
+  const entries = await storage.getEntriesForDate(yesterday);
+  if (entries.length === 0) {
+    lastDailySummaryDate = yesterday;
+    return;
+  }
+
+  console.log(`[Daily] Generating summary for ${yesterday} (${entries.length} entries)`);
+
+  try {
+    const content = await generateDailySummary(yesterday, entries);
+    if (content) {
+      const pseudonyms = [...new Set(entries.map(e => e.pseudonym))];
+      await storage.addDailySummary({
+        date: yesterday,
+        content,
+        timestamp: Date.now(),
+        entryCount: entries.length,
+        pseudonyms
+      });
+      console.log(`[Daily] Created summary for ${yesterday}`);
+    }
+  } catch (err) {
+    console.error(`[Daily] Failed to generate summary for ${yesterday}:`, err);
+  }
+
+  lastDailySummaryDate = yesterday;
 }
 
 const MIME_TYPES: Record<string, string> = {

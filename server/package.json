@@ -13,6 +13,7 @@
     "dev:tunnel": "start ngrok http 3000 && tsx src/http.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@phala/dstack-sdk": "^0.5.7",
     "dotenv": "^17.2.3",

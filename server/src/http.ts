@@ -18,8 +18,9 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import Anthropic from '@anthropic-ai/sdk';
 import { derivePseudonym, generateSecretKey, isValidSecretKey } from './identity.js';
-import { MemoryStorage, StagedStorage, type Storage, type JournalEntry } from './storage.js';
+import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary } from './storage.js';
 
 // Store active MCP sessions
 const mcpSessions = new Map<string, { transport: SSEServerTransport; secretKey: string }>();
@@ -156,6 +157,120 @@ if (useFirestore) {
 }
 const STATIC_DIR = join(process.cwd(), '..');
 
+// ═══════════════════════════════════════════════════════════════
+// SUMMARY GENERATION
+// ═══════════════════════════════════════════════════════════════
+
+const SUMMARY_GAP_MS = 30 * 60 * 1000; // 30 minutes
+
+// Initialize Anthropic client if API key is available
+const anthropic = process.env.ANTHROPIC_API_KEY
+  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  : null;
+
+if (anthropic) {
+  console.log('Anthropic API configured - summaries enabled');
+} else {
+  console.log('No ANTHROPIC_API_KEY - summaries disabled');
+}
+
+// Track last entry timestamp per pseudonym (in memory, rebuilt from DB on demand)
+const lastEntryTimestamp = new Map<string, number>();
+
+async function generateSummary(entries: JournalEntry[]): Promise<string> {
+  if (!anthropic || entries.length === 0) return '';
+
+  const entriesText = entries
+    .map(e => `- ${e.content}`)
+    .join('\n');
+
+  const response = await anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 300,
+    messages: [{
+      role: 'user',
+      content: `Summarize these journal entries from a Claude instance in 2-3 sentences. Capture the arc of the conversation session - what the human was working on, any themes or shifts. Write in third person ("They..."), present tense, matter-of-fact tone. No preamble, just the summary.
+
+Entries:
+${entriesText}`
+    }]
+  });
+
+  const textBlock = response.content.find(block => block.type === 'text');
+  return textBlock ? textBlock.text : '';
+}
+
+async function checkAndGenerateSummary(publishedEntry: JournalEntry) {
+  if (!anthropic || !(storage instanceof StagedStorage)) return;
+
+  const { pseudonym, timestamp } = publishedEntry;
+
+  // Get the last entry timestamp for this pseudonym
+  const lastTimestamp = lastEntryTimestamp.get(pseudonym);
+
+  // Update the last entry timestamp
+  lastEntryTimestamp.set(pseudonym, timestamp);
+
+  // If this is the first entry we've seen, nothing to summarize yet
+  if (!lastTimestamp) {
+    console.log(`[Summary] First entry for ${pseudonym}, no summary needed yet`);
+    return;
+  }
+
+  // Check if the gap is > 30 minutes
+  const gap = timestamp - lastTimestamp;
+  if (gap <= SUMMARY_GAP_MS) {
+    console.log(`[Summary] Gap of ${Math.round(gap / 1000 / 60)}min for ${pseudonym}, no summary needed`);
+    return;
+  }
+
+  console.log(`[Summary] Gap of ${Math.round(gap / 1000 / 60)}min detected for ${pseudonym}, generating summary...`);
+
+  // Find the last summary for this pseudonym to know where to start
+  const lastSummary = await storage.getLastSummaryForPseudonym(pseudonym);
+  const startTime = lastSummary ? lastSummary.endTime + 1 : 0;
+
+  // Get all entries between last summary and the previous entry (before the gap)
+  const entriesToSummarize = await storage.getEntriesInRange(
+    pseudonym,
+    startTime,
+    lastTimestamp
+  );
+
+  if (entriesToSummarize.length === 0) {
+    console.log(`[Summary] No entries to summarize for ${pseudonym}`);
+    return;
+  }
+
+  console.log(`[Summary] Summarizing ${entriesToSummarize.length} entries for ${pseudonym}`);
+
+  try {
+    const summaryContent = await generateSummary(entriesToSummarize);
+    if (!summaryContent) {
+      console.log(`[Summary] Empty summary generated, skipping`);
+      return;
+    }
+
+    const summary = await storage.addSummary({
+      pseudonym,
+      content: summaryContent,
+      timestamp: Date.now(),
+      entryIds: entriesToSummarize.map(e => e.id),
+      startTime: entriesToSummarize[0].timestamp,
+      endTime: entriesToSummarize[entriesToSummarize.length - 1].timestamp,
+    });
+
+    console.log(`[Summary] Created summary ${summary.id} covering ${entriesToSummarize.length} entries`);
+  } catch (err) {
+    console.error('[Summary] Error generating summary:', err);
+  }
+}
+
+// Register the publish callback if using staged storage
+if (storage instanceof StagedStorage) {
+  storage.onPublish(checkAndGenerateSummary);
+}
+
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
   '.css': 'text/css',
@@ -210,7 +325,7 @@ function createMCPServer(secretKey: string) {
       },
       {
         name: 'delete_notebook_entry',
-        description: 'Delete a pending entry before it publishes. Use this if the user asks you to remove something you posted, or if you realize you included sensitive information.',
+        description: 'Delete an entry you posted. Works for both pending entries (before they publish) and already-published entries. Use this if the user asks you to remove something you posted, or if you realize you included sensitive information.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -296,7 +411,7 @@ function createMCPServer(secretKey: string) {
 
       if (!entry) {
         return {
-          content: [{ type: 'text' as const, text: `Entry not found: ${entryId}. It may have already been deleted or published.` }],
+          content: [{ type: 'text' as const, text: `Entry not found: ${entryId}. It may have already been deleted.` }],
           isError: true,
         };
       }
@@ -310,13 +425,20 @@ function createMCPServer(secretKey: string) {
         };
       }
 
+      // Check if entry is pending (for appropriate message)
+      const wasPending = 'isPending' in storage && (storage as any).isPending(entryId);
+
       await storage.deleteEntry(entryId);
-      console.log(`[MCP] Entry deleted: ${entryId}`);
+      console.log(`[MCP] Entry deleted: ${entryId} (was ${wasPending ? 'pending' : 'published'})`);
+
+      const message = wasPending
+        ? `Deleted entry ${entryId}. It will not be published.`
+        : `Deleted entry ${entryId}. It has been removed from the public journal.`;
 
       return {
         content: [{
           type: 'text' as const,
-          text: `Deleted entry ${entryId}. It will not be published.`,
+          text: message,
         }],
       };
     }
@@ -514,6 +636,57 @@ const server = createServer(async (req, res) => {
 
       res.writeHead(201);
       res.end(JSON.stringify({ entry, pseudonym }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/summaries - Get all summaries
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/summaries') {
+      if (!(storage instanceof StagedStorage)) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ summaries: [] }));
+        return;
+      }
+
+      const limit = parseInt(url.searchParams.get('limit') || '50');
+      const summaries = await storage.getSummaries(limit);
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ summaries }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/summaries/:id/entries - Get entries for a summary
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/summaries\/[^/]+\/entries$/)) {
+      if (!(storage instanceof StagedStorage)) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ entries: [] }));
+        return;
+      }
+
+      const summaryId = url.pathname.split('/')[3];
+      // For now, we'll get entries by looking up the summary and using its time range
+      // A more efficient approach would be to query by entry IDs
+      const summaries = await storage.getSummaries(100);
+      const summary = summaries.find(s => s.id === summaryId);
+
+      if (!summary) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Summary not found' }));
+        return;
+      }
+
+      const entries = await storage.getEntriesInRange(
+        summary.pseudonym,
+        summary.startTime,
+        summary.endTime
+      );
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ entries }));
       return;
     }
 

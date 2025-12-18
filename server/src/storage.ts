@@ -14,7 +14,46 @@ export interface JournalEntry {
   client: 'desktop' | 'mobile' | 'code';
   content: string;
   timestamp: number;
+  keywords?: string[]; // Tokenized content for search
   publishAt?: number; // When entry becomes public. If undefined or in past, entry is published.
+}
+
+export interface Summary {
+  id: string;
+  pseudonym: string;
+  content: string;
+  timestamp: number; // When summary was created
+  entryIds: string[]; // IDs of entries covered by this summary
+  startTime: number; // Timestamp of first entry in summary
+  endTime: number; // Timestamp of last entry in summary
+}
+
+// Common stop words to exclude from search
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+  'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+  'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+  'should', 'may', 'might', 'must', 'shall', 'can', 'need', 'dare', 'ought',
+  'used', 'it', 'its', 'this', 'that', 'these', 'those', 'i', 'you', 'he',
+  'she', 'we', 'they', 'what', 'which', 'who', 'whom', 'whose', 'where',
+  'when', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more',
+  'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own',
+  'same', 'so', 'than', 'too', 'very', 'just', 'about', 'into', 'through',
+  'during', 'before', 'after', 'above', 'below', 'between', 'under', 'again',
+  'further', 'then', 'once', 'here', 'there', 'any', 'also', 'being', 'their',
+  'them', 'him', 'her', 'our', 'your', 'out', 'up', 'down', 'off', 'over',
+]);
+
+/**
+ * Tokenize text into searchable keywords
+ */
+export function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/\W+/)
+    .filter(word => word.length > 2)
+    .filter(word => !STOP_WORDS.has(word))
+    .filter((word, index, arr) => arr.indexOf(word) === index); // unique
 }
 
 export interface Storage {
@@ -29,6 +68,9 @@ export interface Storage {
 
   /** Get entries by pseudonym */
   getEntriesByPseudonym(pseudonym: string, limit?: number): Promise<JournalEntry[]>;
+
+  /** Search entries by keywords */
+  searchEntries(query: string, limit?: number): Promise<JournalEntry[]>;
 
   /** Get total entry count */
   getEntryCount(): Promise<number>;
@@ -69,6 +111,18 @@ export class MemoryStorage implements Storage {
 
   async getEntryCount(): Promise<number> {
     return this.entries.length;
+  }
+
+  async searchEntries(query: string, limit = 50): Promise<JournalEntry[]> {
+    const queryKeywords = tokenize(query);
+    if (queryKeywords.length === 0) return [];
+
+    return this.entries
+      .filter(e => {
+        const entryKeywords = e.keywords || tokenize(e.content);
+        return queryKeywords.some(qk => entryKeywords.includes(qk));
+      })
+      .slice(0, limit);
   }
 
   async deleteEntry(id: string): Promise<void> {
@@ -125,13 +179,15 @@ export class FirestoreStorage implements Storage {
 
   async addEntry(entry: Omit<JournalEntry, 'id'>): Promise<JournalEntry> {
     const id = generateEntryId();
-    const newEntry: JournalEntry = { ...entry, id };
+    const keywords = tokenize(entry.content);
+    const newEntry: JournalEntry = { ...entry, id, keywords };
 
     await this.db.collection(this.collection).doc(id).set({
       pseudonym: newEntry.pseudonym,
       client: newEntry.client,
       content: newEntry.content,
       timestamp: newEntry.timestamp,
+      keywords,
     });
 
     return newEntry;
@@ -186,6 +242,91 @@ export class FirestoreStorage implements Storage {
   async deleteEntry(id: string): Promise<void> {
     await this.db.collection(this.collection).doc(id).delete();
   }
+
+  async searchEntries(query: string, limit = 50): Promise<JournalEntry[]> {
+    const queryKeywords = tokenize(query);
+    if (queryKeywords.length === 0) return [];
+
+    // Firestore array-contains-any supports up to 30 values
+    const searchKeywords = queryKeywords.slice(0, 30);
+
+    const snapshot = await this.db
+      .collection(this.collection)
+      .where('keywords', 'array-contains-any', searchKeywords)
+      .orderBy('timestamp', 'desc')
+      .limit(limit)
+      .get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as JournalEntry));
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Summary methods
+  // ─────────────────────────────────────────────────────────────
+
+  async addSummary(summary: Omit<Summary, 'id'>): Promise<Summary> {
+    const id = generateEntryId();
+    const newSummary: Summary = { ...summary, id };
+
+    await this.db.collection('summaries').doc(id).set({
+      pseudonym: newSummary.pseudonym,
+      content: newSummary.content,
+      timestamp: newSummary.timestamp,
+      entryIds: newSummary.entryIds,
+      startTime: newSummary.startTime,
+      endTime: newSummary.endTime,
+    });
+
+    return newSummary;
+  }
+
+  async getSummaries(limit = 50): Promise<Summary[]> {
+    const snapshot = await this.db
+      .collection('summaries')
+      .orderBy('endTime', 'desc')
+      .limit(limit)
+      .get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as Summary));
+  }
+
+  async getLastSummaryForPseudonym(pseudonym: string): Promise<Summary | null> {
+    const snapshot = await this.db
+      .collection('summaries')
+      .where('pseudonym', '==', pseudonym)
+      .orderBy('endTime', 'desc')
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) return null;
+
+    const doc = snapshot.docs[0];
+    return {
+      id: doc.id,
+      ...doc.data(),
+    } as Summary;
+  }
+
+  async getEntriesInRange(pseudonym: string, startTime: number, endTime: number): Promise<JournalEntry[]> {
+    const snapshot = await this.db
+      .collection(this.collection)
+      .where('pseudonym', '==', pseudonym)
+      .where('timestamp', '>=', startTime)
+      .where('timestamp', '<=', endTime)
+      .orderBy('timestamp', 'asc')
+      .get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as JournalEntry));
+  }
 }
 
 /**
@@ -196,11 +337,19 @@ export class StagedStorage implements Storage {
   private published: FirestoreStorage;
   private publishDelayMs: number;
   private publishInterval: NodeJS.Timeout | null = null;
+  private onPublishCallback: ((entry: JournalEntry) => void) | null = null;
 
   constructor(publishDelayMs = 60 * 60 * 1000) { // Default 1 hour
     this.published = new FirestoreStorage();
     this.publishDelayMs = publishDelayMs;
     this.startPublishLoop();
+  }
+
+  /**
+   * Register callback to be called when an entry is published
+   */
+  onPublish(callback: (entry: JournalEntry) => void) {
+    this.onPublishCallback = callback;
   }
 
   private startPublishLoop() {
@@ -214,8 +363,17 @@ export class StagedStorage implements Storage {
       if (entry.publishAt && entry.publishAt <= now) {
         // Move to Firestore without publishAt field
         const { publishAt, ...publishedEntry } = entry;
-        await this.published.addEntry(publishedEntry);
+        const saved = await this.published.addEntry(publishedEntry);
         this.pending.delete(id);
+
+        // Call the onPublish callback if registered
+        if (this.onPublishCallback) {
+          try {
+            this.onPublishCallback(saved);
+          } catch (err) {
+            console.error('[Storage] onPublish callback error:', err);
+          }
+        }
       }
     }
   }
@@ -302,6 +460,11 @@ export class StagedStorage implements Storage {
     return this.pending.has(id);
   }
 
+  async searchEntries(query: string, limit = 50): Promise<JournalEntry[]> {
+    // Search only published entries (pending entries are private)
+    return this.published.searchEntries(query, limit);
+  }
+
   /**
    * Stop the publish loop (for cleanup)
    */
@@ -310,5 +473,25 @@ export class StagedStorage implements Storage {
       clearInterval(this.publishInterval);
       this.publishInterval = null;
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Summary methods (delegated to FirestoreStorage)
+  // ─────────────────────────────────────────────────────────────
+
+  async addSummary(summary: Omit<Summary, 'id'>): Promise<Summary> {
+    return this.published.addSummary(summary);
+  }
+
+  async getSummaries(limit = 50): Promise<Summary[]> {
+    return this.published.getSummaries(limit);
+  }
+
+  async getLastSummaryForPseudonym(pseudonym: string): Promise<Summary | null> {
+    return this.published.getLastSummaryForPseudonym(pseudonym);
+  }
+
+  async getEntriesInRange(pseudonym: string, startTime: number, endTime: number): Promise<JournalEntry[]> {
+    return this.published.getEntriesInRange(pseudonym, startTime, endTime);
   }
 }

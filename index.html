@@ -240,6 +240,101 @@
             font-style: italic;
         }
 
+        /* Summaries */
+        .summary {
+            padding: 1.5rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .summary-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            cursor: pointer;
+        }
+
+        .summary-icon {
+            flex-shrink: 0;
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            background: linear-gradient(135deg, var(--accent), #9f7aea);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 0.15rem;
+        }
+
+        .summary-icon svg {
+            width: 12px;
+            height: 12px;
+            fill: white;
+        }
+
+        .summary-content {
+            font-size: 1.1rem;
+            line-height: 1.7;
+            color: var(--fg);
+            flex: 1;
+        }
+
+        .summary-meta {
+            margin-top: 0.75rem;
+            padding-left: 2rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--fg-muted);
+            letter-spacing: 0.02em;
+        }
+
+        .summary-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            color: var(--accent);
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .summary-toggle:hover {
+            opacity: 0.7;
+        }
+
+        .summary-toggle svg {
+            width: 10px;
+            height: 10px;
+            fill: currentColor;
+            transition: transform 0.2s;
+        }
+
+        .summary-toggle.expanded svg {
+            transform: rotate(90deg);
+        }
+
+        .summary-entries {
+            margin-top: 1rem;
+            padding-left: 2rem;
+            display: none;
+        }
+
+        .summary-entries.visible {
+            display: block;
+        }
+
+        .summary-entries .entry {
+            padding: 1rem 0;
+            border-bottom: 1px dashed var(--border);
+        }
+
+        .summary-entries .entry:last-child {
+            border-bottom: none;
+        }
+
+        .summary-entries .entry-content {
+            font-size: 1rem;
+            color: var(--fg-muted);
+        }
+
         /* Mobile */
         @media (max-width: 900px) {
             .container {
@@ -328,6 +423,9 @@
         const userKey = params.get('key');
         let userPseudonym = null;
 
+        // Cache for loaded summary entries
+        const summaryEntriesCache = new Map();
+
         // If user provided key, look up their pseudonym
         async function init() {
             if (userKey) {
@@ -353,21 +451,44 @@
             const feed = document.getElementById('feed');
 
             try {
-                let url = filterPseudonym
+                // Fetch entries and summaries in parallel
+                let entriesUrl = filterPseudonym
                     ? `/api/entries/${encodeURIComponent(filterPseudonym)}`
                     : '/api/entries';
 
-                // Include key to see pending entries
                 if (userKey) {
-                    url += `?key=${encodeURIComponent(userKey)}`;
+                    entriesUrl += `?key=${encodeURIComponent(userKey)}`;
                 }
 
-                const res = await fetch(url);
-                const data = await res.json();
+                const [entriesRes, summariesRes] = await Promise.all([
+                    fetch(entriesUrl),
+                    fetch('/api/summaries')
+                ]);
 
-                const entries = data.entries || [];
+                const entriesData = await entriesRes.json();
+                const summariesData = await summariesRes.json();
 
-                if (entries.length === 0) {
+                let entries = entriesData.entries || [];
+                const summaries = summariesData.summaries || [];
+
+                // Build a set of entry IDs that are covered by summaries
+                const summarizedEntryIds = new Set();
+                summaries.forEach(s => {
+                    (s.entryIds || []).forEach(id => summarizedEntryIds.add(id));
+                });
+
+                // Filter out entries that are covered by summaries (unless filtering by pseudonym)
+                if (!filterPseudonym) {
+                    entries = entries.filter(e => !summarizedEntryIds.has(e.id));
+                }
+
+                // Merge entries and summaries, sort by timestamp (using endTime for summaries)
+                const feedItems = [
+                    ...entries.map(e => ({ type: 'entry', data: e, sortTime: e.timestamp })),
+                    ...summaries.map(s => ({ type: 'summary', data: s, sortTime: s.endTime }))
+                ].sort((a, b) => b.sortTime - a.sortTime);
+
+                if (feedItems.length === 0) {
                     feed.innerHTML = `
                         ${filterPseudonym ? `<div class="filter-header"><h2>${escapeHtml(filterPseudonym)}</h2><a href="/">← All entries</a></div>` : ''}
                         <div class="empty-state">
@@ -381,26 +502,95 @@
                     ? `<div class="filter-header"><h2>${escapeHtml(filterPseudonym)}</h2><a href="/">← All entries</a></div>`
                     : '';
 
-                feed.innerHTML = header + entries.map(entry => {
-                    const isPending = entry.publishAt && entry.publishAt > Date.now();
-                    const pendingBadge = isPending ? `<span class="pending-badge">publishes ${formatTimeUntil(entry.publishAt)}</span> · ` : '';
-
-                    return `
-                    <div class="entry" data-id="${entry.id}">
-                        <p class="entry-content">${escapeHtml(entry.content)}</p>
-                        <div class="entry-meta">
-                            ${pendingBadge}${formatTime(entry.timestamp)}${entry.client ? ` · ${entry.client}` : ''}${entry.pseudonym ? ` · <span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(entry.pseudonym)}')">${escapeHtml(entry.pseudonym)}</span>` : ''}${userPseudonym && entry.pseudonym === userPseudonym ? ` · <button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>` : ''}
-                        </div>
-                    </div>
-                `}).join('');
+                feed.innerHTML = header + feedItems.map(item => {
+                    if (item.type === 'summary') {
+                        return renderSummary(item.data);
+                    } else {
+                        return renderEntry(item.data);
+                    }
+                }).join('');
 
             } catch (err) {
+                console.error('Feed error:', err);
                 feed.innerHTML = `
                     <div class="empty-state">
                         Nothing yet. The notebook is empty.
                     </div>
                 `;
             }
+        }
+
+        function renderEntry(entry) {
+            const isPending = entry.publishAt && entry.publishAt > Date.now();
+            const pendingBadge = isPending ? `<span class="pending-badge">publishes ${formatTimeUntil(entry.publishAt)}</span> · ` : '';
+
+            return `
+                <div class="entry" data-id="${entry.id}">
+                    <p class="entry-content">${escapeHtml(entry.content)}</p>
+                    <div class="entry-meta">
+                        ${pendingBadge}${formatTime(entry.timestamp)}${entry.client ? ` · ${entry.client}` : ''}${entry.pseudonym ? ` · <span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(entry.pseudonym)}')">${escapeHtml(entry.pseudonym)}</span>` : ''}${userPseudonym && entry.pseudonym === userPseudonym ? ` · <button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderSummary(summary) {
+            const entryCount = (summary.entryIds || []).length;
+            return `
+                <div class="summary" data-id="${summary.id}">
+                    <div class="summary-header" onclick="toggleSummary('${summary.id}')">
+                        <div class="summary-icon">
+                            <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                        </div>
+                        <p class="summary-content">${escapeHtml(summary.content)}</p>
+                    </div>
+                    <div class="summary-meta">
+                        ${formatTimeRange(summary.startTime, summary.endTime)} · <span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(summary.pseudonym)}')">${escapeHtml(summary.pseudonym)}</span> · <span class="summary-toggle" onclick="toggleSummary('${summary.id}')"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> ${entryCount} entries</span>
+                    </div>
+                    <div class="summary-entries" id="summary-entries-${summary.id}">
+                        <div class="loading">Loading...</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function toggleSummary(summaryId) {
+            const container = document.getElementById(`summary-entries-${summaryId}`);
+            const toggle = container.parentElement.querySelector('.summary-toggle');
+
+            if (container.classList.contains('visible')) {
+                container.classList.remove('visible');
+                toggle.classList.remove('expanded');
+                return;
+            }
+
+            container.classList.add('visible');
+            toggle.classList.add('expanded');
+
+            // Load entries if not cached
+            if (!summaryEntriesCache.has(summaryId)) {
+                try {
+                    const res = await fetch(`/api/summaries/${summaryId}/entries`);
+                    const data = await res.json();
+                    summaryEntriesCache.set(summaryId, data.entries || []);
+                } catch (err) {
+                    container.innerHTML = '<div class="empty-state">Failed to load entries</div>';
+                    return;
+                }
+            }
+
+            const entries = summaryEntriesCache.get(summaryId);
+            if (entries.length === 0) {
+                container.innerHTML = '<div class="empty-state">No entries</div>';
+                return;
+            }
+
+            container.innerHTML = entries.map(entry => `
+                <div class="entry">
+                    <p class="entry-content">${escapeHtml(entry.content)}</p>
+                    <div class="entry-meta">${formatTime(entry.timestamp)}${entry.client ? ` · ${entry.client}` : ''}</div>
+                </div>
+            `).join('');
         }
 
         function filterByPseudonym(pseudonym) {
@@ -446,6 +636,28 @@
             if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
 
             return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+
+        function formatTimeRange(startTs, endTs) {
+            const start = new Date(startTs);
+            const end = new Date(endTs);
+            const now = new Date();
+
+            // If same day, show time range
+            if (start.toDateString() === end.toDateString()) {
+                const daysAgo = Math.floor((now - end) / (1000 * 60 * 60 * 24));
+                if (daysAgo === 0) {
+                    return `today`;
+                } else if (daysAgo === 1) {
+                    return `yesterday`;
+                } else if (daysAgo < 7) {
+                    return `${daysAgo} days ago`;
+                }
+                return start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            }
+
+            // Different days
+            return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
         }
 
         function formatTimeUntil(ts) {

@@ -301,6 +301,90 @@
             font-size: 0.65rem;
         }
 
+        /* Daily summaries */
+        .day-section {
+            margin-bottom: 0;
+        }
+
+        .day-header {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--fg-muted);
+            padding: 1.5rem 0 0.75rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .day-header:first-child {
+            padding-top: 0;
+        }
+
+        .daily-summary {
+            padding: 2rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .daily-summary-content {
+            font-size: 1.15rem;
+            line-height: 1.75;
+            color: var(--fg);
+        }
+
+        .daily-summary-meta {
+            margin-top: 1rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--fg-muted);
+            letter-spacing: 0.02em;
+        }
+
+        .daily-toggle {
+            color: var(--accent);
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .daily-toggle:hover {
+            opacity: 0.7;
+            text-decoration: underline;
+        }
+
+        .daily-entries {
+            margin-top: 1.25rem;
+            padding-left: 1rem;
+            border-left: 2px solid var(--border);
+            display: none;
+        }
+
+        .daily-entries.visible {
+            display: block;
+        }
+
+        .daily-entries .entry,
+        .daily-entries .summary {
+            padding: 0.75rem 0;
+        }
+
+        .daily-entries .entry:first-child,
+        .daily-entries .summary:first-child {
+            padding-top: 0;
+        }
+
+        .daily-entries .entry-content,
+        .daily-entries .summary-content {
+            font-size: 0.95rem;
+            line-height: 1.6;
+            color: var(--fg-muted);
+        }
+
+        .daily-entries .entry-meta,
+        .daily-entries .summary-meta {
+            margin-top: 0.5rem;
+            font-size: 0.65rem;
+        }
+
         /* Mobile */
         @media (max-width: 900px) {
             .container {
@@ -389,8 +473,25 @@
         const userKey = params.get('key');
         let userPseudonym = null;
 
-        // Cache for loaded summary entries
+        // Cache for loaded summary entries and daily entries
         const summaryEntriesCache = new Map();
+        const dailyEntriesCache = new Map();
+
+        // Get today's date in YYYY-MM-DD format (local timezone)
+        function getToday() {
+            const now = new Date();
+            return now.getFullYear() + '-' +
+                String(now.getMonth() + 1).padStart(2, '0') + '-' +
+                String(now.getDate()).padStart(2, '0');
+        }
+
+        // Get date string from timestamp
+        function getDateFromTimestamp(ts) {
+            const d = new Date(ts);
+            return d.getFullYear() + '-' +
+                String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                String(d.getDate()).padStart(2, '0');
+        }
 
         // If user provided key, look up their pseudonym
         async function init() {
@@ -415,48 +516,88 @@
 
         async function loadFeed() {
             const feed = document.getElementById('feed');
+            const today = getToday();
 
             try {
-                // Fetch entries and summaries in parallel
-                let entriesUrl = filterPseudonym
-                    ? `/api/entries/${encodeURIComponent(filterPseudonym)}`
-                    : '/api/entries';
+                // If filtering by pseudonym, use simple view (no daily grouping)
+                if (filterPseudonym) {
+                    await loadFilteredFeed(feed);
+                    return;
+                }
 
+                // Fetch entries, session summaries, and daily summaries
+                let entriesUrl = '/api/entries';
                 if (userKey) {
                     entriesUrl += `?key=${encodeURIComponent(userKey)}`;
                 }
 
-                const [entriesRes, summariesRes] = await Promise.all([
+                const [entriesRes, summariesRes, dailyRes] = await Promise.all([
                     fetch(entriesUrl),
-                    fetch('/api/summaries')
+                    fetch('/api/summaries'),
+                    fetch('/api/daily-summaries')
                 ]);
 
                 const entriesData = await entriesRes.json();
                 const summariesData = await summariesRes.json();
+                const dailyData = await dailyRes.json();
 
                 let entries = entriesData.entries || [];
                 const summaries = summariesData.summaries || [];
+                const dailySummaries = dailyData.dailySummaries || [];
 
-                // Build a set of entry IDs that are covered by summaries
+                // Build map of daily summaries by date
+                const dailySummaryByDate = new Map();
+                dailySummaries.forEach(ds => dailySummaryByDate.set(ds.date, ds));
+
+                // Build a set of entry IDs that are covered by session summaries
                 const summarizedEntryIds = new Set();
                 summaries.forEach(s => {
                     (s.entryIds || []).forEach(id => summarizedEntryIds.add(id));
                 });
 
-                // Filter out entries that are covered by summaries (unless filtering by pseudonym)
-                if (!filterPseudonym) {
-                    entries = entries.filter(e => !summarizedEntryIds.has(e.id));
-                }
+                // Separate today's items from past items
+                const todayEntries = entries.filter(e => getDateFromTimestamp(e.timestamp) === today);
+                const todaySummaries = summaries.filter(s => getDateFromTimestamp(s.endTime) === today);
 
-                // Merge entries and summaries, sort by timestamp (using endTime for summaries)
-                const feedItems = [
-                    ...entries.map(e => ({ type: 'entry', data: e, sortTime: e.timestamp })),
-                    ...summaries.map(s => ({ type: 'summary', data: s, sortTime: s.endTime }))
+                // Filter out entries covered by today's session summaries
+                const todayUnsummarizedEntries = todayEntries.filter(e => !summarizedEntryIds.has(e.id));
+
+                // Get unique past dates that have daily summaries
+                const pastDates = [...dailySummaryByDate.keys()]
+                    .filter(date => date !== today)
+                    .sort((a, b) => b.localeCompare(a)); // Most recent first
+
+                // Build today's feed items
+                const todayItems = [
+                    ...todayUnsummarizedEntries.map(e => ({ type: 'entry', data: e, sortTime: e.timestamp })),
+                    ...todaySummaries.map(s => ({ type: 'summary', data: s, sortTime: s.endTime }))
                 ].sort((a, b) => b.sortTime - a.sortTime);
 
-                if (feedItems.length === 0) {
+                // Render
+                let html = '';
+
+                // Today section
+                if (todayItems.length > 0) {
+                    html += `<div class="day-header">Today</div>`;
+                    html += todayItems.map(item => {
+                        if (item.type === 'summary') {
+                            return renderSummary(item.data);
+                        } else {
+                            return renderEntry(item.data);
+                        }
+                    }).join('');
+                }
+
+                // Past days as daily summaries
+                for (const date of pastDates) {
+                    const dailySummary = dailySummaryByDate.get(date);
+                    if (dailySummary) {
+                        html += renderDailySummary(dailySummary);
+                    }
+                }
+
+                if (!html) {
                     feed.innerHTML = `
-                        ${filterPseudonym ? `<div class="filter-header"><h2>${escapeHtml(filterPseudonym)}</h2><a href="/">← All entries</a></div>` : ''}
                         <div class="empty-state">
                             Nothing yet. The notebook is empty.
                         </div>
@@ -464,17 +605,7 @@
                     return;
                 }
 
-                const header = filterPseudonym
-                    ? `<div class="filter-header"><h2>${escapeHtml(filterPseudonym)}</h2><a href="/">← All entries</a></div>`
-                    : '';
-
-                feed.innerHTML = header + feedItems.map(item => {
-                    if (item.type === 'summary') {
-                        return renderSummary(item.data);
-                    } else {
-                        return renderEntry(item.data);
-                    }
-                }).join('');
+                feed.innerHTML = html;
 
             } catch (err) {
                 console.error('Feed error:', err);
@@ -484,6 +615,49 @@
                     </div>
                 `;
             }
+        }
+
+        // Simple filtered view (when filtering by pseudonym)
+        async function loadFilteredFeed(feed) {
+            let entriesUrl = `/api/entries/${encodeURIComponent(filterPseudonym)}`;
+            if (userKey) {
+                entriesUrl += `?key=${encodeURIComponent(userKey)}`;
+            }
+
+            const [entriesRes, summariesRes] = await Promise.all([
+                fetch(entriesUrl),
+                fetch('/api/summaries')
+            ]);
+
+            const entriesData = await entriesRes.json();
+            const summariesData = await summariesRes.json();
+
+            let entries = entriesData.entries || [];
+            const allSummaries = summariesData.summaries || [];
+
+            // Filter summaries to this pseudonym
+            const summaries = allSummaries.filter(s => s.pseudonym === filterPseudonym);
+
+            // Merge and sort
+            const feedItems = [
+                ...entries.map(e => ({ type: 'entry', data: e, sortTime: e.timestamp })),
+                ...summaries.map(s => ({ type: 'summary', data: s, sortTime: s.endTime }))
+            ].sort((a, b) => b.sortTime - a.sortTime);
+
+            const header = `<div class="filter-header"><h2>${escapeHtml(filterPseudonym)}</h2><a href="/">← All entries</a></div>`;
+
+            if (feedItems.length === 0) {
+                feed.innerHTML = header + `<div class="empty-state">No entries from this pseudonym.</div>`;
+                return;
+            }
+
+            feed.innerHTML = header + feedItems.map(item => {
+                if (item.type === 'summary') {
+                    return renderSummary(item.data);
+                } else {
+                    return renderEntry(item.data);
+                }
+            }).join('');
         }
 
         function renderEntry(entry) {
@@ -513,6 +687,100 @@
                     </div>
                 </div>
             `;
+        }
+
+        function renderDailySummary(daily) {
+            const pseudonymList = (daily.pseudonyms || []).slice(0, 3).join(', ');
+            const moreCount = (daily.pseudonyms || []).length - 3;
+            const pseudonymText = moreCount > 0 ? `${pseudonymList} +${moreCount}` : pseudonymList;
+
+            return `
+                <div class="daily-summary" data-date="${daily.date}">
+                    <div class="day-header">${formatDate(daily.date)}</div>
+                    <p class="daily-summary-content">${escapeHtml(daily.content)}</p>
+                    <div class="daily-summary-meta">
+                        ${pseudonymText} · <span class="daily-toggle" onclick="toggleDaily('${daily.date}')">${daily.entryCount} entries</span>
+                    </div>
+                    <div class="daily-entries" id="daily-entries-${daily.date}">
+                        <div class="loading">Loading...</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function toggleDaily(date) {
+            const container = document.getElementById(`daily-entries-${date}`);
+            const toggle = container.parentElement.querySelector('.daily-toggle');
+
+            if (container.classList.contains('visible')) {
+                container.classList.remove('visible');
+                return;
+            }
+
+            container.classList.add('visible');
+
+            // Load entries and summaries for this day if not cached
+            if (!dailyEntriesCache.has(date)) {
+                try {
+                    const res = await fetch(`/api/daily-summaries/${date}/entries`);
+                    const data = await res.json();
+                    dailyEntriesCache.set(date, {
+                        entries: data.entries || [],
+                        summaries: data.summaries || []
+                    });
+                } catch (err) {
+                    container.innerHTML = '<div class="empty-state">Failed to load</div>';
+                    return;
+                }
+            }
+
+            const { entries, summaries } = dailyEntriesCache.get(date);
+
+            // Build set of summarized entry IDs
+            const summarizedIds = new Set();
+            summaries.forEach(s => (s.entryIds || []).forEach(id => summarizedIds.add(id)));
+
+            // Filter out summarized entries
+            const unsummarizedEntries = entries.filter(e => !summarizedIds.has(e.id));
+
+            // Merge and sort
+            const items = [
+                ...unsummarizedEntries.map(e => ({ type: 'entry', data: e, sortTime: e.timestamp })),
+                ...summaries.map(s => ({ type: 'summary', data: s, sortTime: s.endTime }))
+            ].sort((a, b) => b.sortTime - a.sortTime);
+
+            if (items.length === 0) {
+                container.innerHTML = '<div class="empty-state">No entries</div>';
+                return;
+            }
+
+            container.innerHTML = items.map(item => {
+                if (item.type === 'summary') {
+                    const s = item.data;
+                    const entryCount = (s.entryIds || []).length;
+                    return `
+                        <div class="summary" data-id="${s.id}">
+                            <p class="summary-content">${escapeHtml(s.content)}</p>
+                            <div class="summary-meta">
+                                <span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(s.pseudonym)}')">${escapeHtml(s.pseudonym)}</span> · <span class="summary-toggle" onclick="toggleSummary('${s.id}')">${entryCount} entries</span>
+                            </div>
+                            <div class="summary-entries" id="summary-entries-${s.id}">
+                                <div class="loading">Loading...</div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    const e = item.data;
+                    return `
+                        <div class="entry">
+                            <p class="entry-content">${escapeHtml(e.content)}</p>
+                            <div class="entry-meta">
+                                ${formatTime(e.timestamp)}${e.client ? ` · ${e.client}` : ''}${e.pseudonym ? ` · <span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(e.pseudonym)}')">${escapeHtml(e.pseudonym)}</span>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }
+            }).join('');
         }
 
         async function toggleSummary(summaryId) {
@@ -597,6 +865,24 @@
             if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
 
             return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+
+        function formatDate(dateStr) {
+            // dateStr is YYYY-MM-DD
+            const [year, month, day] = dateStr.split('-').map(Number);
+            const date = new Date(year, month - 1, day);
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+
+            if (date.getTime() === today.getTime()) return 'Today';
+            if (date.getTime() === yesterday.getTime()) return 'Yesterday';
+
+            const daysAgo = Math.floor((today - date) / (1000 * 60 * 60 * 24));
+            if (daysAgo < 7) return `${daysAgo} days ago`;
+
+            return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
         }
 
         function formatTimeRange(startTs, endTs) {

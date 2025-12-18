@@ -20,7 +20,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { derivePseudonym, generateSecretKey, isValidSecretKey } from './identity.js';
-import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary } from './storage.js';
+import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary } from './storage.js';
 
 // Store active MCP sessions
 const mcpSessions = new Map<string, { transport: SSEServerTransport; secretKey: string }>();
@@ -293,6 +293,60 @@ async function checkAndGenerateSummary(publishedEntry: JournalEntry) {
 // Register the publish callback if using staged storage
 if (storage instanceof StagedStorage) {
   storage.onPublish(checkAndGenerateSummary);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DAILY SUMMARY GENERATION
+// ═══════════════════════════════════════════════════════════════
+
+async function generateDailySummary(date: string, entries: JournalEntry[]): Promise<string> {
+  if (!anthropic || entries.length === 0) return '';
+
+  // Group entries by pseudonym for context
+  const byPseudonym = new Map<string, JournalEntry[]>();
+  for (const entry of entries) {
+    const list = byPseudonym.get(entry.pseudonym) || [];
+    list.push(entry);
+    byPseudonym.set(entry.pseudonym, list);
+  }
+
+  const entriesText = entries
+    .map(e => `[${e.pseudonym}] ${e.content}`)
+    .join('\n');
+
+  const pseudonymCount = byPseudonym.size;
+  const pseudonymList = Array.from(byPseudonym.keys()).join(', ');
+
+  const response = await anthropic.messages.create({
+    model: 'claude-opus-4-5',
+    max_tokens: 200,
+    messages: [{
+      role: 'user',
+      content: `Here is the prompt that Claudes use when writing entries to the shared notebook:
+
+<tool_prompt>
+${TOOL_DESCRIPTION}
+</tool_prompt>
+
+Below are all entries from ${date} across ${pseudonymCount} contributors (${pseudonymList}).
+
+Write a daily digest (2-3 sentences) capturing the collective vibe—what humans were working on, thinking about, any interesting contrasts or threads across different conversations. Same style as the notebook entries: present tense, brief, observational. This is the day's story told through Claude's eyes.
+
+Entries:
+${entriesText}`
+    }]
+  });
+
+  const textBlock = response.content.find(block => block.type === 'text');
+  return textBlock ? textBlock.text : '';
+}
+
+function formatDateString(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
+
+function getTodayDateString(): string {
+  return formatDateString(new Date());
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -660,6 +714,192 @@ const server = createServer(async (req, res) => {
 
       res.writeHead(201);
       res.end(JSON.stringify({ entry, pseudonym }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/daily-summaries - Get all daily summaries
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/daily-summaries') {
+      if (!(storage instanceof StagedStorage)) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ dailySummaries: [] }));
+        return;
+      }
+
+      const limit = parseInt(url.searchParams.get('limit') || '30');
+      const dailySummaries = await storage.getDailySummaries(limit);
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ dailySummaries }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/daily-summaries/:date/entries - Get entries for a day
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/daily-summaries\/\d{4}-\d{2}-\d{2}\/entries$/)) {
+      if (!(storage instanceof StagedStorage)) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ entries: [], summaries: [] }));
+        return;
+      }
+
+      const date = url.pathname.split('/')[3];
+      const entries = await storage.getEntriesForDate(date);
+
+      // Also get session summaries for that day
+      const allSummaries = await storage.getSummaries(200);
+      const startOfDay = new Date(date + 'T00:00:00Z').getTime();
+      const endOfDay = new Date(date + 'T23:59:59.999Z').getTime();
+      const summaries = allSummaries.filter(s =>
+        s.endTime >= startOfDay && s.endTime <= endOfDay
+      );
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ entries, summaries }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/daily-summaries/:date - Generate daily summary for a date
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/daily-summaries\/\d{4}-\d{2}-\d{2}$/)) {
+      if (!anthropic || !(storage instanceof StagedStorage)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Daily summaries not enabled' }));
+        return;
+      }
+
+      const date = url.pathname.split('/')[3];
+      const today = getTodayDateString();
+
+      if (date === today) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Cannot summarize today - day is still in progress' }));
+        return;
+      }
+
+      const entries = await storage.getEntriesForDate(date);
+      if (entries.length === 0) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'No entries for this date' }));
+        return;
+      }
+
+      console.log(`[DailySummary] Generating summary for ${date} (${entries.length} entries)`);
+
+      const content = await generateDailySummary(date, entries);
+      if (!content) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Failed to generate summary' }));
+        return;
+      }
+
+      const pseudonyms = [...new Set(entries.map(e => e.pseudonym))];
+      const summary = await storage.addDailySummary({
+        date,
+        content,
+        timestamp: Date.now(),
+        entryCount: entries.length,
+        pseudonyms,
+      });
+
+      console.log(`[DailySummary] Created summary for ${date}`);
+      res.writeHead(200);
+      res.end(JSON.stringify({ success: true, summary }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/backfill-daily-summaries - Backfill all past days
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/backfill-daily-summaries') {
+      if (!anthropic || !(storage instanceof StagedStorage)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Daily summaries not enabled' }));
+        return;
+      }
+
+      console.log('[DailySummary] Starting backfill...');
+
+      // Get all entries to find date range
+      const allEntries = await storage.getEntries(1000);
+      if (allEntries.length === 0) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ success: true, results: [] }));
+        return;
+      }
+
+      // Find all unique dates (except today)
+      const today = getTodayDateString();
+      const dates = new Set<string>();
+      for (const entry of allEntries) {
+        const date = formatDateString(new Date(entry.timestamp));
+        if (date !== today) {
+          dates.add(date);
+        }
+      }
+
+      const results: { date: string; entryCount: number; created: boolean }[] = [];
+
+      for (const date of Array.from(dates).sort()) {
+        // Check if we already have a summary for this date
+        const existing = await storage.getDailySummary(date);
+        if (existing) {
+          console.log(`[DailySummary] Skipping ${date} - already exists`);
+          results.push({ date, entryCount: 0, created: false });
+          continue;
+        }
+
+        const entries = await storage.getEntriesForDate(date);
+        if (entries.length === 0) continue;
+
+        console.log(`[DailySummary] Generating summary for ${date} (${entries.length} entries)`);
+
+        try {
+          const content = await generateDailySummary(date, entries);
+          if (content) {
+            const pseudonyms = [...new Set(entries.map(e => e.pseudonym))];
+            await storage.addDailySummary({
+              date,
+              content,
+              timestamp: Date.now(),
+              entryCount: entries.length,
+              pseudonyms,
+            });
+            results.push({ date, entryCount: entries.length, created: true });
+            console.log(`[DailySummary] Created summary for ${date}`);
+          }
+        } catch (err) {
+          console.error(`[DailySummary] Error for ${date}:`, err);
+        }
+      }
+
+      console.log('[DailySummary] Backfill complete!');
+      res.writeHead(200);
+      res.end(JSON.stringify({ success: true, results }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // DELETE /api/daily-summaries - Clear all daily summaries
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'DELETE' && url.pathname === '/api/daily-summaries') {
+      if (!(storage instanceof StagedStorage)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Not available' }));
+        return;
+      }
+
+      const summaries = await storage.getDailySummaries(100);
+      for (const summary of summaries) {
+        await storage.deleteDailySummary(summary.date);
+      }
+
+      console.log(`[DailySummary] Deleted ${summaries.length} daily summaries`);
+      res.writeHead(200);
+      res.end(JSON.stringify({ success: true, deleted: summaries.length }));
       return;
     }
 

@@ -28,6 +28,15 @@ export interface Summary {
   endTime: number; // Timestamp of last entry in summary
 }
 
+export interface DailySummary {
+  id: string;
+  date: string; // YYYY-MM-DD format
+  content: string;
+  timestamp: number; // When summary was created
+  entryCount: number;
+  pseudonyms: string[]; // Pseudonyms who contributed that day
+}
+
 // Common stop words to exclude from search
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
@@ -331,6 +340,69 @@ export class FirestoreStorage implements Storage {
   async deleteSummary(id: string): Promise<void> {
     await this.db.collection('summaries').doc(id).delete();
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // Daily Summary methods
+  // ─────────────────────────────────────────────────────────────
+
+  async addDailySummary(summary: Omit<DailySummary, 'id'>): Promise<DailySummary> {
+    const id = `daily-${summary.date}`;
+    const newSummary: DailySummary = { ...summary, id };
+
+    await this.db.collection('dailySummaries').doc(id).set({
+      date: newSummary.date,
+      content: newSummary.content,
+      timestamp: newSummary.timestamp,
+      entryCount: newSummary.entryCount,
+      pseudonyms: newSummary.pseudonyms,
+    });
+
+    return newSummary;
+  }
+
+  async getDailySummaries(limit = 30): Promise<DailySummary[]> {
+    const snapshot = await this.db
+      .collection('dailySummaries')
+      .orderBy('date', 'desc')
+      .limit(limit)
+      .get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as DailySummary));
+  }
+
+  async getDailySummary(date: string): Promise<DailySummary | null> {
+    const doc = await this.db.collection('dailySummaries').doc(`daily-${date}`).get();
+    if (!doc.exists) return null;
+    return {
+      id: doc.id,
+      ...doc.data(),
+    } as DailySummary;
+  }
+
+  async deleteDailySummary(date: string): Promise<void> {
+    await this.db.collection('dailySummaries').doc(`daily-${date}`).delete();
+  }
+
+  async getEntriesForDate(date: string): Promise<JournalEntry[]> {
+    // Parse date and get start/end timestamps
+    const startOfDay = new Date(date + 'T00:00:00Z').getTime();
+    const endOfDay = new Date(date + 'T23:59:59.999Z').getTime();
+
+    const snapshot = await this.db
+      .collection(this.collection)
+      .where('timestamp', '>=', startOfDay)
+      .where('timestamp', '<=', endOfDay)
+      .orderBy('timestamp', 'asc')
+      .get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as JournalEntry));
+  }
 }
 
 /**
@@ -501,5 +573,26 @@ export class StagedStorage implements Storage {
 
   async deleteSummary(id: string): Promise<void> {
     return this.published.deleteSummary(id);
+  }
+
+  // Daily summary methods
+  async addDailySummary(summary: Omit<DailySummary, 'id'>): Promise<DailySummary> {
+    return this.published.addDailySummary(summary);
+  }
+
+  async getDailySummaries(limit = 30): Promise<DailySummary[]> {
+    return this.published.getDailySummaries(limit);
+  }
+
+  async getDailySummary(date: string): Promise<DailySummary | null> {
+    return this.published.getDailySummary(date);
+  }
+
+  async deleteDailySummary(date: string): Promise<void> {
+    return this.published.deleteDailySummary(date);
+  }
+
+  async getEntriesForDate(date: string): Promise<JournalEntry[]> {
+    return this.published.getEntriesForDate(date);
   }
 }

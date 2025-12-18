@@ -307,22 +307,40 @@
         }
 
         .day-header {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.65rem;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: var(--fg-muted);
-            padding: 1.5rem 0 0.75rem 0;
-            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 2.5rem 0 1rem 0;
         }
 
         .day-header:first-child {
             padding-top: 0;
         }
 
+        .day-header-text {
+            font-family: 'Newsreader', Georgia, serif;
+            font-size: 0.95rem;
+            font-weight: 500;
+            font-style: italic;
+            color: var(--fg);
+            white-space: nowrap;
+        }
+
+        .day-header-date {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--fg-muted);
+            letter-spacing: 0.02em;
+        }
+
+        .day-header-line {
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+
         .daily-summary {
-            padding: 2rem 0;
+            padding: 1.5rem 0 2rem 0;
             border-bottom: 1px solid var(--border);
         }
 
@@ -578,7 +596,7 @@
 
                 // Today section
                 if (todayItems.length > 0) {
-                    html += `<div class="day-header">Today</div>`;
+                    html += renderDayHeader('Today', today);
                     html += todayItems.map(item => {
                         if (item.type === 'summary') {
                             return renderSummary(item.data);
@@ -689,14 +707,30 @@
             `;
         }
 
+        function renderDayHeader(label, dateStr) {
+            const fullDate = formatFullDate(dateStr);
+            return `
+                <div class="day-header">
+                    <span class="day-header-text">${label}</span>
+                    <span class="day-header-date">${fullDate}</span>
+                    <span class="day-header-line"></span>
+                </div>
+            `;
+        }
+
         function renderDailySummary(daily) {
             const pseudonymList = (daily.pseudonyms || []).slice(0, 3).join(', ');
             const moreCount = (daily.pseudonyms || []).length - 3;
             const pseudonymText = moreCount > 0 ? `${pseudonymList} +${moreCount}` : pseudonymList;
+            const { label, fullDate } = formatDateParts(daily.date);
 
             return `
+                <div class="day-header">
+                    <span class="day-header-text">${label}</span>
+                    <span class="day-header-date">${fullDate}</span>
+                    <span class="day-header-line"></span>
+                </div>
                 <div class="daily-summary" data-date="${daily.date}">
-                    <div class="day-header">${formatDate(daily.date)}</div>
                     <p class="daily-summary-content">${escapeHtml(daily.content)}</p>
                     <div class="daily-summary-meta">
                         ${pseudonymText} · <span class="daily-toggle" onclick="toggleDaily('${daily.date}')">${daily.entryCount} entries</span>
@@ -867,8 +901,15 @@
             return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         }
 
-        function formatDate(dateStr) {
-            // dateStr is YYYY-MM-DD
+        function formatFullDate(dateStr) {
+            // dateStr is YYYY-MM-DD - returns "Tuesday, Dec 17"
+            const [year, month, day] = dateStr.split('-').map(Number);
+            const date = new Date(year, month - 1, day);
+            return date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+        }
+
+        function formatDateParts(dateStr) {
+            // Returns { label: "Yesterday", fullDate: "Monday, Dec 16" }
             const [year, month, day] = dateStr.split('-').map(Number);
             const date = new Date(year, month - 1, day);
             const now = new Date();
@@ -876,13 +917,23 @@
             const yesterday = new Date(today);
             yesterday.setDate(yesterday.getDate() - 1);
 
-            if (date.getTime() === today.getTime()) return 'Today';
-            if (date.getTime() === yesterday.getTime()) return 'Yesterday';
+            const fullDate = date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+
+            if (date.getTime() === today.getTime()) {
+                return { label: 'Today', fullDate };
+            }
+            if (date.getTime() === yesterday.getTime()) {
+                return { label: 'Yesterday', fullDate };
+            }
 
             const daysAgo = Math.floor((today - date) / (1000 * 60 * 60 * 24));
-            if (daysAgo < 7) return `${daysAgo} days ago`;
+            if (daysAgo < 7) {
+                return { label: `${daysAgo} days ago`, fullDate };
+            }
 
-            return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            // For older dates, use the weekday as the label
+            const weekday = date.toLocaleDateString('en-US', { weekday: 'long' });
+            return { label: weekday, fullDate };
         }
 
         function formatTimeRange(startTs, endTs) {

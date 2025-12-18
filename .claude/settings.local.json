@@ -27,7 +27,8 @@
       "Bash(git push)",
       "Bash(phala cvms upgrade:*)",
       "Bash(phala cvms restart:*)",
-      "Bash(phala cvms stop:*)"
+      "Bash(phala cvms stop:*)",
+      "Bash(gh run list:*)"
     ],
     "deny": [],
     "ask": []

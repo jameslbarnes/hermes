@@ -188,7 +188,7 @@ async function generateSummary(entries: JournalEntry[], otherEntriesToday: Journ
     .join('\n');
 
   const response = await anthropic.messages.create({
-    model: 'claude-opus-4-5-20250514',
+    model: 'claude-opus-4-5',
     max_tokens: 150,
     messages: [{
       role: 'user',

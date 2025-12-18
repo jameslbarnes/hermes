@@ -24,7 +24,10 @@
       "Bash(gh run watch:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push)"
+      "Bash(git push)",
+      "Bash(phala cvms upgrade:*)",
+      "Bash(phala cvms restart:*)",
+      "Bash(phala cvms stop:*)"
     ],
     "deny": [],
     "ask": []

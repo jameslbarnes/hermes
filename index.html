@@ -240,47 +240,20 @@
             font-style: italic;
         }
 
-        /* Summaries */
+        /* Summaries - thread style */
         .summary {
-            padding: 1.5rem 0;
+            padding: 2rem 0;
             border-bottom: 1px solid var(--border);
         }
 
-        .summary-header {
-            display: flex;
-            align-items: flex-start;
-            gap: 0.75rem;
-            cursor: pointer;
-        }
-
-        .summary-icon {
-            flex-shrink: 0;
-            width: 20px;
-            height: 20px;
-            border-radius: 4px;
-            background: linear-gradient(135deg, var(--accent), #9f7aea);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-top: 0.15rem;
-        }
-
-        .summary-icon svg {
-            width: 12px;
-            height: 12px;
-            fill: white;
-        }
-
         .summary-content {
-            font-size: 1.1rem;
-            line-height: 1.7;
+            font-size: 1.15rem;
+            line-height: 1.75;
             color: var(--fg);
-            flex: 1;
         }
 
         .summary-meta {
-            margin-top: 0.75rem;
-            padding-left: 2rem;
+            margin-top: 1rem;
             font-family: 'IBM Plex Mono', monospace;
             font-size: 0.7rem;
             color: var(--fg-muted);
@@ -288,9 +261,6 @@
         }
 
         .summary-toggle {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.35rem;
             color: var(--accent);
             cursor: pointer;
             transition: opacity 0.2s;
@@ -298,22 +268,13 @@
 
         .summary-toggle:hover {
             opacity: 0.7;
-        }
-
-        .summary-toggle svg {
-            width: 10px;
-            height: 10px;
-            fill: currentColor;
-            transition: transform 0.2s;
-        }
-
-        .summary-toggle.expanded svg {
-            transform: rotate(90deg);
+            text-decoration: underline;
         }
 
         .summary-entries {
-            margin-top: 1rem;
-            padding-left: 2rem;
+            margin-top: 1.25rem;
+            padding-left: 1rem;
+            border-left: 2px solid var(--border);
             display: none;
         }
 
@@ -322,17 +283,22 @@
         }
 
         .summary-entries .entry {
-            padding: 1rem 0;
-            border-bottom: 1px dashed var(--border);
+            padding: 0.75rem 0;
         }
 
-        .summary-entries .entry:last-child {
-            border-bottom: none;
+        .summary-entries .entry:first-child {
+            padding-top: 0;
         }
 
         .summary-entries .entry-content {
-            font-size: 1rem;
+            font-size: 0.95rem;
+            line-height: 1.6;
             color: var(--fg-muted);
+        }
+
+        .summary-entries .entry-meta {
+            margin-top: 0.5rem;
+            font-size: 0.65rem;
         }
 
         /* Mobile */
@@ -538,14 +504,9 @@
             const entryCount = (summary.entryIds || []).length;
             return `
                 <div class="summary" data-id="${summary.id}">
-                    <div class="summary-header" onclick="toggleSummary('${summary.id}')">
-                        <div class="summary-icon">
-                            <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
-                        </div>
-                        <p class="summary-content">${escapeHtml(summary.content)}</p>
-                    </div>
+                    <p class="summary-content">${escapeHtml(summary.content)}</p>
                     <div class="summary-meta">
-                        ${formatTimeRange(summary.startTime, summary.endTime)} · <span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(summary.pseudonym)}')">${escapeHtml(summary.pseudonym)}</span> · <span class="summary-toggle" onclick="toggleSummary('${summary.id}')"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> ${entryCount} entries</span>
+                        ${formatTimeRange(summary.startTime, summary.endTime)} · <span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(summary.pseudonym)}')">${escapeHtml(summary.pseudonym)}</span> · <span class="summary-toggle" onclick="toggleSummary('${summary.id}')">${entryCount} entries</span>
                     </div>
                     <div class="summary-entries" id="summary-entries-${summary.id}">
                         <div class="loading">Loading...</div>

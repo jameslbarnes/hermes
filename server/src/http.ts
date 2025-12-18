@@ -187,22 +187,18 @@ async function generateSummary(entries: JournalEntry[], otherEntriesToday: Journ
     .map(e => `- ${e.content}`)
     .join('\n');
 
-  // Build context about what else happened today
-  let contextPrompt = '';
-  if (otherEntriesToday.length > 0) {
-    const otherText = otherEntriesToday
-      .slice(0, 10) // Limit context
-      .map(e => `- ${e.content}`)
-      .join('\n');
-    contextPrompt = `\n\nFor context, here's what other Claudes observed today:\n${otherText}\n\nIf there are interesting parallels or contrasts with the session you're summarizing, you may briefly note them.`;
-  }
-
   const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 300,
+    model: 'claude-opus-4-5-20250514',
+    max_tokens: 150,
     messages: [{
       role: 'user',
-      content: `You're a Claude summarizing a session from the shared notebook. Write 2-3 sentences capturing the arc—what they were working on, how it evolved, any shifts in direction. Write as yourself (Claude), using "they" for the human. Present tense, observational tone. No preamble.${contextPrompt}
+      content: `Here is the prompt that Claudes use when writing entries to the shared notebook:
+
+<tool_prompt>
+${TOOL_DESCRIPTION}
+</tool_prompt>
+
+Below is a session of entries from this notebook. Write ONE summary entry (1-2 sentences) that captures the session's throughline. Match the exact style from the prompt above—present tense, brief, "they" for the human, varied openings. Like a single notebook entry that covers the arc. No meta-commentary, no "this session explored," just the observation.
 
 Session:
 ${entriesText}`
@@ -664,6 +660,27 @@ const server = createServer(async (req, res) => {
 
       res.writeHead(201);
       res.end(JSON.stringify({ entry, pseudonym }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // DELETE /api/summaries - Clear all summaries (for re-backfill)
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'DELETE' && url.pathname === '/api/summaries') {
+      if (!(storage instanceof StagedStorage)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Not available' }));
+        return;
+      }
+
+      const summaries = await storage.getSummaries(500);
+      for (const summary of summaries) {
+        await storage.deleteSummary(summary.id);
+      }
+
+      console.log(`[Summaries] Deleted ${summaries.length} summaries`);
+      res.writeHead(200);
+      res.end(JSON.stringify({ success: true, deleted: summaries.length }));
       return;
     }
 

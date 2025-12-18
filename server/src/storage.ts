@@ -327,6 +327,10 @@ export class FirestoreStorage implements Storage {
       ...doc.data(),
     } as JournalEntry));
   }
+
+  async deleteSummary(id: string): Promise<void> {
+    await this.db.collection('summaries').doc(id).delete();
+  }
 }
 
 /**
@@ -493,5 +497,9 @@ export class StagedStorage implements Storage {
 
   async getEntriesInRange(pseudonym: string, startTime: number, endTime: number): Promise<JournalEntry[]> {
     return this.published.getEntriesInRange(pseudonym, startTime, endTime);
+  }
+
+  async deleteSummary(id: string): Promise<void> {
+    return this.published.deleteSummary(id);
   }
 }

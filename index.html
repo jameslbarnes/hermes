@@ -308,9 +308,9 @@
 
         .day-header {
             display: flex;
-            align-items: center;
+            align-items: baseline;
             gap: 1rem;
-            padding: 2.5rem 0 1rem 0;
+            padding: 3rem 0 1.5rem 0;
         }
 
         .day-header:first-child {
@@ -319,7 +319,7 @@
 
         .day-header-text {
             font-family: 'Newsreader', Georgia, serif;
-            font-size: 0.95rem;
+            font-size: 1.75rem;
             font-weight: 500;
             font-style: italic;
             color: var(--fg);
@@ -328,7 +328,7 @@
 
         .day-header-date {
             font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.7rem;
+            font-size: 0.8rem;
             color: var(--fg-muted);
             letter-spacing: 0.02em;
         }
@@ -337,6 +337,7 @@
             flex: 1;
             height: 1px;
             background: var(--border);
+            align-self: center;
         }
 
         .daily-summary {

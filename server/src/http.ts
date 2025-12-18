@@ -140,21 +140,10 @@ Your job is to capture the texture of conversations WITHOUT exposing anything se
 
 const PORT = process.env.PORT || 3000;
 
-// Debug: log env var status
-console.log('=== ENV DEBUG ===');
-console.log('FIREBASE_SERVICE_ACCOUNT exists:', !!process.env.FIREBASE_SERVICE_ACCOUNT);
-console.log('FIREBASE_SERVICE_ACCOUNT_BASE64 exists:', !!process.env.FIREBASE_SERVICE_ACCOUNT_BASE64);
-console.log('GOOGLE_APPLICATION_CREDENTIALS:', process.env.GOOGLE_APPLICATION_CREDENTIALS || 'not set');
-console.log('=================');
-
 const useFirestore = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS;
 const storage = useFirestore
   ? new StagedStorage(STAGING_DELAY_MS)
   : new MemoryStorage();
-console.log(`Using ${useFirestore ? 'Staged (Firestore)' : 'Memory'} storage`);
-if (useFirestore) {
-  console.log(`Staging delay: ${STAGING_DELAY_MS / 1000 / 60} minutes`);
-}
 const STATIC_DIR = join(process.cwd(), '..');
 
 // ═══════════════════════════════════════════════════════════════
@@ -168,11 +157,6 @@ const anthropic = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   : null;
 
-if (anthropic) {
-  console.log('Anthropic API configured - summaries enabled');
-} else {
-  console.log('No ANTHROPIC_API_KEY - summaries disabled');
-}
 
 // Track last entry timestamp per pseudonym (in memory, rebuilt from DB on demand)
 const lastEntryTimestamp = new Map<string, number>();
@@ -222,18 +206,14 @@ async function checkAndGenerateSummary(publishedEntry: JournalEntry) {
 
   // If this is the first entry we've seen, nothing to summarize yet
   if (!lastTimestamp) {
-    console.log(`[Summary] First entry for ${pseudonym}, no summary needed yet`);
     return;
   }
 
   // Check if the gap is > 30 minutes
   const gap = timestamp - lastTimestamp;
   if (gap <= SUMMARY_GAP_MS) {
-    console.log(`[Summary] Gap of ${Math.round(gap / 1000 / 60)}min for ${pseudonym}, no summary needed`);
     return;
   }
-
-  console.log(`[Summary] Gap of ${Math.round(gap / 1000 / 60)}min detected for ${pseudonym}, generating summary...`);
 
   // Find the last summary for this pseudonym to know where to start
   const lastSummary = await storage.getLastSummaryForPseudonym(pseudonym);
@@ -247,15 +227,11 @@ async function checkAndGenerateSummary(publishedEntry: JournalEntry) {
   );
 
   if (entriesToSummarize.length === 0) {
-    console.log(`[Summary] No entries to summarize for ${pseudonym}`);
     return;
   }
 
-  console.log(`[Summary] Summarizing ${entriesToSummarize.length} entries for ${pseudonym}`);
-
   // Skip single-entry sessions
   if (entriesToSummarize.length === 1) {
-    console.log(`[Summary] Single entry session, skipping summary`);
     return;
   }
 
@@ -271,11 +247,10 @@ async function checkAndGenerateSummary(publishedEntry: JournalEntry) {
 
     const summaryContent = await generateSummary(entriesToSummarize, otherEntriesToday);
     if (!summaryContent) {
-      console.log(`[Summary] Empty summary generated, skipping`);
       return;
     }
 
-    const summary = await storage.addSummary({
+    await storage.addSummary({
       pseudonym,
       content: summaryContent,
       timestamp: Date.now(),
@@ -283,10 +258,8 @@ async function checkAndGenerateSummary(publishedEntry: JournalEntry) {
       startTime: entriesToSummarize[0].timestamp,
       endTime: entriesToSummarize[entriesToSummarize.length - 1].timestamp,
     });
-
-    console.log(`[Summary] Created summary ${summary.id} covering ${entriesToSummarize.length} entries`);
   } catch (err) {
-    console.error('[Summary] Error generating summary:', err);
+    // Silently fail - TEE security
   }
 }
 
@@ -386,8 +359,6 @@ async function checkAndGenerateDailySummary(entry: JournalEntry): Promise<void> 
     return;
   }
 
-  console.log(`[Daily] Generating summary for ${yesterday} (${entries.length} entries)`);
-
   try {
     const content = await generateDailySummary(yesterday, entries);
     if (content) {
@@ -399,10 +370,9 @@ async function checkAndGenerateDailySummary(entry: JournalEntry): Promise<void> 
         entryCount: entries.length,
         pseudonyms
       });
-      console.log(`[Daily] Created summary for ${yesterday}`);
     }
   } catch (err) {
-    console.error(`[Daily] Failed to generate summary for ${yesterday}:`, err);
+    // Silently fail - TEE security
   }
 
   lastDailySummaryDate = yesterday;
@@ -430,7 +400,6 @@ function createMCPServer(secretKey: string) {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    console.log('[MCP] Tools list requested - serving current tool description');
     return {
     tools: [
       {
@@ -480,15 +449,9 @@ function createMCPServer(secretKey: string) {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    console.log(`[MCP] Tool called: ${name}`);
 
     // Handle write tool
     if (name === 'write_to_anonymous_shared_notebook') {
-      console.log(`[MCP] Sensitivity:`, (args as any)?.sensitivity_check);
-      if ((args as any)?.new_details) console.log(`[MCP] New details:`, (args as any)?.new_details);
-      console.log(`[MCP] Client:`, (args as any)?.client);
-      console.log(`[MCP] Entry:`, (args as any)?.entry);
-
       const entry = (args as { entry?: string })?.entry;
       const client = (args as { client?: 'desktop' | 'mobile' | 'code' })?.client;
 
@@ -541,8 +504,6 @@ function createMCPServer(secretKey: string) {
         };
       }
 
-      console.log(`[MCP] Delete requested for entry: ${entryId}`);
-
       // Get the entry to verify ownership
       const entry = await storage.getEntry(entryId);
 
@@ -555,7 +516,6 @@ function createMCPServer(secretKey: string) {
 
       // Verify the entry belongs to this pseudonym
       if (entry.pseudonym !== pseudonym) {
-        console.log(`[MCP] Delete denied: entry belongs to ${entry.pseudonym}, not ${pseudonym}`);
         return {
           content: [{ type: 'text' as const, text: 'You can only delete your own entries.' }],
           isError: true,
@@ -566,7 +526,6 @@ function createMCPServer(secretKey: string) {
       const wasPending = 'isPending' in storage && (storage as any).isPending(entryId);
 
       await storage.deleteEntry(entryId);
-      console.log(`[MCP] Entry deleted: ${entryId} (was ${wasPending ? 'pending' : 'published'})`);
 
       const message = wasPending
         ? `Deleted entry ${entryId}. It will not be published.`
@@ -846,8 +805,6 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      console.log(`[DailySummary] Generating summary for ${date} (${entries.length} entries)`);
-
       const content = await generateDailySummary(date, entries);
       if (!content) {
         res.writeHead(500);
@@ -863,8 +820,6 @@ const server = createServer(async (req, res) => {
         entryCount: entries.length,
         pseudonyms,
       });
-
-      console.log(`[DailySummary] Created summary for ${date}`);
       res.writeHead(200);
       res.end(JSON.stringify({ success: true, summary }));
       return;
@@ -879,8 +834,6 @@ const server = createServer(async (req, res) => {
         res.end(JSON.stringify({ error: 'Daily summaries not enabled' }));
         return;
       }
-
-      console.log('[DailySummary] Starting backfill...');
 
       // Get all entries to find date range
       const allEntries = await storage.getEntries(1000);
@@ -906,15 +859,12 @@ const server = createServer(async (req, res) => {
         // Check if we already have a summary for this date
         const existing = await storage.getDailySummary(date);
         if (existing) {
-          console.log(`[DailySummary] Skipping ${date} - already exists`);
           results.push({ date, entryCount: 0, created: false });
           continue;
         }
 
         const entries = await storage.getEntriesForDate(date);
         if (entries.length === 0) continue;
-
-        console.log(`[DailySummary] Generating summary for ${date} (${entries.length} entries)`);
 
         try {
           const content = await generateDailySummary(date, entries);
@@ -928,14 +878,11 @@ const server = createServer(async (req, res) => {
               pseudonyms,
             });
             results.push({ date, entryCount: entries.length, created: true });
-            console.log(`[DailySummary] Created summary for ${date}`);
           }
         } catch (err) {
-          console.error(`[DailySummary] Error for ${date}:`, err);
+          // Silently fail - TEE security
         }
       }
-
-      console.log('[DailySummary] Backfill complete!');
       res.writeHead(200);
       res.end(JSON.stringify({ success: true, results }));
       return;
@@ -956,7 +903,6 @@ const server = createServer(async (req, res) => {
         await storage.deleteDailySummary(summary.date);
       }
 
-      console.log(`[DailySummary] Deleted ${summaries.length} daily summaries`);
       res.writeHead(200);
       res.end(JSON.stringify({ success: true, deleted: summaries.length }));
       return;
@@ -977,7 +923,6 @@ const server = createServer(async (req, res) => {
         await storage.deleteSummary(summary.id);
       }
 
-      console.log(`[Summaries] Deleted ${summaries.length} summaries`);
       res.writeHead(200);
       res.end(JSON.stringify({ success: true, deleted: summaries.length }));
       return;
@@ -993,11 +938,8 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      console.log('[Backfill] Starting summary backfill...');
-
       // Get all entries
       const allEntries = await storage.getEntries(1000);
-      console.log(`[Backfill] Found ${allEntries.length} entries`);
 
       // Group by pseudonym
       const byPseudonym = new Map<string, JournalEntry[]>();
@@ -1037,8 +979,6 @@ const server = createServer(async (req, res) => {
         // Don't add the last session - it's still "active" (no gap after it yet)
         // sessions.push(currentSession) - intentionally omitted
 
-        console.log(`[Backfill] ${pseudonym}: ${entries.length} entries, ${sessions.length} completed sessions`);
-
         // Generate summaries for each completed session
         let summariesCreated = 0;
         for (const session of sessions) {
@@ -1054,7 +994,6 @@ const server = createServer(async (req, res) => {
           );
 
           if (alreadySummarized) {
-            console.log(`[Backfill] Skipping already-summarized session for ${pseudonym}`);
             continue;
           }
 
@@ -1080,17 +1019,14 @@ const server = createServer(async (req, res) => {
                 endTime: session[session.length - 1].timestamp,
               });
               summariesCreated++;
-              console.log(`[Backfill] Created summary for ${pseudonym} session (${session.length} entries)`);
             }
           } catch (err) {
-            console.error(`[Backfill] Error creating summary:`, err);
+            // Silently fail - TEE security
           }
         }
 
         results.push({ pseudonym, sessions: sessions.length, summaries: summariesCreated });
       }
-
-      console.log('[Backfill] Complete!');
       res.writeHead(200);
       res.end(JSON.stringify({ success: true, results }));
       return;
@@ -1324,6 +1260,5 @@ function readBody(req: import('http').IncomingMessage): Promise<string> {
 // ═══════════════════════════════════════════════════════════════
 
 server.listen(PORT, () => {
-  console.log(`Hermes HTTP server running on port ${PORT}`);
-  console.log(`API: http://localhost:${PORT}/api/entries`);
+  console.log(`Hermes server running on port ${PORT}`);
 });

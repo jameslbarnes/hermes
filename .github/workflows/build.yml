@@ -97,21 +97,29 @@ jobs:
         run: npm install -g phala
 
       - name: Generate compose and env files
+        env:
+          FIREBASE_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
+          BASE_URL: ${{ secrets.BASE_URL }}
+          ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SENDGRID_KEY: ${{ secrets.SENDGRID_API_KEY }}
         run: |
           # Generate compose file with image tag (no secrets - just reference vars)
           export GIT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
           sed "s/\${GIT_SHA}/$GIT_SHA/g" docker-compose.template.yml > docker-compose.deploy.yml
           cat docker-compose.deploy.yml
 
-          # Create env file with secrets using heredoc to preserve all characters
-          cat > .env.deploy << 'ENVEOF'
-          FIREBASE_SERVICE_ACCOUNT_BASE64=${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
-          BASE_URL=${{ secrets.BASE_URL }}
-          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-          SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}
-          ENVEOF
-          # Remove leading whitespace from each line
-          sed -i 's/^[[:space:]]*//' .env.deploy
+          # Create env file - strip any newlines from base64 (it may have line wrapping)
+          FIREBASE_CLEAN=$(echo "$FIREBASE_B64" | tr -d '\n\r ')
+          echo "FIREBASE_SERVICE_ACCOUNT_BASE64=$FIREBASE_CLEAN" > .env.deploy
+          echo "BASE_URL=$BASE_URL" >> .env.deploy
+          echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY" >> .env.deploy
+          echo "SENDGRID_API_KEY=$SENDGRID_KEY" >> .env.deploy
+
+          # Debug: show env file structure (lengths only, not values)
+          echo "Env file created with $(wc -l < .env.deploy) lines"
+          while IFS='=' read -r key value; do
+            echo "  $key: ${#value} chars"
+          done < .env.deploy
 
       - name: Deploy to Phala Cloud
         run: |

@@ -104,10 +104,16 @@ jobs:
           cat docker-compose.deploy.yml
 
           # Create env file with secrets (will be encrypted by phala CLI)
-          echo "FIREBASE_SERVICE_ACCOUNT_BASE64=${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}" > .env.deploy
-          echo "BASE_URL=${{ secrets.BASE_URL }}" >> .env.deploy
-          echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> .env.deploy
-          echo "SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}" >> .env.deploy
+          # Use printf to avoid shell interpretation issues with base64
+          printf '%s\n' "FIREBASE_SERVICE_ACCOUNT_BASE64=${FIREBASE_SERVICE_ACCOUNT_BASE64}" > .env.deploy
+          printf '%s\n' "BASE_URL=${BASE_URL}" >> .env.deploy
+          printf '%s\n' "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" >> .env.deploy
+          printf '%s\n' "SENDGRID_API_KEY=${SENDGRID_API_KEY}" >> .env.deploy
+        env:
+          FIREBASE_SERVICE_ACCOUNT_BASE64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
+          BASE_URL: ${{ secrets.BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
 
       - name: Deploy to Phala Cloud
         run: |

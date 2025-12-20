@@ -96,20 +96,28 @@ jobs:
       - name: Install Phala CLI
         run: npm install -g phala
 
-      - name: Generate compose file
+      - name: Generate compose and env files
         run: |
+          # Generate compose file with image tag (no secrets - just reference vars)
           export GIT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-          envsubst < docker-compose.template.yml > docker-compose.deploy.yml
+          sed "s/\${GIT_SHA}/$GIT_SHA/g" docker-compose.template.yml > docker-compose.deploy.yml
           cat docker-compose.deploy.yml
-        env:
-          FIREBASE_SERVICE_ACCOUNT_BASE64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
-          BASE_URL: ${{ secrets.BASE_URL }}
+
+          # Create env file with secrets (will be encrypted by phala CLI)
+          echo "FIREBASE_SERVICE_ACCOUNT_BASE64=${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}" > .env.deploy
+          echo "BASE_URL=${{ secrets.BASE_URL }}" >> .env.deploy
+          echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> .env.deploy
+          echo "SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}" >> .env.deploy
 
       - name: Deploy to Phala Cloud
         run: |
-          phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml
+          phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml --env-file .env.deploy
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_API_KEY }}
+
+      - name: Cleanup secrets
+        if: always()
+        run: rm -f .env.deploy
 
       - name: Deployment summary
         run: |

@@ -8,6 +8,9 @@ services:
     environment:
       - PORT=3000
       - STAGING_DELAY_MS=3600000
+      # These vars are passed via --env-file (encrypted by phala CLI)
       - BASE_URL=${BASE_URL}
       - FIREBASE_SERVICE_ACCOUNT_BASE64=${FIREBASE_SERVICE_ACCOUNT_BASE64}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
     restart: unless-stopped

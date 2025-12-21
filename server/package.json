@@ -16,6 +16,7 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@phala/dstack-sdk": "^0.5.7",
+    "@sendgrid/mail": "^8.1.6",
     "dotenv": "^17.2.3",
     "firebase-admin": "^13.6.0"
   },

@@ -73,3 +73,15 @@ export function isValidSecretKey(key: string): boolean {
   if (key.length < 32 || key.length > 64) return false;
   return /^[A-Za-z0-9_-]+$/.test(key);
 }
+
+/**
+ * Derive a relay email address from a secret key.
+ * "Solitary Feather#ed8acb" -> "solitary-feather-ed8acb"
+ */
+export function deriveRelayAddress(secretKey: string): string {
+  const pseudonym = derivePseudonym(secretKey);
+  return pseudonym
+    .toLowerCase()
+    .replace('#', '-')
+    .replace(/\s+/g, '-');
+}

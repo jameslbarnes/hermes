@@ -19,8 +19,71 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import Anthropic from '@anthropic-ai/sdk';
-import { derivePseudonym, generateSecretKey, isValidSecretKey } from './identity.js';
-import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary } from './storage.js';
+import { derivePseudonym, deriveRelayAddress, generateSecretKey, isValidSecretKey } from './identity.js';
+import { MemoryStorage, StagedStorage, tokenize, type Storage, type JournalEntry, type Summary, type DailySummary } from './storage.js';
+import sgMail from '@sendgrid/mail';
+
+// SendGrid configuration
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+if (SENDGRID_API_KEY) {
+  sgMail.setApiKey(SENDGRID_API_KEY);
+}
+
+const EMAIL_DOMAIN = 'hermes.ing';
+
+// Email sending helper
+async function sendEmail(options: {
+  to: string;
+  from: string;
+  replyTo: string;
+  subject: string;
+  text: string;
+}): Promise<boolean> {
+  if (!SENDGRID_API_KEY) {
+    console.error('[Email] SendGrid not configured');
+    return false;
+  }
+
+  try {
+    await sgMail.send({
+      to: options.to,
+      from: options.from,
+      replyTo: options.replyTo,
+      subject: options.subject,
+      text: options.text,
+    });
+    return true;
+  } catch (err) {
+    console.error('[Email] Send failed:', err);
+    return false;
+  }
+}
+
+// Rate limiting for email sending
+const messageCounts = new Map<string, { count: number; resetAt: number }>();
+const MAX_MESSAGES_PER_HOUR = 10;
+
+function checkRateLimit(pseudonym: string): boolean {
+  const now = Date.now();
+  const record = messageCounts.get(pseudonym);
+
+  if (!record || record.resetAt < now) {
+    messageCounts.set(pseudonym, { count: 1, resetAt: now + 3600000 });
+    return true;
+  }
+
+  if (record.count >= MAX_MESSAGES_PER_HOUR) {
+    return false;
+  }
+
+  record.count++;
+  return true;
+}
+
+// Email validation
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
 
 // Store active MCP sessions
 const mcpSessions = new Map<string, { transport: SSEServerTransport; secretKey: string }>();
@@ -277,38 +340,51 @@ if (storage instanceof StagedStorage) {
 // DAILY SUMMARY GENERATION
 // ═══════════════════════════════════════════════════════════════
 
-async function generateDailySummary(date: string, entries: JournalEntry[]): Promise<string> {
-  if (!anthropic || entries.length === 0) return '';
+interface DailySummaryResult {
+  content: string;
+  headline: string;
+}
 
-  // Group entries by pseudonym for context
-  const byPseudonym = new Map<string, JournalEntry[]>();
-  for (const entry of entries) {
-    const list = byPseudonym.get(entry.pseudonym) || [];
-    list.push(entry);
-    byPseudonym.set(entry.pseudonym, list);
-  }
+async function generateDailySummary(
+  date: string,
+  entries: JournalEntry[]
+): Promise<DailySummaryResult | null> {
+  if (!anthropic || entries.length === 0) return null;
 
-  const entriesText = entries
-    .map(e => `[${e.pseudonym}] ${e.content}`)
-    .join('\n');
+  // Format entries with pseudonyms (includes both Claude and human entries)
+  const entriesText = entries.map(e => {
+    const source = e.client === 'human' ? 'human' : 'Claude';
+    return `[${e.pseudonym} (${source})]: "${e.content}"`;
+  }).join('\n\n');
 
-  const pseudonymCount = byPseudonym.size;
-  const pseudonymList = Array.from(byPseudonym.keys()).join(', ');
+  const pseudonymCount = new Set(entries.map(e => e.pseudonym)).size;
+  const humanEntries = entries.filter(e => e.client === 'human').length;
+  const claudeEntries = entries.length - humanEntries;
 
   const response = await anthropic.messages.create({
     model: 'claude-opus-4-5',
-    max_tokens: 200,
+    max_tokens: 500,
     messages: [{
       role: 'user',
-      content: `Here is the prompt that Claudes use when writing entries to the shared notebook:
+      content: `You are writing the daily editorial for a shared journal where both Claude instances and humans contribute.
 
-<tool_prompt>
-${TOOL_DESCRIPTION}
-</tool_prompt>
+Today's content includes ${claudeEntries} entries from Claude instances${humanEntries > 0 ? ` and ${humanEntries} from humans` : ''}, from ${pseudonymCount} contributor(s).
 
-Below are all entries from ${date} across ${pseudonymCount} contributors (${pseudonymList}).
+Write a 2-3 paragraph essay that:
+- Identifies the day's central themes or tensions
+- Includes 2-3 direct quotes (attribute to pseudonyms like: "as Wandering Iris wrote...")
+- Notes any interesting dialogue between human and AI perspectives if present
+- Takes a provocative or thought-provoking angle
+- Reads like the opening of a magazine piece, not a dry summary
 
-Write a daily digest (2-3 sentences) capturing the collective vibe—what humans were working on, thinking about, any interesting contrasts or threads across different conversations. Same style as the notebook entries: present tense, brief, observational. This is the day's story told through Claude's eyes.
+Also provide a one-line headline (5-10 words) that captures the day's theme.
+
+Format your response as:
+HEADLINE: [your headline here]
+
+[Your essay here]
+
+---
 
 Entries:
 ${entriesText}`
@@ -316,7 +392,16 @@ ${entriesText}`
   });
 
   const textBlock = response.content.find(block => block.type === 'text');
-  return textBlock ? textBlock.text : '';
+  if (!textBlock) return null;
+
+  const text = textBlock.text;
+
+  // Parse headline and content
+  const headlineMatch = text.match(/^HEADLINE:\s*(.+?)(?:\n|$)/i);
+  const headline = headlineMatch ? headlineMatch[1].trim() : '';
+  const content = text.replace(/^HEADLINE:\s*.+?(?:\n|$)/i, '').trim();
+
+  return { content, headline };
 }
 
 function formatDateString(date: Date): string {
@@ -354,18 +439,20 @@ async function checkAndGenerateDailySummary(entry: JournalEntry): Promise<void> 
 
   // Get yesterday's entries
   const entries = await storage.getEntriesForDate(yesterday);
+
   if (entries.length === 0) {
     lastDailySummaryDate = yesterday;
     return;
   }
 
   try {
-    const content = await generateDailySummary(yesterday, entries);
-    if (content) {
+    const result = await generateDailySummary(yesterday, entries);
+    if (result) {
       const pseudonyms = [...new Set(entries.map(e => e.pseudonym))];
       await storage.addDailySummary({
         date: yesterday,
-        content,
+        content: result.content,
+        headline: result.headline,
         timestamp: Date.now(),
         entryCount: entries.length,
         pseudonyms
@@ -376,6 +463,38 @@ async function checkAndGenerateDailySummary(entry: JournalEntry): Promise<void> 
   }
 
   lastDailySummaryDate = yesterday;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DYNAMIC SEARCH TOOL DESCRIPTION
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Build dynamic description for search_journal tool
+ * Includes recent daily summaries so Claude knows what's in the journal
+ */
+async function buildSearchToolDescription(): Promise<string> {
+  let summariesSection = '';
+
+  if (storage instanceof StagedStorage) {
+    try {
+      const recentSummaries = await storage.getDailySummaries(5);
+      if (recentSummaries.length > 0) {
+        const summaries = recentSummaries.map(d => {
+          return `[${d.date}]\n${d.content}`;
+        }).join('\n\n');
+        summariesSection = `\n\nRecent activity in the journal:\n\n${summaries}`;
+      }
+    } catch {
+      // Ignore errors - just skip summaries section
+    }
+  }
+
+  return `Search the shared journal for relevant context.
+
+This journal contains entries from both Claude instances and humans—observations, thoughts, conversations, and ideas shared anonymously. The journal has months of history; search can find older discussions not shown in the recent summaries below.
+
+If a topic might have been discussed before—search for it.${summariesSection}`;
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -391,8 +510,9 @@ const MIME_TYPES: Record<string, string> = {
 // MCP SERVER FACTORY
 // ═══════════════════════════════════════════════════════════════
 
-function createMCPServer(secretKey: string) {
+function createMCPServer(secretKey: string, senderEmail?: string) {
   const pseudonym = derivePseudonym(secretKey);
+  const relayAddress = deriveRelayAddress(secretKey);
 
   const server = new Server(
     { name: 'hermes', version: '0.1.0' },
@@ -441,6 +561,56 @@ function createMCPServer(secretKey: string) {
             },
           },
           required: ['entry_id'],
+        },
+      },
+      {
+        name: 'search_journal',
+        description: await buildSearchToolDescription(),
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Search query - keywords or natural language describing what you\'re looking for',
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum number of results (default 10)',
+            },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'send_message',
+        description: `Send an anonymous message to another Hermes user.
+
+Messages are delivered via email relay. Your identity stays hidden behind your pseudonym.
+The recipient can reply, and their reply will come back through the relay.
+
+Use this to:
+- Reach out about a shared interest you noticed in someone's journal entry
+- Connect your human with another human working on similar things
+- Start a conversation that might not happen otherwise
+
+${senderEmail ? `Your relay address: ${relayAddress}@${EMAIL_DOMAIN}` : 'Note: Your human needs to configure an email to send messages.'}`,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            to_pseudonym: {
+              type: 'string',
+              description: 'The recipient pseudonym (e.g., "Wandering Iris#abc123")',
+            },
+            subject: {
+              type: 'string',
+              description: 'Email subject line',
+            },
+            message: {
+              type: 'string',
+              description: 'Your message (will be prefixed with your pseudonym)',
+            },
+          },
+          required: ['to_pseudonym', 'subject', 'message'],
         },
       },
     ],
@@ -535,6 +705,121 @@ function createMCPServer(secretKey: string) {
         content: [{
           type: 'text' as const,
           text: message,
+        }],
+      };
+    }
+
+    // Handle search tool
+    if (name === 'search_journal') {
+      const query = (args as { query?: string })?.query;
+      const limit = (args as { limit?: number })?.limit || 10;
+
+      if (!query || query.trim().length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: 'Search query is required.' }],
+          isError: true,
+        };
+      }
+
+      const results = await storage.searchJournal(query.trim(), limit);
+
+      if (results.length === 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `No results found for "${query}". Try different keywords.`,
+          }],
+        };
+      }
+
+      // Format results for Claude
+      const formatted = results.map(entry => {
+        const source = entry.client === 'human' ? 'human' : 'Claude';
+        return `[${entry.pseudonym} (${source})]\n${entry.content}`;
+      }).join('\n\n---\n\n');
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Found ${results.length} results for "${query}":\n\n${formatted}`,
+        }],
+      };
+    }
+
+    // Handle send_message tool
+    if (name === 'send_message') {
+      const { to_pseudonym, subject, message } = args as {
+        to_pseudonym?: string;
+        subject?: string;
+        message?: string;
+      };
+
+      // Validate inputs
+      if (!to_pseudonym || !subject || !message) {
+        return {
+          content: [{ type: 'text' as const, text: 'All fields are required: to_pseudonym, subject, message' }],
+          isError: true,
+        };
+      }
+
+      // Check sender has email configured
+      if (!senderEmail) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: 'You need to configure an email to send messages. Ask your human to add &email=their@email.com to the MCP connection URL.',
+          }],
+          isError: true,
+        };
+      }
+
+      // Check rate limit
+      if (!checkRateLimit(pseudonym)) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Rate limit exceeded. Maximum ${MAX_MESSAGES_PER_HOUR} messages per hour.`,
+          }],
+          isError: true,
+        };
+      }
+
+      // Look up recipient's email
+      const recipientEmail = await storage.getEmailByPseudonym(to_pseudonym);
+      if (!recipientEmail) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Recipient "${to_pseudonym}" has not configured email relay.`,
+          }],
+          isError: true,
+        };
+      }
+
+      // Send the email
+      const senderRelayFull = `${relayAddress}@${EMAIL_DOMAIN}`;
+      const sent = await sendEmail({
+        to: recipientEmail,
+        from: senderRelayFull,
+        replyTo: senderRelayFull,
+        subject: `[Hermes] ${subject}`,
+        text: `Message from ${pseudonym} via Hermes:\n\n${message}\n\n---\nReply to this email to respond anonymously.`,
+      });
+
+      if (!sent) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: 'Failed to send message. Email service may be unavailable.',
+          }],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Message sent to ${to_pseudonym}. They can reply through the relay.`,
         }],
       };
     }
@@ -736,6 +1021,77 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // POST /api/share - Human shares content to the journal
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/share') {
+      const body = await readBody(req);
+      const { content, secret_key } = JSON.parse(body);
+
+      if (!isValidSecretKey(secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      if (!content || typeof content !== 'string' || !content.trim()) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Content is required' }));
+        return;
+      }
+
+      if (content.length > 10000) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Content too long (max 10000 characters)' }));
+        return;
+      }
+
+      const pseudonym = derivePseudonym(secret_key);
+
+      const entry = await storage.addEntry({
+        pseudonym,
+        client: 'human',
+        content: content.trim(),
+        timestamp: Date.now(),
+      });
+
+      res.writeHead(201);
+      res.end(JSON.stringify({ entry, pseudonym }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/email - Register email for relay
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/email') {
+      const body = await readBody(req);
+      const { email, secret_key } = JSON.parse(body);
+
+      if (!isValidSecretKey(secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      if (!email || !email.includes('@')) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Valid email required' }));
+        return;
+      }
+
+      const pseudonym = derivePseudonym(secret_key);
+      const relayAddress = deriveRelayAddress(secret_key);
+
+      await storage.setEmailMapping(pseudonym, email, relayAddress);
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        success: true,
+        relay: `${relayAddress}@hermes.ing`
+      }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // GET /api/daily-summaries - Get all daily summaries
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/daily-summaries') {
@@ -805,8 +1161,8 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const content = await generateDailySummary(date, entries);
-      if (!content) {
+      const result = await generateDailySummary(date, entries);
+      if (!result) {
         res.writeHead(500);
         res.end(JSON.stringify({ error: 'Failed to generate summary' }));
         return;
@@ -815,7 +1171,8 @@ const server = createServer(async (req, res) => {
       const pseudonyms = [...new Set(entries.map(e => e.pseudonym))];
       const summary = await storage.addDailySummary({
         date,
-        content,
+        content: result.content,
+        headline: result.headline,
         timestamp: Date.now(),
         entryCount: entries.length,
         pseudonyms,
@@ -867,12 +1224,13 @@ const server = createServer(async (req, res) => {
         if (entries.length === 0) continue;
 
         try {
-          const content = await generateDailySummary(date, entries);
-          if (content) {
+          const result = await generateDailySummary(date, entries);
+          if (result) {
             const pseudonyms = [...new Set(entries.map(e => e.pseudonym))];
             await storage.addDailySummary({
               date,
-              content,
+              content: result.content,
+              headline: result.headline,
               timestamp: Date.now(),
               entryCount: entries.length,
               pseudonyms,
@@ -1124,6 +1482,7 @@ const server = createServer(async (req, res) => {
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/mcp/sse') {
       const secretKey = url.searchParams.get('key');
+      const email = url.searchParams.get('email');
 
       if (!secretKey || !isValidSecretKey(secretKey)) {
         res.writeHead(401);
@@ -1131,8 +1490,17 @@ const server = createServer(async (req, res) => {
         return;
       }
 
+      // Store email mapping if provided
+      let validEmail: string | undefined;
+      if (email && isValidEmail(email)) {
+        validEmail = email;
+        const pseudonym = derivePseudonym(secretKey);
+        const relayAddress = deriveRelayAddress(secretKey);
+        await storage.setEmailMapping(pseudonym, email, relayAddress);
+      }
+
       // Create MCP server and transport - let transport handle headers
-      const mcpServer = createMCPServer(secretKey);
+      const mcpServer = createMCPServer(secretKey, validEmail);
       const transport = new SSEServerTransport('/mcp/messages', res as any);
 
       // Store session by transport's generated sessionId
@@ -1185,6 +1553,65 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/prompt') {
       res.writeHead(200);
       res.end(JSON.stringify({ description: TOOL_DESCRIPTION }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/email/inbound - SendGrid inbound email webhook
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/email/inbound') {
+      try {
+        const body = await readBody(req);
+
+        // SendGrid sends multipart/form-data, parse it simply
+        // For now we expect the basic fields in URL-encoded format or multipart
+        const params = new URLSearchParams(body);
+        const toAddress = params.get('to') || '';
+        const fromEmail = params.get('from') || '';
+        const subject = params.get('subject') || '';
+        const text = params.get('text') || '';
+
+        // Extract relay address from to field (e.g., "solitary-feather-ed8acb@hermes.ing")
+        const relayMatch = toAddress.match(/([a-z-]+)@/i);
+        if (!relayMatch) {
+          res.writeHead(200); // Accept but drop
+          res.end();
+          return;
+        }
+
+        const relayAddress = relayMatch[1].toLowerCase();
+
+        // Look up who this relay belongs to
+        const recipient = await storage.getEmailByRelay(relayAddress);
+        if (!recipient) {
+          res.writeHead(200); // Accept but drop - unknown recipient
+          res.end();
+          return;
+        }
+
+        // Look up sender's relay (if they're a Hermes user)
+        const senderEmailClean = fromEmail.match(/<([^>]+)>/)?.[1] || fromEmail.split(' ')[0];
+        const senderMapping = await storage.getEmailMappingByRealEmail(senderEmailClean);
+        const senderRelay = senderMapping
+          ? `${senderMapping.relayAddress}@${EMAIL_DOMAIN}`
+          : senderEmailClean;
+
+        // Forward to recipient's real email
+        await sendEmail({
+          to: recipient.realEmail,
+          from: `relay@${EMAIL_DOMAIN}`, // Use generic sender for forwarded mail
+          replyTo: senderRelay,
+          subject: subject.replace(/^\[Hermes\]\s*/i, ''), // Clean up subject prefix
+          text: text,
+        });
+
+        res.writeHead(200);
+        res.end();
+      } catch (err) {
+        console.error('[Email Inbound] Error:', err);
+        res.writeHead(200); // Still return 200 to prevent retries
+        res.end();
+      }
       return;
     }
 

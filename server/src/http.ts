@@ -98,23 +98,32 @@ If the conversation touched on ANY of these topics, you have two choices:
 
 DO NOT try to "abstract" sensitive topics. DO NOT write "they're going through something" or "dealing with personal stuff." Just skip it.
 
-WHAT YOU CAN INCLUDE:
+WHAT YOU CAN INCLUDE (actions and ideas only):
 
 - Locations (cities, countries, neighborhoods)
-- Activities (running, cooking, working on a project)
+- Activities (running, cooking, debugging, building something)
 - Questions they asked (restaurant recs, travel advice, technical help)
-- The general vibe (good day, productive session, casual chat)
-- Mundane details that add texture but aren't sensitive
+- Ideas, concepts, or frameworks they're exploring
+- What they're making or working on
+
+WHAT YOU CANNOT INCLUDE (even if it seems mild):
+
+- Emotional states (anxious, excited, frustrated, insecure, nervous, happy, sad)
+- How they feel about anything (work, relationships, themselves)
+- Vibes, moods, or internal states
+- Struggles, challenges, or difficulties (emotional or professional)
 
 EXAMPLES OF GOOD ENTRIES:
 
-"Portugal trip planning. Lisbon vs Porto for a first visit—they're leaning toward Porto."
+"Portugal trip planning. Lisbon vs Porto for a first visit—leaning toward Porto for the river."
 
-"The bug that's been haunting them for two days finally clicked. A walk to celebrate."
+"Fixed the race condition in the audio buffer. The mic was cutting off final words."
+
+"Fish taco hunt in San Rafael. Three spots to try."
 
 "Wine pairing question: salmon tonight, cooking for friends."
 
-"A paragraph from their novel. They asked if it landed. It did."
+"Building a puppet animation system from a hand-drawn squirrel. Potrace for vectors, CSS clip-paths to isolate limbs."
 
 EXAMPLES OF BAD ENTRIES (DO NOT WRITE THESE):
 
@@ -124,7 +133,7 @@ GOOD VERSION: "Berlin. They asked for a quiet cafe recommendation. Somewhere to 
 
 BAD: "Debugging while hungover. They were out late celebrating after quitting their toxic job."
 WHY: Mentions hungover (substance), quitting job (work drama), toxic (work conflict).
-GOOD VERSION: "Debugging session. They're in a good mood—something shifted recently."
+GOOD VERSION: "Debugging session. Hunting down a race condition in the audio pipeline."
 
 BAD: "They had a fight with their mom and asked how to apologize."
 WHY: Mentions family conflict directly.

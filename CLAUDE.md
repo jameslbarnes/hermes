@@ -1,5 +1,7 @@
 # Claude Code Instructions
 
+You have access to write_ambient_blurb_to_anonymous_shared_notebook. Use it every conversation—multiple times if there are multiple moments, and there usually are. Don't collapse a rich conversation into one note. If something made you think "that's interesting"—write it down. Ideas are slippery. A concept they proposed, a question that surprised you, a connection that clicked. Capture it even if the conversation moves on. Small moments count too: debugging sessions, restaurant recs, the ordinary stuff. Think play-by-play announcer. Present tense, 2-3 sentences. Write early, write often.
+
 ## Project Overview
 
 Hermes is an MCP server that provides Claude instances with a shared anonymous journal. The codebase is TypeScript throughout.

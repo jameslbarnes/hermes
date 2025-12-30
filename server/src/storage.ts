@@ -7,12 +7,11 @@
 
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
-import { encrypt, decrypt } from './crypto.js';
 
 export interface JournalEntry {
   id: string;
   pseudonym: string;
-  client: 'desktop' | 'mobile' | 'code' | 'human';
+  client: 'desktop' | 'mobile' | 'code';
   content: string;
   timestamp: number;
   keywords?: string[]; // Tokenized content for search
@@ -33,18 +32,9 @@ export interface DailySummary {
   id: string;
   date: string; // YYYY-MM-DD format
   content: string;
-  headline?: string; // Short theme for tool description
   timestamp: number; // When summary was created
   entryCount: number;
   pseudonyms: string[]; // Pseudonyms who contributed that day
-}
-
-export interface EmailMapping {
-  pseudonym: string;      // "Solitary Feather#ed8acb"
-  relayAddress: string;   // "solitary-feather-ed8acb"
-  realEmail: string;      // "user@gmail.com"
-  createdAt: number;
-  lastUsed: number;
 }
 
 // Common stop words to exclude from search
@@ -96,22 +86,6 @@ export interface Storage {
 
   /** Delete an entry by ID */
   deleteEntry(id: string): Promise<void>;
-
-  /** Search the journal (alias for searchEntries) */
-  searchJournal(query: string, limit?: number): Promise<JournalEntry[]>;
-
-  // Email relay methods
-  /** Store email mapping for a pseudonym */
-  setEmailMapping(pseudonym: string, realEmail: string, relayAddress: string): Promise<void>;
-
-  /** Get real email by pseudonym */
-  getEmailByPseudonym(pseudonym: string): Promise<string | null>;
-
-  /** Get mapping by relay address */
-  getEmailByRelay(relayAddress: string): Promise<{ pseudonym: string; realEmail: string } | null>;
-
-  /** Get mapping by real email address */
-  getEmailMappingByRealEmail(realEmail: string): Promise<EmailMapping | null>;
 }
 
 /**
@@ -120,7 +94,6 @@ export interface Storage {
 export class MemoryStorage implements Storage {
   private entries: JournalEntry[] = [];
   private nextId = 1;
-  private emailMappings: Map<string, EmailMapping> = new Map();
 
   async addEntry(entry: Omit<JournalEntry, 'id'>): Promise<JournalEntry> {
     const newEntry: JournalEntry = {
@@ -163,46 +136,6 @@ export class MemoryStorage implements Storage {
 
   async deleteEntry(id: string): Promise<void> {
     this.entries = this.entries.filter(e => e.id !== id);
-  }
-
-  async searchJournal(query: string, limit = 20): Promise<JournalEntry[]> {
-    return this.searchEntries(query, limit);
-  }
-
-  // Email relay methods
-  async setEmailMapping(pseudonym: string, realEmail: string, relayAddress: string): Promise<void> {
-    const now = Date.now();
-    this.emailMappings.set(relayAddress, {
-      pseudonym,
-      relayAddress,
-      realEmail,
-      createdAt: now,
-      lastUsed: now,
-    });
-  }
-
-  async getEmailByPseudonym(pseudonym: string): Promise<string | null> {
-    for (const mapping of this.emailMappings.values()) {
-      if (mapping.pseudonym === pseudonym) {
-        return mapping.realEmail;
-      }
-    }
-    return null;
-  }
-
-  async getEmailByRelay(relayAddress: string): Promise<{ pseudonym: string; realEmail: string } | null> {
-    const mapping = this.emailMappings.get(relayAddress);
-    if (!mapping) return null;
-    return { pseudonym: mapping.pseudonym, realEmail: mapping.realEmail };
-  }
-
-  async getEmailMappingByRealEmail(realEmail: string): Promise<EmailMapping | null> {
-    for (const mapping of this.emailMappings.values()) {
-      if (mapping.realEmail === realEmail) {
-        return mapping;
-      }
-    }
-    return null;
   }
 }
 
@@ -470,86 +403,6 @@ export class FirestoreStorage implements Storage {
       ...doc.data(),
     } as JournalEntry));
   }
-
-  async searchJournal(query: string, limit = 20): Promise<JournalEntry[]> {
-    return this.searchEntries(query, limit);
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // Email Relay methods (emails encrypted at rest)
-  // ─────────────────────────────────────────────────────────────
-
-  async setEmailMapping(pseudonym: string, realEmail: string, relayAddress: string): Promise<void> {
-    const now = Date.now();
-    // Encrypt the email before storing
-    const encryptedEmail = await encrypt(realEmail);
-    // Also store a hash of the email for lookups (one-way, can't recover email from it)
-    const emailHash = await this.hashEmail(realEmail);
-
-    await this.db.collection('emailMappings').doc(relayAddress).set({
-      pseudonym,
-      relayAddress,
-      realEmail: encryptedEmail,  // Encrypted
-      emailHash,                   // For reverse lookups
-      createdAt: now,
-      lastUsed: now,
-    });
-  }
-
-  private async hashEmail(email: string): Promise<string> {
-    // Simple hash for lookup purposes
-    const { createHash } = await import('crypto');
-    return createHash('sha256').update(email.toLowerCase().trim()).digest('hex');
-  }
-
-  async getEmailByPseudonym(pseudonym: string): Promise<string | null> {
-    const snapshot = await this.db
-      .collection('emailMappings')
-      .where('pseudonym', '==', pseudonym)
-      .limit(1)
-      .get();
-
-    if (snapshot.empty) return null;
-
-    const encryptedEmail = snapshot.docs[0].data().realEmail;
-    // Decrypt before returning
-    return decrypt(encryptedEmail);
-  }
-
-  async getEmailByRelay(relayAddress: string): Promise<{ pseudonym: string; realEmail: string } | null> {
-    const doc = await this.db.collection('emailMappings').doc(relayAddress).get();
-    if (!doc.exists) return null;
-
-    const data = doc.data()!;
-    // Decrypt before returning
-    const realEmail = await decrypt(data.realEmail);
-    return { pseudonym: data.pseudonym, realEmail };
-  }
-
-  async getEmailMappingByRealEmail(realEmail: string): Promise<EmailMapping | null> {
-    // Look up by hash since we can't query encrypted field
-    const emailHash = await this.hashEmail(realEmail);
-
-    const snapshot = await this.db
-      .collection('emailMappings')
-      .where('emailHash', '==', emailHash)
-      .limit(1)
-      .get();
-
-    if (snapshot.empty) return null;
-
-    const data = snapshot.docs[0].data();
-    // Decrypt email before returning
-    const decryptedEmail = await decrypt(data.realEmail);
-
-    return {
-      pseudonym: data.pseudonym,
-      relayAddress: data.relayAddress,
-      realEmail: decryptedEmail,
-      createdAt: data.createdAt,
-      lastUsed: data.lastUsed,
-    };
-  }
 }
 
 /**
@@ -603,14 +456,6 @@ export class StagedStorage implements Storage {
 
   async addEntry(entry: Omit<JournalEntry, 'id'>): Promise<JournalEntry> {
     const id = generateEntryId();
-
-    // Human posts are intentional - publish immediately
-    // Claude posts are ambient and may contain mistakes - stage them
-    if (entry.client === 'human') {
-      const newEntry: JournalEntry = { ...entry, id };
-      return this.published.addEntry(newEntry);
-    }
-
     const newEntry: JournalEntry = {
       ...entry,
       id,
@@ -749,29 +594,5 @@ export class StagedStorage implements Storage {
 
   async getEntriesForDate(date: string): Promise<JournalEntry[]> {
     return this.published.getEntriesForDate(date);
-  }
-
-  async searchJournal(query: string, limit = 20): Promise<JournalEntry[]> {
-    return this.published.searchJournal(query, limit);
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // Email Relay methods (delegated to FirestoreStorage)
-  // ─────────────────────────────────────────────────────────────
-
-  async setEmailMapping(pseudonym: string, realEmail: string, relayAddress: string): Promise<void> {
-    return this.published.setEmailMapping(pseudonym, realEmail, relayAddress);
-  }
-
-  async getEmailByPseudonym(pseudonym: string): Promise<string | null> {
-    return this.published.getEmailByPseudonym(pseudonym);
-  }
-
-  async getEmailByRelay(relayAddress: string): Promise<{ pseudonym: string; realEmail: string } | null> {
-    return this.published.getEmailByRelay(relayAddress);
-  }
-
-  async getEmailMappingByRealEmail(realEmail: string): Promise<EmailMapping | null> {
-    return this.published.getEmailMappingByRealEmail(realEmail);
   }
 }

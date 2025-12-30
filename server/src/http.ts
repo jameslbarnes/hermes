@@ -373,6 +373,16 @@ function getYesterdayDateString(): string {
   return formatDateString(yesterday);
 }
 
+function formatPlatformName(platform: string): string {
+  const names: Record<string, string> = {
+    'chatgpt': 'ChatGPT',
+    'claude': 'Claude',
+    'gemini': 'Gemini',
+    'grok': 'Grok',
+  };
+  return names[platform] || platform;
+}
+
 // Track last daily summary date to avoid duplicate generation
 let lastDailySummaryDate: string | null = null;
 
@@ -600,6 +610,20 @@ function createMCPServer(secretKey: string) {
           required: ['entry_id'],
         },
       },
+      {
+        name: 'get_notebook_entry',
+        description: 'Get full details of a notebook entry or conversation. Use this after searching to see the complete content of an interesting result. For conversations, this returns the full thread instead of just the summary.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            entry_id: {
+              type: 'string',
+              description: 'The entry ID from search results (e.g. "m5abc123-x7y8z9")',
+            },
+          },
+          required: ['entry_id'],
+        },
+      },
     ],
   };
   });
@@ -698,6 +722,48 @@ function createMCPServer(secretKey: string) {
       };
     }
 
+    // Handle get entry details tool
+    if (name === 'get_notebook_entry') {
+      const entryId = (args as { entry_id?: string })?.entry_id;
+
+      if (!entryId) {
+        return {
+          content: [{ type: 'text' as const, text: 'Entry ID is required.' }],
+          isError: true,
+        };
+      }
+
+      // Try to find as an entry first
+      const entry = await storage.getEntry(entryId);
+      if (entry) {
+        const date = new Date(entry.timestamp).toISOString().split('T')[0];
+        const type = entry.isReflection ? 'reflection' : 'note';
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `[${date}] ${entry.pseudonym} posted a ${type}:\n\n${entry.content}`,
+          }],
+        };
+      }
+
+      // Try to find as a conversation
+      const conversation = await storage.getConversation(entryId);
+      if (conversation) {
+        const date = new Date(conversation.timestamp).toISOString().split('T')[0];
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `[${date}] ${conversation.pseudonym} posted a conversation with ${formatPlatformName(conversation.platform)}:\n\nTitle: ${conversation.title}\n\nSummary: ${conversation.summary}\n\nFull conversation:\n${conversation.content}`,
+          }],
+        };
+      }
+
+      return {
+        content: [{ type: 'text' as const, text: `Entry not found: ${entryId}` }],
+        isError: true,
+      };
+    }
+
     // Handle search tool
     if (name === 'search_notebook') {
       const query = (args as { query?: string })?.query;
@@ -721,16 +787,18 @@ function createMCPServer(secretKey: string) {
       const conversationResults = allConversationResults.filter(c => c.pseudonym !== pseudonym);
 
       // Combine and sort by timestamp
-      const combined: Array<{ type: 'entry' | 'conversation'; timestamp: number; text: string }> = [
+      const combined: Array<{ type: 'entry' | 'conversation'; id: string; timestamp: number; text: string }> = [
         ...entryResults.map(e => ({
           type: 'entry' as const,
+          id: e.id,
           timestamp: e.timestamp,
           text: `[${new Date(e.timestamp).toISOString().split('T')[0]}] ${e.pseudonym}: ${e.content}`,
         })),
         ...conversationResults.map(c => ({
           type: 'conversation' as const,
+          id: c.id,
           timestamp: c.timestamp,
-          text: `[${new Date(c.timestamp).toISOString().split('T')[0]}] ${c.pseudonym} [${c.platform}]: ${c.summary}`,
+          text: `[${new Date(c.timestamp).toISOString().split('T')[0]}] ${c.pseudonym} posted a conversation with ${formatPlatformName(c.platform)}: ${c.summary}`,
         })),
       ];
 
@@ -748,12 +816,12 @@ function createMCPServer(secretKey: string) {
         };
       }
 
-      const resultsText = results.map(r => r.text).join('\n\n');
+      const resultsText = results.map(r => `[id:${r.id}] ${r.text}`).join('\n\n');
 
       return {
         content: [{
           type: 'text' as const,
-          text: `Found ${results.length} results matching "${query}":\n\n${resultsText}`,
+          text: `Found ${results.length} results matching "${query}":\n\n${resultsText}\n\nUse get_notebook_entry with an ID to see full details.`,
         }],
       };
     }

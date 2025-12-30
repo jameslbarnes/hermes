@@ -7,6 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -371,6 +372,96 @@
             }
         }
 
+        /* Reflection entries (markdown) */
+        .entry-content.reflection {
+            font-size: 1.05rem;
+        }
+
+        .entry-content.reflection h1,
+        .entry-content.reflection h2,
+        .entry-content.reflection h3 {
+            font-family: 'Newsreader', Georgia, serif;
+            margin: 1.25rem 0 0.75rem 0;
+            font-weight: 500;
+        }
+
+        .entry-content.reflection h1:first-child,
+        .entry-content.reflection h2:first-child,
+        .entry-content.reflection h3:first-child {
+            margin-top: 0;
+        }
+
+        .entry-content.reflection h1 { font-size: 1.4rem; }
+        .entry-content.reflection h2 { font-size: 1.25rem; }
+        .entry-content.reflection h3 { font-size: 1.1rem; font-style: italic; }
+
+        .entry-content.reflection p {
+            margin: 0.75rem 0;
+        }
+
+        .entry-content.reflection p:first-child {
+            margin-top: 0;
+        }
+
+        .entry-content.reflection ul,
+        .entry-content.reflection ol {
+            margin: 0.75rem 0;
+            padding-left: 1.5rem;
+        }
+
+        .entry-content.reflection li {
+            margin: 0.25rem 0;
+        }
+
+        .entry-content.reflection blockquote {
+            border-left: 3px solid var(--accent);
+            padding-left: 1rem;
+            margin: 1rem 0;
+            color: var(--fg-muted);
+            font-style: italic;
+        }
+
+        .entry-content.reflection code {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.9em;
+            background: var(--border);
+            padding: 0.15rem 0.35rem;
+            border-radius: 3px;
+        }
+
+        .entry-content.reflection pre {
+            background: var(--border);
+            padding: 1rem;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+
+        .entry-content.reflection pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .entry-content.reflection em {
+            font-style: italic;
+        }
+
+        .entry-content.reflection strong {
+            font-weight: 500;
+        }
+
+        .reflection-badge {
+            display: inline-block;
+            padding: 0.15rem 0.4rem;
+            background: rgba(124, 92, 191, 0.1);
+            color: var(--accent);
+            border-radius: 3px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
         /* Dark mode */
         @media (prefers-color-scheme: dark) {
             :root {
@@ -642,12 +733,20 @@
         function renderEntry(entry) {
             const isPending = entry.publishAt && entry.publishAt > Date.now();
             const pendingBadge = isPending ? `<span class="pending-badge">publishes ${formatTimeUntil(entry.publishAt)}</span> · ` : '';
+            const isReflection = entry.isReflection;
+            const reflectionBadge = isReflection ? `<span class="reflection-badge">reflection</span> · ` : '';
+
+            // Render content: markdown for reflections, escaped text for regular entries
+            const contentHtml = isReflection
+                ? marked.parse(entry.content)
+                : escapeHtml(entry.content);
+            const contentClass = isReflection ? 'entry-content reflection' : 'entry-content';
 
             return `
                 <div class="entry" data-id="${entry.id}">
-                    <p class="entry-content">${escapeHtml(entry.content)}</p>
+                    <div class="${contentClass}">${contentHtml}</div>
                     <div class="entry-meta">
-                        ${pendingBadge}${formatTime(entry.timestamp)}${entry.client ? ` · ${entry.client}` : ''}${entry.pseudonym ? ` · <span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(entry.pseudonym)}')">${escapeHtml(entry.pseudonym)}</span>` : ''}${userPseudonym && entry.pseudonym === userPseudonym ? ` · <button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>` : ''}
+                        ${pendingBadge}${reflectionBadge}${formatTime(entry.timestamp)}${entry.client ? ` · ${entry.client}` : ''}${entry.pseudonym ? ` · <span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(entry.pseudonym)}')">${escapeHtml(entry.pseudonym)}</span>` : ''}${userPseudonym && entry.pseudonym === userPseudonym ? ` · <button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>` : ''}
                     </div>
                 </div>
             `;

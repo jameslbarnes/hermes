@@ -16,6 +16,7 @@ export interface JournalEntry {
   timestamp: number;
   keywords?: string[]; // Tokenized content for search
   publishAt?: number; // When entry becomes public. If undefined or in past, entry is published.
+  isReflection?: boolean; // True for longform markdown reflections
 }
 
 export interface Summary {
@@ -191,13 +192,19 @@ export class FirestoreStorage implements Storage {
     const keywords = tokenize(entry.content);
     const newEntry: JournalEntry = { ...entry, id, keywords };
 
-    await this.db.collection(this.collection).doc(id).set({
+    const docData: Record<string, any> = {
       pseudonym: newEntry.pseudonym,
       client: newEntry.client,
       content: newEntry.content,
       timestamp: newEntry.timestamp,
       keywords,
-    });
+    };
+
+    if (newEntry.isReflection) {
+      docData.isReflection = true;
+    }
+
+    await this.db.collection(this.collection).doc(id).set(docData);
 
     return newEntry;
   }

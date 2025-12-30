@@ -17,6 +17,7 @@ export interface JournalEntry {
   keywords?: string[]; // Tokenized content for search
   publishAt?: number; // When entry becomes public. If undefined or in past, entry is published.
   isReflection?: boolean; // True for longform markdown reflections
+  model?: string; // Model that wrote the entry (e.g., "claude-sonnet-4", "opus-4")
 }
 
 export interface Summary {
@@ -36,6 +37,19 @@ export interface DailySummary {
   timestamp: number; // When summary was created
   entryCount: number;
   pseudonyms: string[]; // Pseudonyms who contributed that day
+}
+
+export interface Conversation {
+  id: string;
+  pseudonym: string;
+  sourceUrl: string;
+  platform: 'chatgpt' | 'claude' | 'gemini' | 'grok';
+  title: string;
+  content: string;           // Full conversation text (markdown from Firecrawl)
+  summary: string;           // AI-generated 2-3 sentence summary
+  timestamp: number;
+  keywords: string[];        // Tokenized from content for search
+  publishAt?: number;        // Staging delay (same as entries)
 }
 
 // Common stop words to exclude from search
@@ -87,6 +101,28 @@ export interface Storage {
 
   /** Delete an entry by ID */
   deleteEntry(id: string): Promise<void>;
+
+  // ─────────────────────────────────────────────────────────────
+  // Conversation methods
+  // ─────────────────────────────────────────────────────────────
+
+  /** Add a new conversation */
+  addConversation(conversation: Omit<Conversation, 'id'>): Promise<Conversation>;
+
+  /** Get a single conversation by ID */
+  getConversation(id: string): Promise<Conversation | null>;
+
+  /** Get recent conversations (newest first) */
+  getConversations(limit?: number, offset?: number): Promise<Conversation[]>;
+
+  /** Get conversations by pseudonym */
+  getConversationsByPseudonym(pseudonym: string, limit?: number): Promise<Conversation[]>;
+
+  /** Search conversations by keywords */
+  searchConversations(query: string, limit?: number): Promise<Conversation[]>;
+
+  /** Delete a conversation by ID */
+  deleteConversation(id: string): Promise<void>;
 }
 
 /**
@@ -137,6 +173,50 @@ export class MemoryStorage implements Storage {
 
   async deleteEntry(id: string): Promise<void> {
     this.entries = this.entries.filter(e => e.id !== id);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Conversation methods
+  // ─────────────────────────────────────────────────────────────
+
+  private conversations: Conversation[] = [];
+
+  async addConversation(conversation: Omit<Conversation, 'id'>): Promise<Conversation> {
+    const newConversation: Conversation = {
+      ...conversation,
+      id: String(this.nextId++),
+    };
+    this.conversations.unshift(newConversation);
+    return newConversation;
+  }
+
+  async getConversation(id: string): Promise<Conversation | null> {
+    return this.conversations.find(c => c.id === id) || null;
+  }
+
+  async getConversations(limit = 50, offset = 0): Promise<Conversation[]> {
+    return this.conversations.slice(offset, offset + limit);
+  }
+
+  async getConversationsByPseudonym(pseudonym: string, limit = 50): Promise<Conversation[]> {
+    return this.conversations
+      .filter(c => c.pseudonym === pseudonym)
+      .slice(0, limit);
+  }
+
+  async searchConversations(query: string, limit = 50): Promise<Conversation[]> {
+    const queryKeywords = tokenize(query);
+    if (queryKeywords.length === 0) return [];
+
+    return this.conversations
+      .filter(c => {
+        return queryKeywords.some(qk => c.keywords.includes(qk));
+      })
+      .slice(0, limit);
+  }
+
+  async deleteConversation(id: string): Promise<void> {
+    this.conversations = this.conversations.filter(c => c.id !== id);
   }
 }
 
@@ -410,6 +490,95 @@ export class FirestoreStorage implements Storage {
       ...doc.data(),
     } as JournalEntry));
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // Conversation methods
+  // ─────────────────────────────────────────────────────────────
+
+  private conversationsCollection = 'imported_conversations';
+
+  async addConversation(conversation: Omit<Conversation, 'id'>): Promise<Conversation> {
+    const id = generateEntryId();
+    const newConversation: Conversation = { ...conversation, id };
+
+    await this.db.collection(this.conversationsCollection).doc(id).set({
+      pseudonym: newConversation.pseudonym,
+      sourceUrl: newConversation.sourceUrl,
+      platform: newConversation.platform,
+      title: newConversation.title,
+      content: newConversation.content,
+      summary: newConversation.summary,
+      timestamp: newConversation.timestamp,
+      keywords: newConversation.keywords,
+    });
+
+    return newConversation;
+  }
+
+  async getConversation(id: string): Promise<Conversation | null> {
+    const doc = await this.db.collection(this.conversationsCollection).doc(id).get();
+    if (!doc.exists) return null;
+    return {
+      id: doc.id,
+      ...doc.data(),
+    } as Conversation;
+  }
+
+  async getConversations(limit = 50, offset = 0): Promise<Conversation[]> {
+    const snapshot = await this.db
+      .collection(this.conversationsCollection)
+      .orderBy('timestamp', 'desc')
+      .limit(limit + offset)
+      .get();
+
+    const conversations: Conversation[] = [];
+    snapshot.docs.slice(offset).forEach(doc => {
+      conversations.push({
+        id: doc.id,
+        ...doc.data(),
+      } as Conversation);
+    });
+
+    return conversations;
+  }
+
+  async getConversationsByPseudonym(pseudonym: string, limit = 50): Promise<Conversation[]> {
+    const snapshot = await this.db
+      .collection(this.conversationsCollection)
+      .where('pseudonym', '==', pseudonym)
+      .orderBy('timestamp', 'desc')
+      .limit(limit)
+      .get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as Conversation));
+  }
+
+  async searchConversations(query: string, limit = 50): Promise<Conversation[]> {
+    const queryKeywords = tokenize(query);
+    if (queryKeywords.length === 0) return [];
+
+    // Firestore array-contains-any supports up to 30 values
+    const searchKeywords = queryKeywords.slice(0, 30);
+
+    const snapshot = await this.db
+      .collection(this.conversationsCollection)
+      .where('keywords', 'array-contains-any', searchKeywords)
+      .orderBy('timestamp', 'desc')
+      .limit(limit)
+      .get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as Conversation));
+  }
+
+  async deleteConversation(id: string): Promise<void> {
+    await this.db.collection(this.conversationsCollection).doc(id).delete();
+  }
 }
 
 /**
@@ -417,6 +586,7 @@ export class FirestoreStorage implements Storage {
  */
 export class StagedStorage implements Storage {
   private pending: Map<string, JournalEntry> = new Map();
+  private pendingConversations: Map<string, Conversation> = new Map();
   private published: FirestoreStorage;
   private publishDelayMs: number;
   private publishInterval: NodeJS.Timeout | null = null;
@@ -442,6 +612,8 @@ export class StagedStorage implements Storage {
 
   private async publishReadyEntries() {
     const now = Date.now();
+
+    // Publish ready entries
     for (const [id, entry] of this.pending) {
       if (entry.publishAt && entry.publishAt <= now) {
         // Move to Firestore without publishAt field
@@ -457,6 +629,16 @@ export class StagedStorage implements Storage {
             console.error('[Storage] onPublish callback error:', err);
           }
         }
+      }
+    }
+
+    // Publish ready conversations
+    for (const [id, conversation] of this.pendingConversations) {
+      if (conversation.publishAt && conversation.publishAt <= now) {
+        // Move to Firestore without publishAt field
+        const { publishAt, ...publishedConversation } = conversation;
+        await this.published.addConversation(publishedConversation);
+        this.pendingConversations.delete(id);
       }
     }
   }
@@ -601,5 +783,85 @@ export class StagedStorage implements Storage {
 
   async getEntriesForDate(date: string): Promise<JournalEntry[]> {
     return this.published.getEntriesForDate(date);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Conversation methods (with staging support)
+  // ─────────────────────────────────────────────────────────────
+
+  async addConversation(conversation: Omit<Conversation, 'id'>): Promise<Conversation> {
+    // Conversations publish immediately (user intentionally imported them)
+    return this.published.addConversation(conversation);
+  }
+
+  async getConversation(id: string): Promise<Conversation | null> {
+    // Check pending first, then published
+    const pending = this.pendingConversations.get(id);
+    if (pending) return pending;
+    return this.published.getConversation(id);
+  }
+
+  async getConversations(limit = 50, offset = 0): Promise<Conversation[]> {
+    // Only return published conversations for public feed
+    return this.published.getConversations(limit, offset);
+  }
+
+  /**
+   * Get conversations by pseudonym. If includePending is true, includes unpublished conversations.
+   */
+  async getConversationsByPseudonym(pseudonym: string, limit = 50, includePending = false): Promise<Conversation[]> {
+    const published = await this.published.getConversationsByPseudonym(pseudonym, limit);
+
+    if (!includePending) {
+      return published;
+    }
+
+    // Include pending conversations for this pseudonym
+    const pendingConversations: Conversation[] = [];
+    for (const conversation of this.pendingConversations.values()) {
+      if (conversation.pseudonym === pseudonym) {
+        pendingConversations.push(conversation);
+      }
+    }
+
+    // Merge and sort by timestamp (newest first)
+    return [...pendingConversations, ...published]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
+  }
+
+  /**
+   * Get pending conversations for a specific pseudonym
+   */
+  async getPendingConversationsByPseudonym(pseudonym: string): Promise<Conversation[]> {
+    const conversations: Conversation[] = [];
+    for (const conversation of this.pendingConversations.values()) {
+      if (conversation.pseudonym === pseudonym) {
+        conversations.push(conversation);
+      }
+    }
+    return conversations.sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  async searchConversations(query: string, limit = 50): Promise<Conversation[]> {
+    // Search only published conversations (pending are private)
+    return this.published.searchConversations(query, limit);
+  }
+
+  async deleteConversation(id: string): Promise<void> {
+    // Try pending first
+    if (this.pendingConversations.has(id)) {
+      this.pendingConversations.delete(id);
+      return;
+    }
+    // Then try published
+    await this.published.deleteConversation(id);
+  }
+
+  /**
+   * Check if a conversation is pending (for authorization checks)
+   */
+  isConversationPending(id: string): boolean {
+    return this.pendingConversations.has(id);
   }
 }

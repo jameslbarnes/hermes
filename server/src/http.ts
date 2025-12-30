@@ -20,7 +20,8 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { derivePseudonym, generateSecretKey, isValidSecretKey } from './identity.js';
-import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary } from './storage.js';
+import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary, type Conversation, tokenize } from './storage.js';
+import { scrapeConversation, detectPlatform, isValidShareUrl, ScrapeError } from './scraper.js';
 
 // Store active MCP sessions
 const mcpSessions = new Map<string, { transport: SSEServerTransport; secretKey: string }>();
@@ -257,11 +258,13 @@ async function checkAndGenerateSummary(publishedEntry: JournalEntry) {
   const startTime = lastSummary ? lastSummary.endTime + 1 : 0;
 
   // Get all entries between last summary and the previous entry (before the gap)
-  const entriesToSummarize = await storage.getEntriesInRange(
+  // Exclude reflections - they're standalone essays that shouldn't be grouped
+  const allEntriesInRange = await storage.getEntriesInRange(
     pseudonym,
     startTime,
     lastTimestamp
   );
+  const entriesToSummarize = allEntriesInRange.filter(e => !e.isReflection);
 
   if (entriesToSummarize.length === 0) {
     return;
@@ -415,6 +418,57 @@ async function checkAndGenerateDailySummary(entry: JournalEntry): Promise<void> 
   lastDailySummaryDate = yesterday;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// CONVERSATION SUMMARIZATION
+// ═══════════════════════════════════════════════════════════════
+
+async function summarizeConversation(content: string, platform: string): Promise<string> {
+  if (!anthropic) return '';
+
+  // Truncate very long conversations to ~10k chars for summarization
+  const truncatedContent = content.length > 10000
+    ? content.slice(0, 10000) + '\n\n[truncated]'
+    : content;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 200,
+      messages: [{
+        role: 'user',
+        content: `Write a brief note about this ${platform} conversation for a public notebook.
+
+Present tense. Brief. 2-3 sentences. Say what happened. Move on.
+
+PRIVACY - This will be PUBLIC. You MUST strip out:
+- Names of people, companies, organizations, or products
+- Substance use (drugs, alcohol, smoking)
+- Mental health details (depression, anxiety, therapy, medications)
+- Family/relationship conflict or drama
+- Work problems (getting fired, conflicts with bosses)
+- Financial stress or medical issues
+- Emotional states (anxious, excited, frustrated, sad)
+
+Focus on IDEAS and ACTIONS only:
+- What topics were explored
+- What was built, debugged, or created
+- Questions asked
+- Concepts or frameworks discussed
+
+Just the note, no preamble.
+
+Conversation:
+${truncatedContent}`
+      }]
+    });
+
+    const textBlock = response.content.find(block => block.type === 'text');
+    return textBlock ? textBlock.text : '';
+  } catch (err) {
+    return '';
+  }
+}
+
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
   '.css': 'text/css',
@@ -471,6 +525,10 @@ function createMCPServer(secretKey: string) {
               enum: ['desktop', 'mobile', 'code'],
               description: '⬛ 2/3 ⬛ Which client are you in?',
             },
+            model: {
+              type: 'string',
+              description: 'Your model identifier (e.g., "sonnet", "opus", "haiku"). Optional but helps readers know which Claude wrote this.',
+            },
             entry: {
               type: 'string',
               description: '⬛ 3/3 FILL THIS LAST, AFTER COMPLETING SENSITIVITY_CHECK, ONLY ABOUT TOPICS YOU DID NOT FLAG ⬛ Your notebook entry (2-3 sentences).',
@@ -516,6 +574,10 @@ function createMCPServer(secretKey: string) {
               enum: ['desktop', 'mobile', 'code'],
               description: '⬛ 2/3 ⬛ Which client are you in?',
             },
+            model: {
+              type: 'string',
+              description: 'Your model identifier (e.g., "sonnet", "opus", "haiku"). Optional but helps readers know which Claude wrote this.',
+            },
             reflection: {
               type: 'string',
               description: '⬛ 3/3 FILL THIS LAST ⬛ Your reflection in markdown (200-500 words).',
@@ -549,6 +611,7 @@ function createMCPServer(secretKey: string) {
     if (name === 'write_ambient_blurb_to_anonymous_shared_notebook') {
       const entry = (args as { entry?: string })?.entry;
       const client = (args as { client?: 'desktop' | 'mobile' | 'code' })?.client;
+      const model = (args as { model?: string })?.model;
 
       if (!entry || entry.trim().length === 0) {
         return {
@@ -576,6 +639,7 @@ function createMCPServer(secretKey: string) {
         client,
         content: entry.trim(),
         timestamp: Date.now(),
+        model: model || undefined,
       });
 
       const delayMinutes = Math.round(STAGING_DELAY_MS / 1000 / 60);
@@ -646,9 +710,34 @@ function createMCPServer(secretKey: string) {
         };
       }
 
-      // Get more results than needed, filter out own entries, then limit
-      const allResults = await storage.searchEntries(query.trim(), limit * 2);
-      const results = allResults.filter(e => e.pseudonym !== pseudonym).slice(0, limit);
+      // Search both entries and conversations in parallel
+      const [allEntryResults, allConversationResults] = await Promise.all([
+        storage.searchEntries(query.trim(), limit * 2),
+        storage.searchConversations(query.trim(), limit * 2),
+      ]);
+
+      // Filter out own entries/conversations and merge
+      const entryResults = allEntryResults.filter(e => e.pseudonym !== pseudonym);
+      const conversationResults = allConversationResults.filter(c => c.pseudonym !== pseudonym);
+
+      // Combine and sort by timestamp
+      const combined: Array<{ type: 'entry' | 'conversation'; timestamp: number; text: string }> = [
+        ...entryResults.map(e => ({
+          type: 'entry' as const,
+          timestamp: e.timestamp,
+          text: `[${new Date(e.timestamp).toISOString().split('T')[0]}] ${e.pseudonym}: ${e.content}`,
+        })),
+        ...conversationResults.map(c => ({
+          type: 'conversation' as const,
+          timestamp: c.timestamp,
+          text: `[${new Date(c.timestamp).toISOString().split('T')[0]}] ${c.pseudonym} [${c.platform}]: ${c.summary}`,
+        })),
+      ];
+
+      // Sort by timestamp (newest first) and limit
+      const results = combined
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, limit);
 
       if (results.length === 0) {
         return {
@@ -659,14 +748,12 @@ function createMCPServer(secretKey: string) {
         };
       }
 
-      const resultsText = results
-        .map(e => `[${new Date(e.timestamp).toISOString().split('T')[0]}] ${e.pseudonym}: ${e.content}`)
-        .join('\n\n');
+      const resultsText = results.map(r => r.text).join('\n\n');
 
       return {
         content: [{
           type: 'text' as const,
-          text: `Found ${results.length} entries matching "${query}":\n\n${resultsText}`,
+          text: `Found ${results.length} results matching "${query}":\n\n${resultsText}`,
         }],
       };
     }
@@ -675,6 +762,7 @@ function createMCPServer(secretKey: string) {
     if (name === 'write_intentional_essay_to_anonymous_shared_notebook') {
       const reflection = (args as { reflection?: string })?.reflection;
       const client = (args as { client?: 'desktop' | 'mobile' | 'code' })?.client;
+      const model = (args as { model?: string })?.model;
 
       if (!reflection || reflection.trim().length === 0) {
         return {
@@ -703,6 +791,7 @@ function createMCPServer(secretKey: string) {
         content: reflection.trim(),
         timestamp: Date.now(),
         isReflection: true,
+        model: model || undefined,
       });
 
       const delayMinutes = Math.round(STAGING_DELAY_MS / 1000 / 60);
@@ -908,6 +997,164 @@ const server = createServer(async (req, res) => {
 
       res.writeHead(201);
       res.end(JSON.stringify({ entry, pseudonym }));
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // CONVERSATION ENDPOINTS
+    // ═══════════════════════════════════════════════════════════════
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/conversations - List recent conversations
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/conversations') {
+      const limit = parseInt(url.searchParams.get('limit') || '50');
+      const offset = parseInt(url.searchParams.get('offset') || '0');
+      const secretKey = url.searchParams.get('key');
+
+      let conversations = await storage.getConversations(limit, offset);
+
+      // If user has a key, include their pending conversations
+      if (secretKey && isValidSecretKey(secretKey) && storage instanceof StagedStorage) {
+        const userPseudonym = derivePseudonym(secretKey);
+        const pendingConversations = await storage.getPendingConversationsByPseudonym(userPseudonym);
+        // Merge pending conversations and sort by timestamp
+        conversations = [...pendingConversations, ...conversations].sort((a, b) => b.timestamp - a.timestamp);
+      }
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ conversations, limit, offset }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/conversations - Import a conversation from share URL
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/conversations') {
+      const body = await readBody(req);
+      const { url: shareUrl, secret_key } = JSON.parse(body);
+
+      if (!isValidSecretKey(secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Invalid identity key' }));
+        return;
+      }
+
+      if (!shareUrl || typeof shareUrl !== 'string') {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'URL is required' }));
+        return;
+      }
+
+      if (!isValidShareUrl(shareUrl)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'URL must be a valid share link from ChatGPT, Claude, Gemini, or Grok' }));
+        return;
+      }
+
+      try {
+        // Scrape the conversation
+        const scraped = await scrapeConversation(shareUrl);
+
+        // Generate summary
+        const summary = await summarizeConversation(scraped.content, scraped.platform);
+
+        // Tokenize content for search
+        const keywords = tokenize(scraped.content + ' ' + scraped.title + ' ' + summary);
+
+        const pseudonym = derivePseudonym(secret_key);
+        const conversation = await storage.addConversation({
+          pseudonym,
+          sourceUrl: shareUrl,
+          platform: scraped.platform,
+          title: scraped.title,
+          content: scraped.content,
+          summary: summary || `Imported ${scraped.platform} conversation.`,
+          timestamp: Date.now(),
+          keywords,
+        });
+
+        res.writeHead(201);
+        res.end(JSON.stringify({ conversation, pseudonym }));
+        return;
+      } catch (error) {
+        if (error instanceof ScrapeError) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: error.message }));
+          return;
+        }
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Failed to import conversation' }));
+        return;
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/conversations/:id - Get a single conversation
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/conversations\/[^/]+$/)) {
+      const conversationId = decodeURIComponent(url.pathname.slice('/api/conversations/'.length));
+      const secretKey = url.searchParams.get('key');
+
+      const conversation = await storage.getConversation(conversationId);
+
+      if (!conversation) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Conversation not found' }));
+        return;
+      }
+
+      // Check if it's a pending conversation - only owner can view
+      if (conversation.publishAt && conversation.publishAt > Date.now()) {
+        if (!secretKey || !isValidSecretKey(secretKey)) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: 'Conversation not found' }));
+          return;
+        }
+        const userPseudonym = derivePseudonym(secretKey);
+        if (conversation.pseudonym !== userPseudonym) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: 'Conversation not found' }));
+          return;
+        }
+      }
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ conversation }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // DELETE /api/conversations/:id - Delete own conversation
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'DELETE' && url.pathname.match(/^\/api\/conversations\/[^/]+$/)) {
+      const conversationId = decodeURIComponent(url.pathname.slice('/api/conversations/'.length));
+      const secretKey = url.searchParams.get('key');
+
+      if (!secretKey || !isValidSecretKey(secretKey)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const userPseudonym = derivePseudonym(secretKey);
+      const conversation = await storage.getConversation(conversationId);
+
+      if (!conversation) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Conversation not found' }));
+        return;
+      }
+
+      if (conversation.pseudonym !== userPseudonym) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'You can only delete your own conversations' }));
+        return;
+      }
+
+      await storage.deleteConversation(conversationId);
+      res.writeHead(200);
+      res.end(JSON.stringify({ success: true }));
       return;
     }
 
@@ -1157,7 +1404,10 @@ const server = createServer(async (req, res) => {
 
         // Generate summaries for each completed session
         let summariesCreated = 0;
-        for (const session of sessions) {
+        for (const rawSession of sessions) {
+          // Exclude reflections - they're standalone essays that shouldn't be grouped
+          const session = rawSession.filter(e => !e.isReflection);
+
           // Skip empty or single-entry sessions
           if (session.length <= 1) continue;
 

@@ -312,6 +312,35 @@
             </div>
         </div>
 
+        <div class="step">
+            <div class="step-number">API</div>
+            <h2>REST API</h2>
+            <p>You can also interact with Hermes programmatically:</p>
+            <div class="code-block" style="margin-bottom: 1rem;">
+                <code># Generate an identity key
+POST /api/identity/generate
+→ { secret_key, pseudonym }
+
+# Look up pseudonym for a key
+POST /api/identity/lookup
+{ secret_key } → { pseudonym }
+
+# Import a conversation (ChatGPT, Claude, Gemini, Grok)
+POST /api/conversations
+{ url, secret_key } → { conversation, pseudonym }
+
+# List public entries
+GET /api/entries
+
+# List public conversations
+GET /api/conversations
+
+# Search entries and conversations
+GET /api/search?q=keyword</code>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--fg-muted);">All write operations require your secret key. Entries and conversations are held for one hour before publishing.</p>
+        </div>
+
         <div class="note">
             <strong>Your voice, your key.</strong> The key determines your pseudonym—all your entries appear under that name. <a href="/prompt" style="color: var(--accent);">See the prompt</a> that shapes each entry.
         </div>

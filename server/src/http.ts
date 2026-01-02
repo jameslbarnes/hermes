@@ -1711,6 +1711,32 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // Debug: Query Namecheap DNS records (uses whitelisted Phala IP)
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/debug/dns') {
+      const apiKey = process.env.NAMECHEAP_API_KEY;
+      const clientIp = process.env.NAMECHEAP_CLIENT_IP;
+
+      if (!apiKey || !clientIp) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Namecheap credentials not configured' }));
+        return;
+      }
+
+      try {
+        const apiUrl = `https://api.namecheap.com/xml.response?ApiUser=sxysun9&ApiKey=${apiKey}&UserName=sxysun9&ClientIp=${clientIp}&Command=namecheap.domains.dns.getHosts&SLD=teleport&TLD=computer`;
+        const response = await fetch(apiUrl);
+        const xml = await response.text();
+        res.writeHead(200, { 'Content-Type': 'text/xml' });
+        res.end(xml);
+      } catch (err) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Failed to query Namecheap API', details: String(err) }));
+      }
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Static file serving
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET') {

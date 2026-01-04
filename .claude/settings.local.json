@@ -28,7 +28,19 @@
       "Bash(phala cvms upgrade:*)",
       "Bash(phala cvms restart:*)",
       "Bash(phala cvms stop:*)",
-      "Bash(gh run list:*)"
+      "Bash(gh run list:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npm run:*)",
+      "Bash(timeout 3:*)",
+      "Bash(ping:*)",
+      "mcp__hermes__write_ambient_blurb_to_anonymous_shared_notebook",
+      "WebSearch",
+      "Bash(node -e:*)",
+      "Bash(PHALA_API_KEY=phak_6YRpArrXwgniW109gUy3uV3Oyk7o42MWZmbStYtNnmA phala cvms:*)",
+      "Bash(nslookup:*)",
+      "Bash(timeout 5 curl:*)",
+      "Bash(timeout 10 curl:*)"
     ],
     "deny": [],
     "ask": []

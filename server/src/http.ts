@@ -1737,6 +1737,63 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // Debug: Set Namecheap DNS records (fixes CNAME underscore issue)
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/debug/dns/fix') {
+      const apiKey = process.env.NAMECHEAP_API_KEY;
+      const clientIp = process.env.NAMECHEAP_CLIENT_IP;
+
+      if (!apiKey || !clientIp) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Namecheap credentials not configured' }));
+        return;
+      }
+
+      try {
+        // Set all DNS records - this OVERWRITES everything, so include all records
+        const params = new URLSearchParams({
+          ApiUser: 'sxysun9',
+          ApiKey: apiKey,
+          UserName: 'sxysun9',
+          ClientIp: clientIp,
+          Command: 'namecheap.domains.dns.setHosts',
+          SLD: 'teleport',
+          TLD: 'computer',
+          // Record 1: Keep existing tee A record
+          HostName1: 'tee',
+          RecordType1: 'A',
+          Address1: '98.89.30.212',
+          TTL1: '1799',
+          // Record 2: CNAME without underscore (the fix!)
+          HostName2: 'hermes',
+          RecordType2: 'CNAME',
+          Address2: 'db82f581256a3c9244c4d7129a67336990d08cdf-3000.dstack-pha-prod9.phala.network',
+          TTL2: '60',
+          // Record 3: Keep existing TXT for dstack routing
+          HostName3: '_dstack-app-address.hermes',
+          RecordType3: 'TXT',
+          Address3: 'db82f581256a3c9244c4d7129a67336990d08cdf:443',
+          TTL3: '60',
+          // Record 4: Add the other TXT prefix that dstack-ingress expects
+          HostName4: '_tapp-address.hermes',
+          RecordType4: 'TXT',
+          Address4: 'db82f581256a3c9244c4d7129a67336990d08cdf:443',
+          TTL4: '60',
+        });
+
+        const apiUrl = `https://api.namecheap.com/xml.response?${params.toString()}`;
+        const response = await fetch(apiUrl);
+        const xml = await response.text();
+        res.writeHead(200, { 'Content-Type': 'text/xml' });
+        res.end(xml);
+      } catch (err) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Failed to set Namecheap DNS', details: String(err) }));
+      }
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Static file serving
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET') {

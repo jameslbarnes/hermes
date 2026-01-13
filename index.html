@@ -131,6 +131,26 @@
             color: var(--fg-muted);
         }
 
+        .identity-handle {
+            display: block;
+            color: var(--accent);
+            font-size: 0.9rem;
+            margin-bottom: 0.35rem;
+            text-decoration: none;
+        }
+
+        .identity-handle:hover {
+            text-decoration: underline;
+        }
+
+        .identity-claim {
+            display: block;
+            font-size: 0.8rem;
+            color: var(--accent);
+            font-weight: 500;
+            margin-top: 0.25rem;
+        }
+
         .footer {
             margin-top: auto;
             padding-top: 2rem;
@@ -203,6 +223,15 @@
             text-decoration: underline;
         }
 
+        .entry-handle {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .entry-handle:hover {
+            text-decoration: underline;
+        }
+
         .delete-btn {
             background: none;
             border: none;
@@ -217,6 +246,20 @@
         .delete-btn:hover {
             opacity: 1;
             color: #e53935;
+        }
+
+        .discuss-link {
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            text-decoration: none;
+            opacity: 0.5;
+            transition: opacity 0.2s;
+        }
+
+        .discuss-link:hover {
+            opacity: 1;
+            color: var(--accent);
         }
 
         /* Unified badge system */
@@ -846,6 +889,59 @@
             font-style: italic;
         }
 
+        /* Comments */
+        .summary-comments {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px dashed var(--border);
+        }
+
+        .comment {
+            margin-bottom: 1rem;
+        }
+
+        .comment:last-child {
+            margin-bottom: 0;
+        }
+
+        .comment-story {
+            border-left: 3px solid var(--accent);
+            padding-left: 1rem;
+        }
+
+        .comment-quote {
+            font-size: 0.85rem;
+            color: var(--fg-muted);
+            padding-left: 0.75rem;
+            border-left: 2px solid var(--border);
+            margin-bottom: 0.5rem;
+            font-style: italic;
+            max-height: 3rem;
+            overflow: hidden;
+        }
+
+        .comment-content {
+            font-size: 1rem;
+            line-height: 1.6;
+            color: var(--fg);
+        }
+
+        .comment-meta {
+            margin-top: 0.4rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            color: var(--fg-muted);
+        }
+
+        .comment-handle {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .comment-handle:hover {
+            text-decoration: underline;
+        }
+
         /* Dark mode */
         @media (prefers-color-scheme: dark) {
             :root {
@@ -872,7 +968,7 @@
             <div class="explainer">
                 <div class="explainer-section">
                     <h2>What is this</h2>
-                    <p>A live feed where people anonymously share moments from their AI conversations—with Claude, ChatGPT, Grok, and other AI assistants.</p>
+                    <p>A live feed where people share moments from their AI conversations—with Claude, ChatGPT, Grok, and other AI assistants.</p>
                 </div>
 
                 <div class="explainer-section">
@@ -917,9 +1013,24 @@
         const filterPseudonym = params.get('pseudonym');
         const userKey = params.get('key');
         let userPseudonym = null;
+        let userHandle = null;
+
+        // Save URL key to localStorage for persistence across pages
+        if (userKey) {
+            localStorage.setItem('hermes_key', userKey);
+        }
+
+        // Map pseudonym -> handle (built from entries that have handles)
+        const pseudonymToHandle = new Map();
 
         // Cache for loaded summary entries
         const summaryEntriesCache = new Map();
+
+        // Cache for comments by entry ID
+        let commentsByEntry = {};
+
+        // Cache for entry content by ID (for quoting in comments)
+        const entryContentCache = new Map();
 
         // Get today's date in YYYY-MM-DD format (local timezone)
         function getToday() {
@@ -953,11 +1064,24 @@
                         // Update identity link in sidebar
                         const identityLink = document.getElementById('identity-link');
                         if (identityLink) {
-                            identityLink.innerHTML = `
-                                <span class="identity-label">Logged in as</span>
-                                <span class="identity-pseudonym">${escapeHtml(data.pseudonym)}</span>
-                                <a href="/setup" class="identity-configure">configure</a>
-                            `;
+                            if (data.hasAccount && data.handle) {
+                                // User has a handle
+                                userHandle = data.handle;
+                                identityLink.innerHTML = `
+                                    <span class="identity-label">Logged in as</span>
+                                    <a href="/u/${escapeHtml(data.handle)}" class="identity-handle">@${escapeHtml(data.handle)}</a>
+                                    <a href="/setup" class="identity-configure">settings</a>
+                                `;
+                            } else {
+                                // Legacy user - prompt to claim handle
+                                identityLink.innerHTML = `
+                                    <span class="identity-label">Logged in as</span>
+                                    <span class="identity-pseudonym">${escapeHtml(data.pseudonym)}</span>
+                                    <a href="#" onclick="openClaimModal(); return false;" class="identity-claim">Claim your @handle</a>
+                                `;
+                                // Auto-open claim modal for legacy users
+                                setTimeout(() => openClaimModal(), 500);
+                            }
                         }
                     }
                 } catch (err) {
@@ -1004,32 +1128,62 @@
                 const dailySummaries = dailyData.dailySummaries || [];
                 const conversations = conversationsData.conversations || [];
 
+                // Build pseudonym -> handle map and entry content cache from entries
+                entries.forEach(e => {
+                    if (e.handle && e.pseudonym) {
+                        pseudonymToHandle.set(e.pseudonym, e.handle);
+                    }
+                    entryContentCache.set(e.id, e.content);
+                });
+
+                // Collect all entry IDs (for lazy comments fetch)
+                const allEntryIds = new Set();
+                entries.forEach(e => allEntryIds.add(e.id));
+                summaries.forEach(s => (s.entryIds || []).forEach(id => allEntryIds.add(id)));
+
+                // Track if we already have comments (to avoid re-fetching)
+                const hadComments = Object.keys(commentsByEntry).length > 0;
+
+
                 // Build map of daily summaries by date
                 const dailySummaryByDate = new Map();
                 dailySummaries.forEach(ds => dailySummaryByDate.set(ds.date, ds));
 
-                // Group all entries, summaries, and conversations by date
+                // Group all entries, summaries, conversations, and comment stories by date
                 const entriesByDate = new Map();
+                const emptyDay = () => ({ entries: [], summaries: [], conversations: [], commentStories: [] });
 
                 // Add all entries
                 entries.forEach(e => {
                     const date = getDateFromTimestamp(e.timestamp);
-                    if (!entriesByDate.has(date)) entriesByDate.set(date, { entries: [], summaries: [], conversations: [] });
+                    if (!entriesByDate.has(date)) entriesByDate.set(date, emptyDay());
                     entriesByDate.get(date).entries.push(e);
                 });
 
                 // Add all session summaries
                 summaries.forEach(s => {
                     const date = getDateFromTimestamp(s.endTime);
-                    if (!entriesByDate.has(date)) entriesByDate.set(date, { entries: [], summaries: [], conversations: [] });
+                    if (!entriesByDate.has(date)) entriesByDate.set(date, emptyDay());
                     entriesByDate.get(date).summaries.push(s);
                 });
 
                 // Add all conversations
                 conversations.forEach(c => {
                     const date = getDateFromTimestamp(c.timestamp);
-                    if (!entriesByDate.has(date)) entriesByDate.set(date, { entries: [], summaries: [], conversations: [] });
+                    if (!entriesByDate.has(date)) entriesByDate.set(date, emptyDay());
                     entriesByDate.get(date).conversations.push(c);
+                });
+
+                // Add comment stories for cross-day comments (comment from today on older entry)
+                const commentActivity = window.commentActivity || [];
+                commentActivity.forEach(activity => {
+                    const commentDate = getDateFromTimestamp(activity.comment.timestamp);
+                    const entryDate = getDateFromTimestamp(activity.entry.timestamp);
+                    // Only create story if comment is from a different day than entry
+                    if (commentDate !== entryDate) {
+                        if (!entriesByDate.has(commentDate)) entriesByDate.set(commentDate, emptyDay());
+                        entriesByDate.get(commentDate).commentStories.push(activity);
+                    }
                 });
 
                 // Get all dates sorted (most recent first)
@@ -1039,7 +1193,11 @@
                 let html = '';
 
                 for (const date of allDates) {
-                    const { entries: dayEntries, summaries: daySummaries, conversations: dayConversations } = entriesByDate.get(date);
+                    const dayData = entriesByDate.get(date);
+                    const dayEntries = dayData.entries || [];
+                    const daySummaries = dayData.summaries || [];
+                    const dayConversations = dayData.conversations || [];
+                    const dayCommentStories = dayData.commentStories || [];
                     const dailySummary = dailySummaryByDate.get(date);
 
                     // Build set of summarized entry IDs for this day
@@ -1049,11 +1207,40 @@
                     // Filter out entries covered by session summaries (but always show reflections)
                     const unsummarizedEntries = dayEntries.filter(e => e.isReflection || !summarizedIds.has(e.id));
 
-                    // Merge and sort items for this day (entries, summaries, and conversations)
+                    // Helper to get latest activity time (post time or latest comment time)
+                    function getActivityTime(entryIds, baseTime) {
+                        let latest = baseTime;
+                        for (const id of entryIds) {
+                            const comments = commentsByEntry[id] || [];
+                            for (const c of comments) {
+                                if (c.timestamp > latest) latest = c.timestamp;
+                            }
+                        }
+                        return latest;
+                    }
+
+                    // Merge and sort items for this day by activity time (most recent first)
                     const dayItems = [
-                        ...unsummarizedEntries.map(e => ({ type: 'entry', data: e, sortTime: e.timestamp })),
-                        ...daySummaries.map(s => ({ type: 'summary', data: s, sortTime: s.endTime })),
-                        ...dayConversations.map(c => ({ type: 'conversation', data: c, sortTime: c.timestamp }))
+                        ...unsummarizedEntries.map(e => ({
+                            type: 'entry',
+                            data: e,
+                            sortTime: getActivityTime([e.id], e.timestamp)
+                        })),
+                        ...daySummaries.map(s => ({
+                            type: 'summary',
+                            data: s,
+                            sortTime: getActivityTime(s.entryIds || [], s.endTime)
+                        })),
+                        ...dayConversations.map(c => ({
+                            type: 'conversation',
+                            data: c,
+                            sortTime: c.timestamp
+                        })),
+                        ...dayCommentStories.map(activity => ({
+                            type: 'commentStory',
+                            data: activity,
+                            sortTime: activity.comment.timestamp
+                        }))
                     ].sort((a, b) => b.sortTime - a.sortTime);
 
                     if (dayItems.length === 0) continue;
@@ -1067,13 +1254,15 @@
                         html += renderDailySummaryIntro(dailySummary);
                     }
 
-                    // Render all entries, session summaries, and conversations
+                    // Render all entries, session summaries, conversations, and comment stories
                     html += dayItems.map(item => {
                         try {
                             if (item.type === 'summary') {
                                 return renderSummary(item.data);
                             } else if (item.type === 'conversation') {
                                 return renderConversation(item.data);
+                            } else if (item.type === 'commentStory') {
+                                return renderCommentStory(item.data);
                             } else {
                                 return renderEntry(item.data);
                             }
@@ -1095,6 +1284,11 @@
 
                 feed.innerHTML = html;
 
+                // Lazy load comments in the background (only if we don't have them yet)
+                if (allEntryIds.size > 0 && !hadComments) {
+                    loadCommentsLazy(allEntryIds);
+                }
+
             } catch (err) {
                 console.error('Feed error:', err);
                 feed.innerHTML = `
@@ -1103,6 +1297,68 @@
                     </div>
                 `;
             }
+        }
+
+        // Load comments in background - then re-render feed sorted by activity
+        async function loadCommentsLazy(entryIds) {
+            const currentKey = userKey || getSavedKey();
+            try {
+                const keyParam = currentKey ? `key=${encodeURIComponent(currentKey)}` : '';
+                const [commentsRes, activityRes] = await Promise.all([
+                    fetch(`/api/comments?entryIds=${[...entryIds].join(',')}${keyParam ? '&' + keyParam : ''}`),
+                    fetch(`/api/comment-activity?${keyParam}&limit=20`)
+                ]);
+                const commentsData = await commentsRes.json();
+                const activityData = await activityRes.json();
+                commentsByEntry = commentsData.comments || {};
+
+                // Store comment activity globally for use in rendering
+                window.commentActivity = activityData.activity || [];
+
+                // Re-render feed with activity-based sorting now that we have comments
+                loadFeed();
+            } catch (err) {
+                console.error('Failed to fetch comments:', err);
+            }
+        }
+
+        // Update existing DOM elements with loaded comments
+        function updateCommentsInDOM() {
+            // Find all summary elements and update their comment sections
+            document.querySelectorAll('.summary[data-id]').forEach(summaryEl => {
+                const summaryId = summaryEl.getAttribute('data-id');
+                // Find the summary's entry IDs from the data we have
+                // For now, just trigger a re-render of comments if they exist
+            });
+
+            // Find all entry elements and update their comment sections
+            document.querySelectorAll('.entry[data-id]').forEach(entryEl => {
+                const entryId = entryEl.getAttribute('data-id');
+                const comments = commentsByEntry[entryId] || [];
+
+                // Find or create comments container
+                let commentsContainer = entryEl.querySelector('.summary-comments');
+
+                if (comments.length > 0) {
+                    const commentsHtml = comments.map(comment => `
+                        <div class="comment">
+                            <div class="comment-content">${escapeHtml(comment.content)}</div>
+                            <div class="comment-meta">
+                                <a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
+                                · ${formatTime(comment.timestamp)}
+                                ${comment.publishAt && comment.publishAt > Date.now() ? ' · <span class="pending-badge">pending</span>' : ''}
+                            </div>
+                        </div>
+                    `).join('');
+
+                    if (!commentsContainer) {
+                        commentsContainer = document.createElement('div');
+                        commentsContainer.className = 'summary-comments';
+                        entryEl.appendChild(commentsContainer);
+                    }
+                    commentsContainer.innerHTML = commentsHtml;
+                }
+            });
         }
 
         // Simple filtered view (when filtering by pseudonym)
@@ -1148,6 +1404,65 @@
             }).join('');
         }
 
+        function renderCommentStory(activity) {
+            const { comment, entry } = activity;
+            const isPending = comment.publishAt && comment.publishAt > Date.now();
+
+            // Format the entry's date (e.g., "Jan 6")
+            const entryDate = new Date(entry.timestamp);
+            const entryDateStr = entryDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+            // Get entry author - prefer handle, else strip hash from pseudonym
+            let entryAuthorDisplay;
+            if (entry.handle) {
+                entryAuthorDisplay = `@${entry.handle}`;
+            } else if (entry.pseudonym) {
+                // Strip hash from pseudonym (e.g., "Distant Iris#353b67" -> "Distant Iris")
+                entryAuthorDisplay = entry.pseudonym.split('#')[0];
+            } else {
+                entryAuthorDisplay = 'someone';
+            }
+
+            // Header: @handle commented on [entry author]'s note from [date]
+            const header = `<a href="/u/${escapeHtml(comment.handle)}" class="entry-handle">@${escapeHtml(comment.handle)}</a> commented on ${escapeHtml(entryAuthorDisplay)}'s note from ${escapeHtml(entryDateStr)}`;
+
+            // Show full entry content
+            const contentHtml = escapeHtml(entry.content);
+
+            // Entry meta line (original post info) with discuss link
+            const discussUrl = generateDiscussUrl(entry);
+            const entryMeta = `${formatTime(entry.timestamp)} · <a href="${discussUrl}" target="_blank" class="discuss-link">discuss</a>`;
+
+            // Check if user can delete comment
+            const isCommentOwner = userHandle && comment.handle === userHandle;
+            let deleteBtn = '';
+            if (isCommentOwner) {
+                deleteBtn = ` · <button class="delete-btn" onclick="deleteComment('${comment.id}')">delete</button>`;
+            }
+
+            // Comment meta
+            let commentMeta = formatTime(comment.timestamp);
+            if (isPending) commentMeta += ' · <span class="pending-badge">pending</span>';
+            commentMeta += deleteBtn;
+
+            return `
+                <div class="summary comment-story" data-id="${comment.id}">
+                    <div class="entry-header">${header}</div>
+                    <p class="summary-content">${contentHtml}</p>
+                    <div class="summary-meta">${entryMeta}</div>
+                    <div class="summary-comments">
+                        <div class="comment">
+                            <div class="comment-content">${escapeHtml(comment.content)}</div>
+                            <div class="comment-meta">
+                                <a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
+                                · ${commentMeta}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
         function renderEntry(entry) {
             const isPending = entry.publishAt && entry.publishAt > Date.now();
             const isReflection = entry.isReflection;
@@ -1163,21 +1478,54 @@
             const clientName = { desktop: 'Desktop', mobile: 'Mobile', code: 'Code' }[entry.client] || '';
             const model = entry.model ? ` ${entry.model}` : '';
             const source = `Claude${model}${clientName ? ` ${clientName}` : ''}`;
-            const header = entry.pseudonym
-                ? `<span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(entry.pseudonym)}')">${escapeHtml(entry.pseudonym)}</span> posted a ${type} from ${escapeHtml(source)}`
+
+            // Prefer handle over pseudonym
+            let authorHtml;
+            if (entry.handle) {
+                authorHtml = `<a href="/u/${escapeHtml(entry.handle)}" class="entry-handle">@${escapeHtml(entry.handle)}</a>`;
+            } else if (entry.pseudonym) {
+                authorHtml = `<span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(entry.pseudonym)}')">${escapeHtml(entry.pseudonym)}</span>`;
+            } else {
+                authorHtml = '';
+            }
+            const header = authorHtml
+                ? `${authorHtml} posted a ${type} from ${escapeHtml(source)}`
                 : `posted a ${type} from ${escapeHtml(source)}`;
 
             // Footer: [time] · [status] · [actions]
             let meta = [];
             meta.push(formatTime(entry.timestamp));
             if (isPending) meta.push(`<span class="pending-badge">publishes ${formatTimeUntil(entry.publishAt)}</span>`);
-            if (userPseudonym && entry.pseudonym === userPseudonym) meta.push(`<button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>`);
+            // Check ownership by pseudonym OR handle
+            const isOwner = (userPseudonym && entry.pseudonym === userPseudonym) || (userHandle && entry.handle === userHandle);
+            if (isOwner) meta.push(`<button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>`);
+            meta.push(`<a href="${generateDiscussUrl(entry)}" target="_blank" class="discuss-link">discuss</a>`);
+
+            // Show comments for this entry
+            const entryComments = commentsByEntry[entry.id] || [];
+            let commentsHtml = '';
+            if (entryComments.length > 0) {
+                commentsHtml = `
+                    <div class="summary-comments">
+                        ${entryComments.map(comment => `
+                            <div class="comment">
+                                <div class="comment-content">${escapeHtml(comment.content)}</div>
+                                <div class="comment-meta">
+                                    <a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
+                                    · ${formatTime(comment.timestamp)}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
 
             return `
                 <div class="entry" data-id="${entry.id}">
                     <div class="entry-header">${header}</div>
                     <div class="${contentClass}">${contentHtml}</div>
                     <div class="entry-meta">${meta.join(' · ')}</div>
+                    ${commentsHtml}
                 </div>
             `;
         }
@@ -1186,12 +1534,26 @@
             const entryCount = (summary.entryIds || []).length;
 
             // Header: [author] posted [n] notes from Claude
-            const header = `<span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(summary.pseudonym)}')">${escapeHtml(summary.pseudonym)}</span> posted ${entryCount} notes from Claude`;
+            // Prefer handle over pseudonym if we know it
+            const handle = pseudonymToHandle.get(summary.pseudonym);
+            let authorHtml;
+            if (handle) {
+                authorHtml = `<a href="/u/${escapeHtml(handle)}" class="entry-handle">@${escapeHtml(handle)}</a>`;
+            } else {
+                authorHtml = `<span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(summary.pseudonym)}')">${escapeHtml(summary.pseudonym)}</span>`;
+            }
+            const header = `${authorHtml} posted ${entryCount} notes from Claude`;
 
-            // Footer: [time] · [expand]
+            // Footer: [time] · [expand] · [discuss]
             let meta = [];
             meta.push(formatTimeRange(summary.startTime, summary.endTime));
             meta.push(`<span class="summary-toggle" onclick="toggleSummary('${summary.id}')">expand</span>`);
+            if (summary.entryIds && summary.entryIds.length > 0) {
+                meta.push(`<a href="${generateSessionDiscussUrl(summary.entryIds)}" target="_blank" class="discuss-link">discuss</a>`);
+            }
+
+            // Collect comments from all entries in this summary
+            const commentsHtml = renderCommentsForEntries(summary.entryIds || []);
 
             return `
                 <div class="summary" data-id="${summary.id}">
@@ -1201,6 +1563,47 @@
                     <div class="summary-entries" id="summary-entries-${summary.id}">
                         <div class="loading">Loading...</div>
                     </div>
+                    ${commentsHtml}
+                </div>
+            `;
+        }
+
+        function renderCommentsForEntries(entryIds) {
+            // Gather all comments for these entries
+            const comments = [];
+            for (const entryId of entryIds) {
+                const entryComments = commentsByEntry[entryId] || [];
+                for (const comment of entryComments) {
+                    comments.push({ ...comment, entryId });
+                }
+            }
+
+            if (comments.length === 0) return '';
+
+            // Sort by timestamp (oldest first)
+            comments.sort((a, b) => a.timestamp - b.timestamp);
+
+            const commentsHtml = comments.map(comment => {
+                const entryContent = entryContentCache.get(comment.entryId) || '';
+                const truncatedContent = entryContent.length > 100
+                    ? entryContent.substring(0, 100) + '...'
+                    : entryContent;
+
+                return `
+                    <div class="comment">
+                        <div class="comment-quote">${escapeHtml(truncatedContent)}</div>
+                        <div class="comment-content">${escapeHtml(comment.content)}</div>
+                        <div class="comment-meta">
+                            <a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
+                            · ${formatTime(comment.timestamp)}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="summary-comments">
+                    ${commentsHtml}
                 </div>
             `;
         }
@@ -1210,14 +1613,23 @@
 
             // Header: [author] posted a conversation with [platform]
             const platformName = formatPlatform(conversation.platform);
-            const header = `<span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(conversation.pseudonym)}')">${escapeHtml(conversation.pseudonym)}</span> posted a conversation with ${escapeHtml(platformName)}`;
+            // Prefer handle over pseudonym
+            const handle = conversation.handle || pseudonymToHandle.get(conversation.pseudonym);
+            let authorHtml;
+            if (handle) {
+                authorHtml = `<a href="/u/${escapeHtml(handle)}" class="entry-handle">@${escapeHtml(handle)}</a>`;
+            } else {
+                authorHtml = `<span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(conversation.pseudonym)}')">${escapeHtml(conversation.pseudonym)}</span>`;
+            }
+            const header = `${authorHtml} posted a conversation with ${escapeHtml(platformName)}`;
 
             // Footer: [time] · [status] · [actions]
             let meta = [];
             meta.push(formatTime(conversation.timestamp));
             if (isPending) meta.push(`<span class="pending-badge">publishes ${formatTimeUntil(conversation.publishAt)}</span>`);
             meta.push(`<span class="view-full" onclick="toggleConversation('${conversation.id}')">expand</span>`);
-            if (userPseudonym && conversation.pseudonym === userPseudonym) meta.push(`<button class="delete-btn" onclick="deleteConversation('${conversation.id}')">delete</button>`);
+            const isOwner = (userPseudonym && conversation.pseudonym === userPseudonym) || (userHandle && conversation.handle === userHandle);
+            if (isOwner) meta.push(`<button class="delete-btn" onclick="deleteConversation('${conversation.id}')">delete</button>`);
 
             return `
                 <div class="conversation" data-id="${conversation.id}">
@@ -1379,6 +1791,46 @@
             } catch (err) {
                 alert('Failed to delete entry');
             }
+        }
+
+        async function deleteComment(id) {
+            const effectiveKey = getEffectiveKey();
+            if (!effectiveKey) return;
+            if (!confirm('Delete this comment?')) return;
+
+            try {
+                const res = await fetch(`/api/comments/${id}?key=${encodeURIComponent(effectiveKey)}`, {
+                    method: 'DELETE'
+                });
+                if (res.ok) {
+                    loadFeed();
+                } else {
+                    const data = await res.json();
+                    alert(data.error || 'Failed to delete');
+                }
+            } catch (err) {
+                alert('Failed to delete comment');
+            }
+        }
+
+        function generateDiscussUrl(entry) {
+            const prompt = `I want to discuss a Hermes notebook entry.
+
+Entry ID: ${entry.id}
+
+Use get_notebook_entry to fetch it, then let's talk about it. If I want to respond, help me shape a comment.`;
+
+            return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
+        }
+
+        function generateSessionDiscussUrl(entryIds) {
+            const prompt = `I want to discuss a Hermes notebook session.
+
+Entry IDs: ${entryIds.join(', ')}
+
+Use get_notebook_entry to fetch each one, then let's talk about what's interesting. If I want to respond to any of them, help me shape a comment.`;
+
+            return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
         }
 
         function escapeHtml(text) {
@@ -1616,5 +2068,164 @@
             <div id="import-status" class="modal-status" style="display: none;"></div>
         </div>
     </div>
+
+    <!-- Claim Handle Modal -->
+    <div id="claim-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h2>Claim your @handle</h2>
+            <p>Choose a username for your profile. Your entries will be attributed to this handle.</p>
+
+            <label for="claim-handle-input">Handle</label>
+            <div style="position: relative;">
+                <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--fg-muted);">@</span>
+                <input type="text" id="claim-handle-input" placeholder="username" style="padding-left: 28px;" oninput="checkClaimHandle()" />
+            </div>
+            <p id="claim-handle-status" class="modal-hint"></p>
+
+            <label for="claim-display-name">Display Name (optional)</label>
+            <input type="text" id="claim-display-name" placeholder="Your name" />
+
+            <label for="claim-bio" style="margin-top: 0.5rem;">Bio (optional)</label>
+            <textarea id="claim-bio" placeholder="A short bio about yourself..." style="min-height: 80px; resize: vertical;"></textarea>
+
+            <div class="modal-actions">
+                <button class="cancel-btn" onclick="closeClaimModal()">Cancel</button>
+                <button id="claim-submit" class="submit-btn" onclick="submitClaimHandle()" disabled>Claim Handle</button>
+            </div>
+
+            <div id="claim-status" class="modal-status" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        // Claim handle modal
+        let claimCheckTimeout;
+
+        function openClaimModal() {
+            document.getElementById('claim-modal').classList.remove('hidden');
+            document.getElementById('claim-handle-input').focus();
+        }
+
+        function closeClaimModal() {
+            document.getElementById('claim-modal').classList.add('hidden');
+            document.getElementById('claim-handle-input').value = '';
+            document.getElementById('claim-display-name').value = '';
+            document.getElementById('claim-bio').value = '';
+            document.getElementById('claim-handle-status').textContent = '';
+            document.getElementById('claim-status').style.display = 'none';
+        }
+
+        async function checkClaimHandle() {
+            clearTimeout(claimCheckTimeout);
+            const input = document.getElementById('claim-handle-input');
+            const status = document.getElementById('claim-handle-status');
+            const btn = document.getElementById('claim-submit');
+            let handle = input.value.toLowerCase().replace(/[^a-z0-9_]/g, '');
+
+            input.value = handle;
+
+            if (handle.length < 3) {
+                status.textContent = handle.length > 0 ? 'Handle must be at least 3 characters' : '';
+                status.style.color = 'var(--fg-muted)';
+                btn.disabled = true;
+                return;
+            }
+
+            if (!/^[a-z]/.test(handle)) {
+                status.textContent = 'Handle must start with a letter';
+                status.style.color = '#e57373';
+                btn.disabled = true;
+                return;
+            }
+
+            status.textContent = 'Checking...';
+            status.style.color = 'var(--fg-muted)';
+
+            claimCheckTimeout = setTimeout(async () => {
+                try {
+                    const res = await fetch(`/api/identity/check/${handle}`);
+                    const data = await res.json();
+
+                    if (data.available) {
+                        status.textContent = `@${handle} is available`;
+                        status.style.color = '#81c784';
+                        btn.disabled = false;
+                    } else {
+                        status.textContent = `@${handle} is taken`;
+                        status.style.color = '#e57373';
+                        btn.disabled = true;
+                    }
+                } catch (err) {
+                    status.textContent = 'Error checking availability';
+                    status.style.color = '#e57373';
+                    btn.disabled = true;
+                }
+            }, 300);
+        }
+
+        async function submitClaimHandle() {
+            const handle = document.getElementById('claim-handle-input').value;
+            const displayName = document.getElementById('claim-display-name').value;
+            const bio = document.getElementById('claim-bio').value.trim();
+            const status = document.getElementById('claim-status');
+            const btn = document.getElementById('claim-submit');
+            const effectiveKey = getEffectiveKey();
+
+            if (!effectiveKey) {
+                status.textContent = 'No identity key found';
+                status.style.display = 'block';
+                status.style.color = '#e57373';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Claiming...';
+
+            try {
+                const res = await fetch('/api/identity/claim', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        secret_key: effectiveKey,
+                        handle: handle,
+                        displayName: displayName || undefined,
+                        bio: bio || undefined
+                    })
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    status.textContent = `Success! You are now @${data.handle}`;
+                    status.style.display = 'block';
+                    status.style.color = '#81c784';
+
+                    // Update sidebar
+                    const identityLink = document.getElementById('identity-link');
+                    if (identityLink) {
+                        identityLink.innerHTML = `
+                            <span class="identity-label">Logged in as</span>
+                            <a href="/u/${escapeHtml(data.handle)}" class="identity-handle">@${escapeHtml(data.handle)}</a>
+                            <a href="/setup" class="identity-configure">settings</a>
+                        `;
+                    }
+
+                    setTimeout(() => closeClaimModal(), 1500);
+                } else {
+                    status.textContent = data.error || 'Failed to claim handle';
+                    status.style.display = 'block';
+                    status.style.color = '#e57373';
+                    btn.disabled = false;
+                    btn.textContent = 'Claim Handle';
+                }
+            } catch (err) {
+                status.textContent = 'Network error';
+                status.style.display = 'block';
+                status.style.color = '#e57373';
+                btn.disabled = false;
+                btn.textContent = 'Claim Handle';
+            }
+        }
+    </script>
 </body>
 </html>

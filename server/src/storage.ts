@@ -10,7 +10,8 @@ import { getFirestore, Firestore } from 'firebase-admin/firestore';
 
 export interface JournalEntry {
   id: string;
-  pseudonym: string;
+  pseudonym: string;         // Legacy: "Quiet Feather#79c30b" (always present for display fallback)
+  handle?: string;           // New: "james" (without @) if user has claimed a handle
   client: 'desktop' | 'mobile' | 'code';
   content: string;
   timestamp: number;
@@ -50,6 +51,27 @@ export interface Conversation {
   timestamp: number;
   keywords: string[];        // Tokenized from content for search
   publishAt?: number;        // Staging delay (same as entries)
+}
+
+export interface User {
+  handle: string;            // @james (unique, primary key, stored without @)
+  secretKeyHash: string;     // SHA-256 hash of the secret key
+  displayName?: string;      // "James"
+  bio?: string;              // "Building things"
+  email?: string;            // For digest/messaging
+  links?: string[];          // External links (Twitter, website, etc.)
+  createdAt: number;
+  legacyPseudonym?: string;  // "Quiet Feather#79c30b" if migrated from old system
+}
+
+export interface Comment {
+  id: string;
+  entryId: string;           // The note being commented on
+  parentCommentId?: string;  // If replying to another comment (for threading)
+  handle: string;            // Author of the comment (without @)
+  content: string;           // Comment text (max 500 chars)
+  timestamp: number;
+  publishAt?: number;        // Staging delay
 }
 
 // Common stop words to exclude from search
@@ -93,6 +115,9 @@ export interface Storage {
   /** Get entries by pseudonym */
   getEntriesByPseudonym(pseudonym: string, limit?: number): Promise<JournalEntry[]>;
 
+  /** Get entries by handle */
+  getEntriesByHandle(handle: string, limit?: number): Promise<JournalEntry[]>;
+
   /** Search entries by keywords */
   searchEntries(query: string, limit?: number): Promise<JournalEntry[]>;
 
@@ -101,6 +126,28 @@ export interface Storage {
 
   /** Delete an entry by ID */
   deleteEntry(id: string): Promise<void>;
+
+  // ─────────────────────────────────────────────────────────────
+  // User methods
+  // ─────────────────────────────────────────────────────────────
+
+  /** Create a new user (register handle) */
+  createUser(user: Omit<User, 'createdAt'>): Promise<User>;
+
+  /** Get user by handle */
+  getUser(handle: string): Promise<User | null>;
+
+  /** Get user by secret key hash */
+  getUserByKeyHash(keyHash: string): Promise<User | null>;
+
+  /** Update user profile */
+  updateUser(handle: string, updates: Partial<Omit<User, 'handle' | 'secretKeyHash' | 'createdAt'>>): Promise<User | null>;
+
+  /** Check if handle is available */
+  isHandleAvailable(handle: string): Promise<boolean>;
+
+  /** Migrate entries from pseudonym to handle (when user claims handle) */
+  migrateEntriesToHandle(pseudonym: string, handle: string): Promise<number>;
 
   // ─────────────────────────────────────────────────────────────
   // Conversation methods
@@ -123,6 +170,22 @@ export interface Storage {
 
   /** Delete a conversation by ID */
   deleteConversation(id: string): Promise<void>;
+
+  // ─────────────────────────────────────────────────────────────
+  // Comment methods
+  // ─────────────────────────────────────────────────────────────
+
+  /** Add a comment to an entry */
+  addComment(comment: Omit<Comment, 'id'>): Promise<Comment>;
+
+  /** Get comments for an entry */
+  getCommentsForEntry(entryId: string): Promise<Comment[]>;
+
+  /** Get comments by handle */
+  getCommentsByHandle(handle: string, limit?: number): Promise<Comment[]>;
+
+  /** Delete a comment */
+  deleteComment(id: string): Promise<void>;
 }
 
 /**
@@ -130,6 +193,7 @@ export interface Storage {
  */
 export class MemoryStorage implements Storage {
   private entries: JournalEntry[] = [];
+  private users: Map<string, User> = new Map(); // handle -> User
   private nextId = 1;
 
   async addEntry(entry: Omit<JournalEntry, 'id'>): Promise<JournalEntry> {
@@ -155,6 +219,13 @@ export class MemoryStorage implements Storage {
       .slice(0, limit);
   }
 
+  async getEntriesByHandle(handle: string, limit = 50): Promise<JournalEntry[]> {
+    return this.entries
+      .filter(e => e.handle === handle)
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
+  }
+
   async getEntryCount(): Promise<number> {
     return this.entries.length;
   }
@@ -173,6 +244,57 @@ export class MemoryStorage implements Storage {
 
   async deleteEntry(id: string): Promise<void> {
     this.entries = this.entries.filter(e => e.id !== id);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // User methods
+  // ─────────────────────────────────────────────────────────────
+
+  async createUser(user: Omit<User, 'createdAt'>): Promise<User> {
+    const newUser: User = {
+      ...user,
+      createdAt: Date.now(),
+    };
+    this.users.set(user.handle, newUser);
+    return newUser;
+  }
+
+  async getUser(handle: string): Promise<User | null> {
+    return this.users.get(handle) || null;
+  }
+
+  async getUserByKeyHash(keyHash: string): Promise<User | null> {
+    for (const user of this.users.values()) {
+      if (user.secretKeyHash === keyHash) {
+        return user;
+      }
+    }
+    return null;
+  }
+
+  async updateUser(handle: string, updates: Partial<Omit<User, 'handle' | 'secretKeyHash' | 'createdAt'>>): Promise<User | null> {
+    const user = this.users.get(handle);
+    if (!user) return null;
+
+    const updated = { ...user, ...updates };
+    this.users.set(handle, updated);
+    return updated;
+  }
+
+  async isHandleAvailable(handle: string): Promise<boolean> {
+    return !this.users.has(handle);
+  }
+
+  async migrateEntriesToHandle(pseudonym: string, handle: string): Promise<number> {
+    let count = 0;
+    this.entries = this.entries.map(e => {
+      if (e.pseudonym === pseudonym) {
+        count++;
+        return { ...e, handle };
+      }
+      return e;
+    });
+    return count;
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -217,6 +339,38 @@ export class MemoryStorage implements Storage {
 
   async deleteConversation(id: string): Promise<void> {
     this.conversations = this.conversations.filter(c => c.id !== id);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Comment methods
+  // ─────────────────────────────────────────────────────────────
+
+  private comments: Comment[] = [];
+
+  async addComment(comment: Omit<Comment, 'id'>): Promise<Comment> {
+    const newComment: Comment = {
+      ...comment,
+      id: `c${this.nextId++}`,
+    };
+    this.comments.unshift(newComment);
+    return newComment;
+  }
+
+  async getCommentsForEntry(entryId: string): Promise<Comment[]> {
+    return this.comments
+      .filter(c => c.entryId === entryId)
+      .sort((a, b) => a.timestamp - b.timestamp); // oldest first for comments
+  }
+
+  async getCommentsByHandle(handle: string, limit = 50): Promise<Comment[]> {
+    return this.comments
+      .filter(c => c.handle === handle)
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
+  }
+
+  async deleteComment(id: string): Promise<void> {
+    this.comments = this.comments.filter(c => c.id !== id);
   }
 }
 
@@ -280,8 +434,16 @@ export class FirestoreStorage implements Storage {
       keywords,
     };
 
+    if (newEntry.handle) {
+      docData.handle = newEntry.handle;
+    }
+
     if (newEntry.isReflection) {
       docData.isReflection = true;
+    }
+
+    if (newEntry.model) {
+      docData.model = newEntry.model;
     }
 
     await this.db.collection(this.collection).doc(id).set(docData);
@@ -311,6 +473,20 @@ export class FirestoreStorage implements Storage {
     const snapshot = await this.db
       .collection(this.collection)
       .where('pseudonym', '==', pseudonym)
+      .orderBy('timestamp', 'desc')
+      .limit(limit)
+      .get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as JournalEntry));
+  }
+
+  async getEntriesByHandle(handle: string, limit = 50): Promise<JournalEntry[]> {
+    const snapshot = await this.db
+      .collection(this.collection)
+      .where('handle', '==', handle)
       .orderBy('timestamp', 'desc')
       .limit(limit)
       .get();
@@ -357,6 +533,91 @@ export class FirestoreStorage implements Storage {
       id: doc.id,
       ...doc.data(),
     } as JournalEntry));
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // User methods
+  // ─────────────────────────────────────────────────────────────
+
+  private usersCollection = 'users';
+
+  async createUser(user: Omit<User, 'createdAt'>): Promise<User> {
+    const newUser: User = {
+      ...user,
+      createdAt: Date.now(),
+    };
+
+    await this.db.collection(this.usersCollection).doc(user.handle).set({
+      secretKeyHash: newUser.secretKeyHash,
+      displayName: newUser.displayName || null,
+      bio: newUser.bio || null,
+      email: newUser.email || null,
+      links: newUser.links || [],
+      createdAt: newUser.createdAt,
+      legacyPseudonym: newUser.legacyPseudonym || null,
+    });
+
+    return newUser;
+  }
+
+  async getUser(handle: string): Promise<User | null> {
+    const doc = await this.db.collection(this.usersCollection).doc(handle).get();
+    if (!doc.exists) return null;
+    return {
+      handle: doc.id,
+      ...doc.data(),
+    } as User;
+  }
+
+  async getUserByKeyHash(keyHash: string): Promise<User | null> {
+    const snapshot = await this.db
+      .collection(this.usersCollection)
+      .where('secretKeyHash', '==', keyHash)
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) return null;
+    const doc = snapshot.docs[0];
+    return {
+      handle: doc.id,
+      ...doc.data(),
+    } as User;
+  }
+
+  async updateUser(handle: string, updates: Partial<Omit<User, 'handle' | 'secretKeyHash' | 'createdAt'>>): Promise<User | null> {
+    const userRef = this.db.collection(this.usersCollection).doc(handle);
+    const doc = await userRef.get();
+    if (!doc.exists) return null;
+
+    await userRef.update(updates);
+
+    const updated = await userRef.get();
+    return {
+      handle: updated.id,
+      ...updated.data(),
+    } as User;
+  }
+
+  async isHandleAvailable(handle: string): Promise<boolean> {
+    const doc = await this.db.collection(this.usersCollection).doc(handle).get();
+    return !doc.exists;
+  }
+
+  async migrateEntriesToHandle(pseudonym: string, handle: string): Promise<number> {
+    // Get all entries with this pseudonym
+    const snapshot = await this.db
+      .collection(this.collection)
+      .where('pseudonym', '==', pseudonym)
+      .get();
+
+    // Update each entry with the handle
+    const batch = this.db.batch();
+    snapshot.docs.forEach(doc => {
+      batch.update(doc.ref, { handle });
+    });
+
+    await batch.commit();
+    return snapshot.size;
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -579,6 +840,58 @@ export class FirestoreStorage implements Storage {
   async deleteConversation(id: string): Promise<void> {
     await this.db.collection(this.conversationsCollection).doc(id).delete();
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // Comment methods
+  // ─────────────────────────────────────────────────────────────
+
+  private commentsCollection = 'comments';
+
+  async addComment(comment: Omit<Comment, 'id'>): Promise<Comment> {
+    const id = generateEntryId();
+    const newComment: Comment = { ...comment, id };
+
+    await this.db.collection(this.commentsCollection).doc(id).set({
+      entryId: newComment.entryId,
+      handle: newComment.handle,
+      content: newComment.content,
+      timestamp: newComment.timestamp,
+      publishAt: newComment.publishAt,
+    });
+
+    return newComment;
+  }
+
+  async getCommentsForEntry(entryId: string): Promise<Comment[]> {
+    const snapshot = await this.db
+      .collection(this.commentsCollection)
+      .where('entryId', '==', entryId)
+      .orderBy('timestamp', 'asc')
+      .get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as Comment));
+  }
+
+  async getCommentsByHandle(handle: string, limit = 50): Promise<Comment[]> {
+    const snapshot = await this.db
+      .collection(this.commentsCollection)
+      .where('handle', '==', handle)
+      .orderBy('timestamp', 'desc')
+      .limit(limit)
+      .get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as Comment));
+  }
+
+  async deleteComment(id: string): Promise<void> {
+    await this.db.collection(this.commentsCollection).doc(id).delete();
+  }
 }
 
 /**
@@ -703,6 +1016,10 @@ export class StagedStorage implements Storage {
     return entries.sort((a, b) => b.timestamp - a.timestamp);
   }
 
+  async getEntriesByHandle(handle: string, limit = 50): Promise<JournalEntry[]> {
+    return this.published.getEntriesByHandle(handle, limit);
+  }
+
   async getEntryCount(): Promise<number> {
     const publishedCount = await this.published.getEntryCount();
     return publishedCount + this.pending.size;
@@ -738,6 +1055,34 @@ export class StagedStorage implements Storage {
       clearInterval(this.publishInterval);
       this.publishInterval = null;
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // User methods (delegated to FirestoreStorage)
+  // ─────────────────────────────────────────────────────────────
+
+  async createUser(user: Omit<User, 'createdAt'>): Promise<User> {
+    return this.published.createUser(user);
+  }
+
+  async getUser(handle: string): Promise<User | null> {
+    return this.published.getUser(handle);
+  }
+
+  async getUserByKeyHash(keyHash: string): Promise<User | null> {
+    return this.published.getUserByKeyHash(keyHash);
+  }
+
+  async updateUser(handle: string, updates: Partial<Omit<User, 'handle' | 'secretKeyHash' | 'createdAt'>>): Promise<User | null> {
+    return this.published.updateUser(handle, updates);
+  }
+
+  async isHandleAvailable(handle: string): Promise<boolean> {
+    return this.published.isHandleAvailable(handle);
+  }
+
+  async migrateEntriesToHandle(pseudonym: string, handle: string): Promise<number> {
+    return this.published.migrateEntriesToHandle(pseudonym, handle);
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -863,5 +1208,67 @@ export class StagedStorage implements Storage {
    */
   isConversationPending(id: string): boolean {
     return this.pendingConversations.has(id);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Comment methods (with staging support)
+  // ─────────────────────────────────────────────────────────────
+
+  private pendingComments: Map<string, Comment> = new Map();
+
+  async addComment(comment: Omit<Comment, 'id'>): Promise<Comment> {
+    const id = generateEntryId();
+    const publishAt = Date.now() + this.publishDelayMs;
+    const newComment: Comment = { ...comment, id, publishAt };
+
+    this.pendingComments.set(id, newComment);
+
+    // Schedule publishing
+    setTimeout(async () => {
+      if (this.pendingComments.has(id)) {
+        this.pendingComments.delete(id);
+        await this.published.addComment({ ...newComment, publishAt: undefined });
+      }
+    }, this.publishDelayMs);
+
+    return newComment;
+  }
+
+  async getCommentsForEntry(entryId: string): Promise<Comment[]> {
+    // Get both pending and published comments for this entry
+    const published = await this.published.getCommentsForEntry(entryId);
+    const pending: Comment[] = [];
+    for (const comment of this.pendingComments.values()) {
+      if (comment.entryId === entryId) {
+        pending.push(comment);
+      }
+    }
+    // Combine and sort by timestamp (oldest first for comments)
+    return [...published, ...pending].sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  async getCommentsByHandle(handle: string, limit = 50): Promise<Comment[]> {
+    const published = await this.published.getCommentsByHandle(handle, limit);
+    const pending: Comment[] = [];
+    for (const comment of this.pendingComments.values()) {
+      if (comment.handle === handle) {
+        pending.push(comment);
+      }
+    }
+    return [...pending, ...published]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
+  }
+
+  async deleteComment(id: string): Promise<void> {
+    if (this.pendingComments.has(id)) {
+      this.pendingComments.delete(id);
+      return;
+    }
+    await this.published.deleteComment(id);
+  }
+
+  isCommentPending(id: string): boolean {
+    return this.pendingComments.has(id);
   }
 }

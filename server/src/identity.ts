@@ -73,3 +73,31 @@ export function isValidSecretKey(key: string): boolean {
   if (key.length < 32 || key.length > 64) return false;
   return /^[A-Za-z0-9_-]+$/.test(key);
 }
+
+/**
+ * Hash a secret key for storage (full SHA-256 hash)
+ * Used to look up users by their secret key without storing the key itself
+ */
+export function hashSecretKey(secretKey: string): string {
+  return createHash('sha256').update(secretKey).digest('hex');
+}
+
+/**
+ * Validate a handle format (Twitter-style)
+ * - 3-15 characters
+ * - Lowercase alphanumeric and underscores only
+ * - Must start with a letter
+ */
+export function isValidHandle(handle: string): boolean {
+  if (typeof handle !== 'string') return false;
+  if (handle.length < 3 || handle.length > 15) return false;
+  // Must start with letter, then letters/numbers/underscores
+  return /^[a-z][a-z0-9_]*$/.test(handle);
+}
+
+/**
+ * Normalize a handle (lowercase, strip @ if present)
+ */
+export function normalizeHandle(handle: string): string {
+  return handle.toLowerCase().replace(/^@/, '');
+}

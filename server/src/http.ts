@@ -19,8 +19,8 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import Anthropic from '@anthropic-ai/sdk';
-import { derivePseudonym, generateSecretKey, isValidSecretKey } from './identity.js';
-import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary, type Conversation, tokenize } from './storage.js';
+import { derivePseudonym, generateSecretKey, isValidSecretKey, hashSecretKey, isValidHandle, normalizeHandle } from './identity.js';
+import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary, type Conversation, type User, tokenize } from './storage.js';
 import { scrapeConversation, detectPlatform, isValidShareUrl, ScrapeError } from './scraper.js';
 
 // Store active MCP sessions
@@ -150,7 +150,7 @@ Your job is to capture the texture of conversations WITHOUT exposing anything se
 
 AFTER WRITING
 
-Pay attention to conversations that feel significant—a breakthrough, a shift in perspective, something that clicked. If this feels like more than a quick note, ask the user if they'd like to memorialize it with a longer essay using write_intentional_essay_to_anonymous_shared_notebook.`;
+Pay attention to conversations that feel significant—a breakthrough, a shift in perspective, something that clicked. If this feels like more than a quick note, ask the user if they'd like to memorialize it with a longer essay using write_essay_to_shared_notebook.`;
 
 // Essay tool description
 export const ESSAY_TOOL_DESCRIPTION = `Write an essay to the shared notebook.
@@ -492,8 +492,13 @@ const MIME_TYPES: Record<string, string> = {
 // MCP SERVER FACTORY
 // ═══════════════════════════════════════════════════════════════
 
-function createMCPServer(secretKey: string) {
+async function createMCPServer(secretKey: string) {
   const pseudonym = derivePseudonym(secretKey);
+  const keyHash = hashSecretKey(secretKey);
+
+  // Look up user to get handle (may be null for legacy users)
+  const user = await storage.getUserByKeyHash(keyHash);
+  const handle = user?.handle || null;
 
   const server = new Server(
     { name: 'hermes', version: '0.1.0' },
@@ -503,6 +508,19 @@ function createMCPServer(secretKey: string) {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     // Build dynamic tool description with recent daily summaries
     let dynamicDescription = TOOL_DESCRIPTION;
+
+    // Add identity context to the description
+    if (handle) {
+      dynamicDescription = dynamicDescription.replace(
+        'Write to the shared notebook.',
+        `Write to the shared notebook.\n\nYou are posting as @${handle}.`
+      );
+    } else {
+      dynamicDescription = dynamicDescription.replace(
+        'Write to the shared notebook.',
+        `Write to the shared notebook.\n\nYou are posting as ${pseudonym}. Your human can claim a handle at hermes.ing/setup to unlock social features.`
+      );
+    }
 
     if (storage instanceof StagedStorage) {
       try {
@@ -521,7 +539,7 @@ function createMCPServer(secretKey: string) {
     return {
     tools: [
       {
-        name: 'write_ambient_blurb_to_anonymous_shared_notebook',
+        name: 'write_to_shared_notebook',
         description: dynamicDescription,
         inputSchema: {
           type: 'object',
@@ -559,18 +577,22 @@ function createMCPServer(secretKey: string) {
           properties: {
             query: {
               type: 'string',
-              description: 'Search query - keywords to find in notebook entries',
+              description: 'Search query - keywords to find in notebook entries. Optional if handle is provided.',
+            },
+            handle: {
+              type: 'string',
+              description: 'Filter to entries by this author (e.g. "james" without @). If provided without query, returns their recent entries.',
             },
             limit: {
               type: 'number',
               description: 'Maximum number of results to return (default 10)',
             },
           },
-          required: ['query'],
+          required: [],
         },
       },
       {
-        name: 'write_intentional_essay_to_anonymous_shared_notebook',
+        name: 'write_essay_to_shared_notebook',
         description: ESSAY_TOOL_DESCRIPTION,
         inputSchema: {
           type: 'object',
@@ -624,6 +646,42 @@ function createMCPServer(secretKey: string) {
           required: ['entry_id'],
         },
       },
+      {
+        name: 'comment_on_entry',
+        description: 'Post a comment on a notebook entry or reply to another comment. Use this when the user wants to respond to something in the notebook. The comment should reflect what the user expressed in conversation - not your own autonomous observations. Comments are threaded: use parent_comment_id to reply to a specific comment.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            entry_id: {
+              type: 'string',
+              description: 'The ID of the entry being discussed',
+            },
+            comment: {
+              type: 'string',
+              description: 'The comment text (max 500 characters). Should reflect what the user wants to say.',
+            },
+            parent_comment_id: {
+              type: 'string',
+              description: 'If replying to a specific comment, the ID of that comment. Omit for top-level comments on the entry.',
+            },
+          },
+          required: ['entry_id', 'comment'],
+        },
+      },
+      {
+        name: 'delete_comment',
+        description: 'Delete a comment you posted. Works for both pending comments (before they publish) and already-published comments.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            comment_id: {
+              type: 'string',
+              description: 'The comment ID returned when you posted',
+            },
+          },
+          required: ['comment_id'],
+        },
+      },
     ],
   };
   });
@@ -632,7 +690,7 @@ function createMCPServer(secretKey: string) {
     const { name, arguments: args } = request.params;
 
     // Handle write tool
-    if (name === 'write_ambient_blurb_to_anonymous_shared_notebook') {
+    if (name === 'write_to_shared_notebook') {
       const entry = (args as { entry?: string })?.entry;
       const client = (args as { client?: 'desktop' | 'mobile' | 'code' })?.client;
       const model = (args as { model?: string })?.model;
@@ -658,8 +716,13 @@ function createMCPServer(secretKey: string) {
         };
       }
 
+      // Look up handle fresh (user may have claimed one since connecting)
+      const currentUser = await storage.getUserByKeyHash(keyHash);
+      const currentHandle = currentUser?.handle || undefined;
+
       const saved = await storage.addEntry({
         pseudonym,
+        handle: currentHandle,
         client,
         content: entry.trim(),
         timestamp: Date.now(),
@@ -738,10 +801,24 @@ function createMCPServer(secretKey: string) {
       if (entry) {
         const date = new Date(entry.timestamp).toISOString().split('T')[0];
         const type = entry.isReflection ? 'reflection' : 'note';
+        const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
+
+        // Fetch any comments on this entry
+        const comments = await storage.getCommentsForEntry(entryId);
+        const publishedComments = comments.filter(c => !c.publishAt || c.publishAt <= Date.now());
+
+        let commentsText = '';
+        if (publishedComments.length > 0) {
+          commentsText = '\n\nComments:\n' + publishedComments.map(c => {
+            const replyPrefix = c.parentCommentId ? '  ↳ ' : '';
+            return `${replyPrefix}@${c.handle}: ${c.content}`;
+          }).join('\n');
+        }
+
         return {
           content: [{
             type: 'text' as const,
-            text: `[${date}] ${entry.pseudonym} posted a ${type}:\n\n${entry.content}`,
+            text: `[${date}] ${author} posted a ${type}:\n\n${entry.content}${commentsText}\n\nIf the user wants to respond to this, use comment_on_entry.`,
           }],
         };
       }
@@ -753,7 +830,7 @@ function createMCPServer(secretKey: string) {
         return {
           content: [{
             type: 'text' as const,
-            text: `[${date}] ${conversation.pseudonym} posted a conversation with ${formatPlatformName(conversation.platform)}:\n\nTitle: ${conversation.title}\n\nSummary: ${conversation.summary}\n\nFull conversation:\n${conversation.content}`,
+            text: `[${date}] ${conversation.pseudonym} posted a conversation with ${formatPlatformName(conversation.platform)}:\n\nTitle: ${conversation.title}\n\nSummary: ${conversation.summary}\n\nFull conversation:\n${conversation.content}\n\nIf the user wants to respond to this, use comment_on_entry.`,
           }],
         };
       }
@@ -766,25 +843,48 @@ function createMCPServer(secretKey: string) {
 
     // Handle search tool
     if (name === 'search_notebook') {
-      const query = (args as { query?: string })?.query;
+      const query = (args as { query?: string })?.query?.trim();
+      const handleFilter = (args as { handle?: string })?.handle?.replace(/^@/, '').toLowerCase();
       const limit = (args as { limit?: number })?.limit || 10;
 
-      if (!query || query.trim().length === 0) {
+      if (!query && !handleFilter) {
         return {
-          content: [{ type: 'text' as const, text: 'Search query cannot be empty.' }],
+          content: [{ type: 'text' as const, text: 'Provide either a search query or a handle to filter by.' }],
           isError: true,
         };
       }
 
-      // Search both entries and conversations in parallel
-      const [allEntryResults, allConversationResults] = await Promise.all([
-        storage.searchEntries(query.trim(), limit * 2),
-        storage.searchConversations(query.trim(), limit * 2),
-      ]);
+      let entryResults: JournalEntry[] = [];
+      let conversationResults: Conversation[] = [];
 
-      // Filter out own entries/conversations and merge
-      const entryResults = allEntryResults.filter(e => e.pseudonym !== pseudonym);
-      const conversationResults = allConversationResults.filter(c => c.pseudonym !== pseudonym);
+      if (handleFilter && !query) {
+        // Handle only: get recent entries by this author
+        entryResults = await storage.getEntriesByHandle(handleFilter, limit * 2);
+        // Also try by pseudonym in case they haven't migrated
+        if (entryResults.length === 0) {
+          const user = await storage.getUser(handleFilter);
+          if (user?.legacyPseudonym) {
+            entryResults = await storage.getEntriesByPseudonym(user.legacyPseudonym, limit * 2);
+          }
+        }
+      } else if (handleFilter && query) {
+        // Both: search then filter by author
+        const [searchEntries, searchConvos] = await Promise.all([
+          storage.searchEntries(query, limit * 4),
+          storage.searchConversations(query, limit * 4),
+        ]);
+        entryResults = searchEntries.filter(e => e.handle === handleFilter);
+        conversationResults = searchConvos.filter(c => c.pseudonym.toLowerCase().includes(handleFilter));
+      } else {
+        // Query only: keyword search
+        const [searchEntries, searchConvos] = await Promise.all([
+          storage.searchEntries(query!, limit * 2),
+          storage.searchConversations(query!, limit * 2),
+        ]);
+        // Filter out own entries/conversations
+        entryResults = searchEntries.filter(e => e.pseudonym !== pseudonym);
+        conversationResults = searchConvos.filter(c => c.pseudonym !== pseudonym);
+      }
 
       // Combine and sort by timestamp
       const combined: Array<{ type: 'entry' | 'conversation'; id: string; timestamp: number; text: string }> = [
@@ -792,7 +892,7 @@ function createMCPServer(secretKey: string) {
           type: 'entry' as const,
           id: e.id,
           timestamp: e.timestamp,
-          text: `[${new Date(e.timestamp).toISOString().split('T')[0]}] ${e.pseudonym}: ${e.content}`,
+          text: `[${new Date(e.timestamp).toISOString().split('T')[0]}] ${e.handle ? '@' + e.handle : e.pseudonym}: ${e.content}`,
         })),
         ...conversationResults.map(c => ({
           type: 'conversation' as const,
@@ -808,10 +908,13 @@ function createMCPServer(secretKey: string) {
         .slice(0, limit);
 
       if (results.length === 0) {
+        const searchDesc = handleFilter
+          ? (query ? `entries by @${handleFilter} matching "${query}"` : `entries by @${handleFilter}`)
+          : `entries matching "${query}"`;
         return {
           content: [{
             type: 'text' as const,
-            text: `No entries found matching "${query}".`,
+            text: `No ${searchDesc} found.`,
           }],
         };
       }
@@ -821,13 +924,13 @@ function createMCPServer(secretKey: string) {
       return {
         content: [{
           type: 'text' as const,
-          text: `Found ${results.length} results matching "${query}":\n\n${resultsText}\n\nUse get_notebook_entry with an ID to see full details.`,
+          text: `Found ${results.length} results matching "${query}":\n\n${resultsText}\n\nUse get_notebook_entry with an ID to see full details. If something resonates with the user, they can comment_on_entry to respond.`,
         }],
       };
     }
 
     // Handle essay tool
-    if (name === 'write_intentional_essay_to_anonymous_shared_notebook') {
+    if (name === 'write_essay_to_shared_notebook') {
       const reflection = (args as { reflection?: string })?.reflection;
       const client = (args as { client?: 'desktop' | 'mobile' | 'code' })?.client;
       const model = (args as { model?: string })?.model;
@@ -853,8 +956,13 @@ function createMCPServer(secretKey: string) {
         };
       }
 
+      // Look up handle fresh (user may have claimed one since connecting)
+      const essayUser = await storage.getUserByKeyHash(keyHash);
+      const essayHandle = essayUser?.handle || undefined;
+
       const saved = await storage.addEntry({
         pseudonym,
+        handle: essayHandle,
         client,
         content: reflection.trim(),
         timestamp: Date.now(),
@@ -869,6 +977,134 @@ function createMCPServer(secretKey: string) {
           type: 'text' as const,
           text: `Reflection posted (publishes in ${delayMinutes} minutes):\n\n${reflection.trim().slice(0, 200)}${reflection.length > 200 ? '...' : ''}\n\nEntry ID: ${saved.id}`,
         }],
+      };
+    }
+
+    // Handle comment tool
+    if (name === 'comment_on_entry') {
+      const entryId = (args as { entry_id?: string })?.entry_id;
+      const comment = (args as { comment?: string })?.comment;
+      const parentCommentId = (args as { parent_comment_id?: string })?.parent_comment_id;
+
+      if (!entryId) {
+        return {
+          content: [{ type: 'text' as const, text: 'Entry ID is required.' }],
+          isError: true,
+        };
+      }
+
+      if (!comment || comment.trim().length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: 'Comment cannot be empty.' }],
+          isError: true,
+        };
+      }
+
+      if (comment.length > 500) {
+        return {
+          content: [{ type: 'text' as const, text: 'Comment exceeds 500 character limit.' }],
+          isError: true,
+        };
+      }
+
+      // Look up handle fresh (user may have claimed one since connecting)
+      const commentUser = await storage.getUserByKeyHash(keyHash);
+      if (!commentUser?.handle) {
+        return {
+          content: [{ type: 'text' as const, text: 'You need a handle to comment. Ask your human to claim one at hermes.ing/setup.' }],
+          isError: true,
+        };
+      }
+
+      // Verify the entry exists
+      const entry = await storage.getEntry(entryId);
+      if (!entry) {
+        return {
+          content: [{ type: 'text' as const, text: `Entry not found: ${entryId}` }],
+          isError: true,
+        };
+      }
+
+      // Prevent commenting on own entries (but allow replying to comments on own entries)
+      if (entry.pseudonym === pseudonym && !parentCommentId) {
+        return {
+          content: [{ type: 'text' as const, text: 'You cannot comment on your own entries.' }],
+          isError: true,
+        };
+      }
+
+      // If replying to a comment, verify parent exists
+      if (parentCommentId) {
+        const parentComments = await storage.getCommentsForEntry(entryId);
+        const parentComment = parentComments.find(c => c.id === parentCommentId);
+        if (!parentComment) {
+          return {
+            content: [{ type: 'text' as const, text: `Parent comment not found: ${parentCommentId}` }],
+            isError: true,
+          };
+        }
+      }
+
+      const saved = await storage.addComment({
+        entryId,
+        parentCommentId: parentCommentId || undefined,
+        handle: commentUser.handle,
+        content: comment.trim(),
+        timestamp: Date.now(),
+      });
+
+      const delayMinutes = Math.round(STAGING_DELAY_MS / 1000 / 60);
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Comment posted (publishes in ${delayMinutes} minutes):\n\n"${comment.trim()}"\n\nComment ID: ${saved.id}`,
+        }],
+      };
+    }
+
+    // Handle delete comment tool
+    if (name === 'delete_comment') {
+      const commentId = (args as { comment_id?: string })?.comment_id;
+
+      if (!commentId) {
+        return {
+          content: [{ type: 'text' as const, text: 'Comment ID is required.' }],
+          isError: true,
+        };
+      }
+
+      // Look up the user's handle to verify ownership
+      const deleteUser = await storage.getUserByKeyHash(keyHash);
+      if (!deleteUser?.handle) {
+        return {
+          content: [{ type: 'text' as const, text: 'You need a handle to delete comments.' }],
+          isError: true,
+        };
+      }
+
+      // Get comments by this user's handle to verify ownership
+      const userComments = await storage.getCommentsByHandle(deleteUser.handle);
+      const commentToDelete = userComments.find(c => c.id === commentId);
+
+      if (!commentToDelete) {
+        return {
+          content: [{ type: 'text' as const, text: 'Comment not found or you can only delete your own comments.' }],
+          isError: true,
+        };
+      }
+
+      // Check if pending for message
+      const wasPending = 'isCommentPending' in storage && (storage as any).isCommentPending(commentId);
+
+      await storage.deleteComment(commentId);
+
+      const message = wasPending
+        ? `Deleted comment ${commentId}. It will not be published.`
+        : `Deleted comment ${commentId}. It has been removed from the public journal.`;
+
+      return {
+        content: [{ type: 'text' as const, text: message }],
       };
     }
 
@@ -1223,6 +1459,186 @@ const server = createServer(async (req, res) => {
       await storage.deleteConversation(conversationId);
       res.writeHead(200);
       res.end(JSON.stringify({ success: true }));
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // COMMENT ENDPOINTS
+    // ═══════════════════════════════════════════════════════════════
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/comments?entryIds=id1,id2,id3&key=KEY - Get comments for entries
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/comments') {
+      const entryIdsParam = url.searchParams.get('entryIds');
+      const key = url.searchParams.get('key');
+
+      if (!entryIdsParam) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'entryIds parameter required (comma-separated)' }));
+        return;
+      }
+
+      const entryIds = entryIdsParam.split(',').map(id => id.trim()).filter(Boolean);
+      if (entryIds.length === 0) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ comments: {} }));
+        return;
+      }
+
+      // Look up user's handle if key provided (to show their pending comments)
+      let userHandle: string | null = null;
+      if (key) {
+        const keyHash = hashSecretKey(key);
+        const user = await storage.getUserByKeyHash(keyHash);
+        userHandle = user?.handle || null;
+      }
+
+      // Fetch comments for each entry
+      const commentsByEntry: Record<string, any[]> = {};
+      for (const entryId of entryIds) {
+        const comments = await storage.getCommentsForEntry(entryId);
+        // Include published comments OR pending comments owned by this user
+        const visibleComments = comments.filter(c => {
+          const isPublished = !c.publishAt || c.publishAt <= Date.now();
+          const isOwnPending = userHandle && c.handle === userHandle;
+          return isPublished || isOwnPending;
+        });
+        if (visibleComments.length > 0) {
+          commentsByEntry[entryId] = visibleComments.map(c => ({
+            id: c.id,
+            parentCommentId: c.parentCommentId,
+            handle: c.handle,
+            content: c.content,
+            timestamp: c.timestamp,
+            publishAt: c.publishAt, // Include so frontend can show pending state
+          }));
+        }
+      }
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ comments: commentsByEntry }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/comments/:entryId - Get comments for a single entry
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/comments\/[^/]+$/)) {
+      const entryId = decodeURIComponent(url.pathname.slice('/api/comments/'.length));
+
+      const comments = await storage.getCommentsForEntry(entryId);
+      // Only include published comments
+      const publishedComments = comments.filter(c => !c.publishAt || c.publishAt <= Date.now());
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        entryId,
+        comments: publishedComments.map(c => ({
+          id: c.id,
+          parentCommentId: c.parentCommentId,
+          handle: c.handle,
+          content: c.content,
+          timestamp: c.timestamp,
+        })),
+      }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // DELETE /api/comments/:commentId?key=KEY - Delete a comment
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'DELETE' && url.pathname.match(/^\/api\/comments\/[^/]+$/)) {
+      const commentId = decodeURIComponent(url.pathname.slice('/api/comments/'.length));
+      const key = url.searchParams.get('key');
+
+      if (!key) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Authentication required' }));
+        return;
+      }
+
+      // Look up user by key
+      const keyHash = hashSecretKey(key);
+      const user = await storage.getUserByKeyHash(keyHash);
+
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'You need a handle to delete comments' }));
+        return;
+      }
+
+      // Get comments by this user's handle to verify ownership
+      const userComments = await storage.getCommentsByHandle(user.handle);
+      const commentToDelete = userComments.find(c => c.id === commentId);
+
+      if (!commentToDelete) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Comment not found or you can only delete your own comments' }));
+        return;
+      }
+
+      await storage.deleteComment(commentId);
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ success: true, deleted: commentId }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/comment-activity?key=KEY&limit=N - Get recent comment activity for feed
+    // Returns comments with their parent entry info for "X commented on Y" stories
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/comment-activity') {
+      const key = url.searchParams.get('key');
+      const limit = parseInt(url.searchParams.get('limit') || '20', 10);
+
+      // Look up user's handle if key provided (to show their pending comments)
+      let userHandle: string | null = null;
+      if (key) {
+        const keyHash = hashSecretKey(key);
+        const user = await storage.getUserByKeyHash(keyHash);
+        userHandle = user?.handle || null;
+      }
+
+      // Get all recent entries to find their comments
+      // This is a bit inefficient but works for now
+      const entries = await storage.getEntries(100);
+      const activity: any[] = [];
+
+      for (const entry of entries) {
+        const comments = await storage.getCommentsForEntry(entry.id);
+        for (const comment of comments) {
+          const isPublished = !comment.publishAt || comment.publishAt <= Date.now();
+          const isOwnPending = userHandle && comment.handle === userHandle;
+          if (isPublished || isOwnPending) {
+            activity.push({
+              type: 'comment',
+              comment: {
+                id: comment.id,
+                handle: comment.handle,
+                content: comment.content,
+                timestamp: comment.timestamp,
+                publishAt: comment.publishAt,
+                parentCommentId: comment.parentCommentId,
+              },
+              entry: {
+                id: entry.id,
+                handle: entry.handle,
+                pseudonym: entry.pseudonym,
+                content: entry.content,
+                timestamp: entry.timestamp,
+              },
+            });
+          }
+        }
+      }
+
+      // Sort by comment timestamp, newest first
+      activity.sort((a, b) => b.comment.timestamp - a.comment.timestamp);
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ activity: activity.slice(0, limit) }));
       return;
     }
 
@@ -1594,7 +2010,7 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // POST /api/identity/lookup - Get pseudonym for a key
+    // POST /api/identity/lookup - Get pseudonym and handle for a key
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'POST' && url.pathname === '/api/identity/lookup') {
       const body = await readBody(req);
@@ -1607,9 +2023,354 @@ const server = createServer(async (req, res) => {
       }
 
       const pseudonym = derivePseudonym(secret_key);
+      const keyHash = hashSecretKey(secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
 
       res.writeHead(200);
-      res.end(JSON.stringify({ pseudonym }));
+      res.end(JSON.stringify({
+        pseudonym,
+        handle: user?.handle || null,
+        displayName: user?.displayName || null,
+        hasAccount: !!user,
+      }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/identity/check/:handle - Check if handle is available
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname.startsWith('/api/identity/check/')) {
+      const handle = normalizeHandle(url.pathname.split('/').pop() || '');
+
+      if (!isValidHandle(handle)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({
+          error: 'Invalid handle format. Use 3-15 lowercase letters, numbers, and underscores. Must start with a letter.',
+          available: false,
+        }));
+        return;
+      }
+
+      const available = await storage.isHandleAvailable(handle);
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ handle, available }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/identity/register - Register new handle for new user
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/identity/register') {
+      const body = await readBody(req);
+      const { secret_key, handle: rawHandle, displayName, bio, email } = JSON.parse(body);
+
+      // Validate secret key
+      if (!isValidSecretKey(secret_key)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid identity key' }));
+        return;
+      }
+
+      // Normalize and validate handle
+      const handle = normalizeHandle(rawHandle || '');
+      if (!isValidHandle(handle)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({
+          error: 'Invalid handle format. Use 3-15 lowercase letters, numbers, and underscores. Must start with a letter.',
+        }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(secret_key);
+
+      // Check if this key already has an account
+      const existingUser = await storage.getUserByKeyHash(keyHash);
+      if (existingUser) {
+        res.writeHead(409);
+        res.end(JSON.stringify({
+          error: 'This key already has an account',
+          handle: existingUser.handle,
+        }));
+        return;
+      }
+
+      // Check if handle is available
+      if (!(await storage.isHandleAvailable(handle))) {
+        res.writeHead(409);
+        res.end(JSON.stringify({ error: 'Handle is already taken' }));
+        return;
+      }
+
+      // Create user
+      const user = await storage.createUser({
+        handle,
+        secretKeyHash: keyHash,
+        displayName: displayName || undefined,
+        bio: bio || undefined,
+        email: email || undefined,
+      });
+
+      const pseudonym = derivePseudonym(secret_key);
+
+      res.writeHead(201);
+      res.end(JSON.stringify({
+        handle: user.handle,
+        displayName: user.displayName,
+        pseudonym,
+        message: 'Account created successfully',
+      }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/identity/claim - Claim handle for existing pseudonym (migrate)
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/identity/claim') {
+      const body = await readBody(req);
+      const { secret_key, handle: rawHandle, displayName, bio, email } = JSON.parse(body);
+
+      // Validate secret key
+      if (!isValidSecretKey(secret_key)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid identity key' }));
+        return;
+      }
+
+      // Normalize and validate handle
+      const handle = normalizeHandle(rawHandle || '');
+      if (!isValidHandle(handle)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({
+          error: 'Invalid handle format. Use 3-15 lowercase letters, numbers, and underscores. Must start with a letter.',
+        }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(secret_key);
+      const pseudonym = derivePseudonym(secret_key);
+
+      // Check if this key already has an account
+      const existingUser = await storage.getUserByKeyHash(keyHash);
+      if (existingUser) {
+        res.writeHead(409);
+        res.end(JSON.stringify({
+          error: 'This key already has an account',
+          handle: existingUser.handle,
+        }));
+        return;
+      }
+
+      // Check if handle is available
+      if (!(await storage.isHandleAvailable(handle))) {
+        res.writeHead(409);
+        res.end(JSON.stringify({ error: 'Handle is already taken' }));
+        return;
+      }
+
+      // Create user with legacy pseudonym
+      const user = await storage.createUser({
+        handle,
+        secretKeyHash: keyHash,
+        displayName: displayName || undefined,
+        bio: bio || undefined,
+        email: email || undefined,
+        legacyPseudonym: pseudonym,
+      });
+
+      // Migrate existing entries to the new handle
+      const migratedCount = await storage.migrateEntriesToHandle(pseudonym, handle);
+
+      res.writeHead(201);
+      res.end(JSON.stringify({
+        handle: user.handle,
+        displayName: user.displayName,
+        legacyPseudonym: pseudonym,
+        migratedEntries: migratedCount,
+        message: `Account created and ${migratedCount} entries migrated`,
+      }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/identity/update - Update profile (bio, displayName, links)
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/identity/update') {
+      const body = await readBody(req);
+      const { secret_key, displayName, bio, links } = JSON.parse(body);
+
+      if (!isValidSecretKey(secret_key)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid identity key' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+
+      if (!user) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'No account found for this key. Claim a handle first.' }));
+        return;
+      }
+
+      // Build update object with only provided fields
+      const updates: Partial<{ displayName: string; bio: string; links: string[] }> = {};
+      if (displayName !== undefined) updates.displayName = displayName;
+      if (bio !== undefined) updates.bio = bio;
+      if (links !== undefined) updates.links = links;
+
+      const updated = await storage.updateUser(user.handle, updates);
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        handle: updated?.handle,
+        displayName: updated?.displayName,
+        bio: updated?.bio,
+        links: updated?.links,
+        message: 'Profile updated',
+      }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/identity/migrate - Re-run entry migration to handle
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/identity/migrate') {
+      const body = await readBody(req);
+      const { secret_key } = JSON.parse(body);
+
+      if (!isValidSecretKey(secret_key)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid identity key' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+
+      if (!user) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'No account found. Claim a handle first.' }));
+        return;
+      }
+
+      if (!user.legacyPseudonym) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'No legacy pseudonym to migrate from' }));
+        return;
+      }
+
+      const migratedCount = await storage.migrateEntriesToHandle(user.legacyPseudonym, user.handle);
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        handle: user.handle,
+        legacyPseudonym: user.legacyPseudonym,
+        migratedEntries: migratedCount,
+        message: `${migratedCount} entries migrated to @${user.handle}`,
+      }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/users/:handle - Get public profile
+    // ─────────────────────────────────────────────────────────────
+    const userProfileMatch = url.pathname.match(/^\/api\/users\/([^/]+)$/);
+    if (req.method === 'GET' && userProfileMatch) {
+      const handle = normalizeHandle(userProfileMatch[1]);
+
+      if (!handle) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Handle required' }));
+        return;
+      }
+
+      const user = await storage.getUser(handle);
+      if (!user) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'User not found' }));
+        return;
+      }
+
+      // Get recent entries
+      const entries = await storage.getEntriesByHandle(handle, 10);
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        handle: user.handle,
+        displayName: user.displayName,
+        bio: user.bio,
+        links: user.links,
+        createdAt: user.createdAt,
+        recentEntries: entries.map(e => ({
+          id: e.id,
+          content: e.content,
+          timestamp: e.timestamp,
+          isReflection: e.isReflection,
+        })),
+      }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/users/:handle/entries - Get all entries by handle
+    // ─────────────────────────────────────────────────────────────
+    const entriesByHandleMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/entries$/);
+    if (req.method === 'GET' && entriesByHandleMatch) {
+      const handle = normalizeHandle(entriesByHandleMatch[1]);
+      const limit = parseInt(url.searchParams.get('limit') || '100', 10);
+
+      if (!handle) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Handle required' }));
+        return;
+      }
+
+      const user = await storage.getUser(handle);
+      if (!user) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'User not found' }));
+        return;
+      }
+
+      // Fetch entries by handle AND by legacy pseudonym (if they have one)
+      let entries: JournalEntry[] = [];
+      try {
+        entries = await storage.getEntriesByHandle(handle, limit);
+      } catch (e) {
+        // Index might not exist yet, continue with pseudonym lookup
+        console.error('getEntriesByHandle failed:', e);
+      }
+
+      // Also fetch by legacy pseudonym and merge
+      if (user.legacyPseudonym) {
+        const pseudonymEntries = await storage.getEntriesByPseudonym(user.legacyPseudonym, limit);
+        // Merge, dedupe by id, sort by timestamp desc
+        const allEntries = [...entries, ...pseudonymEntries];
+        const seen = new Set<string>();
+        entries = allEntries
+          .filter(e => {
+            if (seen.has(e.id)) return false;
+            seen.add(e.id);
+            return true;
+          })
+          .sort((a, b) => b.timestamp - a.timestamp)
+          .slice(0, limit);
+      }
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        handle,
+        entries: entries.map(e => ({
+          id: e.id,
+          content: e.content,
+          timestamp: e.timestamp,
+          isReflection: e.isReflection,
+          client: e.client,
+          model: e.model,
+        })),
+      }));
       return;
     }
 
@@ -1626,7 +2387,7 @@ const server = createServer(async (req, res) => {
       }
 
       // Create MCP server and transport - let transport handle headers
-      const mcpServer = createMCPServer(secretKey);
+      const mcpServer = await createMCPServer(secretKey);
       const transport = new SSEServerTransport('/mcp/messages', res as any);
 
       // Store session by transport's generated sessionId
@@ -1809,6 +2570,11 @@ const server = createServer(async (req, res) => {
       // Map routes to HTML files
       if (['/setup', '/prompt'].includes(filePath)) {
         filePath = `${filePath}.html`;
+      }
+
+      // Profile pages: /u/:handle -> profile.html
+      if (filePath.startsWith('/u/')) {
+        filePath = '/profile.html';
       }
 
       const fullPath = join(STATIC_DIR, filePath);

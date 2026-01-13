@@ -492,13 +492,18 @@ const MIME_TYPES: Record<string, string> = {
 // MCP SERVER FACTORY
 // ═══════════════════════════════════════════════════════════════
 
-async function createMCPServer(secretKey: string) {
+function createMCPServer(secretKey: string) {
   const pseudonym = derivePseudonym(secretKey);
   const keyHash = hashSecretKey(secretKey);
 
-  // Look up user to get handle (may be null for legacy users)
-  const user = await storage.getUserByKeyHash(keyHash);
-  const handle = user?.handle || null;
+  // Cache for lazy user lookup (avoids blocking SSE connection)
+  let cachedUser: User | null | undefined = undefined;
+  async function getHandle(): Promise<string | null> {
+    if (cachedUser === undefined) {
+      cachedUser = await storage.getUserByKeyHash(keyHash);
+    }
+    return cachedUser?.handle || null;
+  }
 
   const server = new Server(
     { name: 'hermes', version: '0.1.0' },
@@ -509,7 +514,8 @@ async function createMCPServer(secretKey: string) {
     // Build dynamic tool description with recent daily summaries
     let dynamicDescription = TOOL_DESCRIPTION;
 
-    // Add identity context to the description
+    // Add identity context to the description (lazy lookup)
+    const handle = await getHandle();
     if (handle) {
       dynamicDescription = dynamicDescription.replace(
         'Write to the shared notebook.',
@@ -2387,7 +2393,7 @@ const server = createServer(async (req, res) => {
       }
 
       // Create MCP server and transport - let transport handle headers
-      const mcpServer = await createMCPServer(secretKey);
+      const mcpServer = createMCPServer(secretKey);
       const transport = new SSEServerTransport('/mcp/messages', res as any);
 
       // Store session by transport's generated sessionId

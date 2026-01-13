@@ -496,6 +496,16 @@ function createMCPServer(secretKey: string) {
   const pseudonym = derivePseudonym(secretKey);
   const keyHash = hashSecretKey(secretKey);
 
+  // Lazy lookup of handle - only computed when tools are listed/called
+  async function getHandle(): Promise<string | null> {
+    try {
+      const user = await storage.getUserByKeyHash(keyHash);
+      return user?.handle || null;
+    } catch {
+      return null;
+    }
+  }
+
   const server = new Server(
     { name: 'hermes', version: '0.1.0' },
     { capabilities: { tools: {} } }
@@ -504,6 +514,20 @@ function createMCPServer(secretKey: string) {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     // Build dynamic tool description with recent daily summaries
     let dynamicDescription = TOOL_DESCRIPTION;
+
+    // Add identity context to the description (lazy lookup)
+    const handle = await getHandle();
+    if (handle) {
+      dynamicDescription = dynamicDescription.replace(
+        'Write to the shared notebook.',
+        `Write to the shared notebook.\n\nYou are posting as @${handle}.`
+      );
+    } else {
+      dynamicDescription = dynamicDescription.replace(
+        'Write to the shared notebook.',
+        `Write to the shared notebook.\n\nYou are posting as ${pseudonym}. Your human can claim a handle at the setup page to unlock social features.`
+      );
+    }
 
     if (storage instanceof StagedStorage) {
       try {

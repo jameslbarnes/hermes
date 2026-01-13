@@ -102,6 +102,10 @@ jobs:
           BASE_URL: ${{ secrets.BASE_URL }}
           ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SENDGRID_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          FIRECRAWL_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+          NAMECHEAP_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
+          NAMECHEAP_IP: ${{ secrets.NAMECHEAP_CLIENT_IP }}
+          NAMECHEAP_USER: ${{ secrets.NAMECHEAP_USERNAME }}
         run: |
           # Generate compose file with image tag (no secrets - just reference vars)
           export GIT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
@@ -114,6 +118,10 @@ jobs:
           echo "BASE_URL=$BASE_URL" >> .env.deploy
           echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY" >> .env.deploy
           echo "SENDGRID_API_KEY=$SENDGRID_KEY" >> .env.deploy
+          echo "FIRECRAWL_API_KEY=$FIRECRAWL_KEY" >> .env.deploy
+          echo "NAMECHEAP_API_KEY=$NAMECHEAP_KEY" >> .env.deploy
+          echo "NAMECHEAP_CLIENT_IP=$NAMECHEAP_IP" >> .env.deploy
+          echo "NAMECHEAP_USERNAME=$NAMECHEAP_USER" >> .env.deploy
 
           # Debug: show env file structure (lengths only, not values)
           echo "Env file created with $(wc -l < .env.deploy) lines"

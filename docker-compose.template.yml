@@ -8,9 +8,34 @@ services:
     environment:
       - PORT=3000
       - STAGING_DELAY_MS=3600000
-      # These vars are passed via --env-file (encrypted by phala CLI)
       - BASE_URL=${BASE_URL}
       - FIREBASE_SERVICE_ACCOUNT_BASE64=${FIREBASE_SERVICE_ACCOUNT_BASE64}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+      - NAMECHEAP_API_KEY=${NAMECHEAP_API_KEY}
+      - NAMECHEAP_CLIENT_IP=${NAMECHEAP_CLIENT_IP}
     restart: unless-stopped
+
+  dstack-ingress:
+    image: socrates1024/dstack-ingress:20251231-namecheap-fix@sha256:a11cdeaa58efc75f83d294bbfd54f599ddf29ae6926152389bce2f3710d4cfe6
+    ports:
+      - "443:443"
+    environment:
+      - DOMAIN=hermes.teleport.computer
+      - DNS_PROVIDER=namecheap
+      - NAMECHEAP_USERNAME=${NAMECHEAP_USERNAME}
+      - NAMECHEAP_API_KEY=${NAMECHEAP_API_KEY}
+      - NAMECHEAP_CLIENT_IP=${NAMECHEAP_CLIENT_IP}
+      - GATEWAY_DOMAIN=_.dstack-pha-prod9.phala.network
+      - CERTBOT_EMAIL=james@generalsemantics.nyc
+      - SET_CAA=false
+      - TARGET_ENDPOINT=http://hermes:3000
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - cert-data:/etc/letsencrypt
+    depends_on:
+      - hermes
+    restart: unless-stopped
+
+volumes:
+  cert-data:

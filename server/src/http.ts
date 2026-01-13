@@ -2627,6 +2627,61 @@ function readBody(req: import('http').IncomingMessage): Promise<string> {
 // START
 // ═══════════════════════════════════════════════════════════════
 
+// Fix DNS records on startup (dstack-ingress may have overwritten them)
+async function fixDnsOnStartup() {
+  const apiKey = process.env.NAMECHEAP_API_KEY;
+  const clientIp = process.env.NAMECHEAP_CLIENT_IP;
+
+  if (!apiKey || !clientIp) {
+    console.log('DNS fix: Namecheap credentials not configured, skipping');
+    return;
+  }
+
+  // Wait for dstack-ingress to finish its DNS setup
+  console.log('DNS fix: Waiting 30s for dstack-ingress to settle...');
+  await new Promise(resolve => setTimeout(resolve, 30000));
+
+  try {
+    console.log('DNS fix: Setting correct DNS records...');
+    const params = new URLSearchParams({
+      ApiUser: 'sxysun9',
+      ApiKey: apiKey,
+      UserName: 'sxysun9',
+      ClientIp: clientIp,
+      Command: 'namecheap.domains.dns.setHosts',
+      SLD: 'teleport',
+      TLD: 'computer',
+      HostName1: 'tee',
+      RecordType1: 'A',
+      Address1: '98.89.30.212',
+      TTL1: '1799',
+      HostName2: 'hermes',
+      RecordType2: 'CNAME',
+      Address2: 'db82f581256a3c9244c4d7129a67336990d08cdf-3000.dstack-pha-prod9.phala.network',
+      TTL2: '60',
+      HostName3: '_dstack-app-address.hermes',
+      RecordType3: 'TXT',
+      Address3: 'db82f581256a3c9244c4d7129a67336990d08cdf:443',
+      TTL3: '60',
+      HostName4: '_tapp-address.hermes',
+      RecordType4: 'TXT',
+      Address4: 'db82f581256a3c9244c4d7129a67336990d08cdf:443',
+      TTL4: '60',
+    });
+
+    const response = await fetch(`https://api.namecheap.com/xml.response?${params.toString()}`);
+    const xml = await response.text();
+    if (xml.includes('IsSuccess="true"')) {
+      console.log('DNS fix: Successfully set DNS records');
+    } else {
+      console.error('DNS fix: API returned error:', xml.slice(0, 500));
+    }
+  } catch (err) {
+    console.error('DNS fix: Failed to set DNS records:', err);
+  }
+}
+
 server.listen(PORT, () => {
   console.log(`Hermes server running on port ${PORT}`);
+  fixDnsOnStartup();
 });

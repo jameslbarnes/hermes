@@ -207,7 +207,7 @@ const notificationService: NotificationService = createNotificationService({
   storage,
   resend,
   anthropic,
-  fromEmail: process.env.RESEND_FROM_EMAIL || 'notify@teleport.computer',
+  fromEmail: process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev',  // TODO: change to notify@teleport.computer once MX record is set
   baseUrl: BASE_URL,
   jwtSecret: process.env.JWT_SECRET || 'hermes-default-secret-change-in-production',
 });

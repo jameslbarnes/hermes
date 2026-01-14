@@ -180,7 +180,7 @@
         }
 
         .entry {
-            padding: 1.5rem 0;
+            padding: 2rem 0;
             border-bottom: 1px solid var(--border);
         }
 
@@ -195,6 +195,7 @@
         .entry-content {
             font-size: 1.15rem;
             line-height: 1.75;
+            color: var(--fg);
         }
 
         .entry-meta {
@@ -223,6 +224,217 @@
         .delete-btn:hover {
             color: #e53935;
             background: rgba(229, 57, 53, 0.1);
+        }
+
+        .discuss-link {
+            color: var(--accent);
+            text-decoration: none;
+            opacity: 0.85;
+        }
+
+        .discuss-link:hover {
+            text-decoration: underline;
+            opacity: 1;
+        }
+
+        /* Comments */
+        .comments-section {
+            margin-top: 1rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .comment {
+            margin-bottom: 0.75rem;
+        }
+
+        .comment:last-child {
+            margin-bottom: 0;
+        }
+
+        .comment-content {
+            font-size: 0.95rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .comment-meta {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            color: var(--fg-muted);
+            margin-top: 0.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .comment-handle {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .comment-handle:hover {
+            text-decoration: underline;
+        }
+
+        .comment-form {
+            margin-top: 0.75rem;
+            position: relative;
+        }
+
+        .comment-form textarea {
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            font-family: 'Newsreader', Georgia, serif;
+            font-size: 0.9rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--fg);
+            resize: none;
+            line-height: 1.5;
+        }
+
+        .comment-form textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .comment-form::after {
+            content: '↵';
+            position: absolute;
+            right: 0.5rem;
+            bottom: 0.35rem;
+            color: var(--fg-muted);
+            font-size: 1.1rem;
+            pointer-events: none;
+            opacity: 0.4;
+        }
+
+        .avatar {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.5rem;
+            height: 1.5rem;
+            border-radius: 50%;
+            color: white;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            font-weight: 500;
+            vertical-align: middle;
+            margin-right: 0.35rem;
+        }
+
+        .avatar-small {
+            width: 1.1rem;
+            height: 1.1rem;
+            font-size: 0.6rem;
+            margin-right: 0.25rem;
+        }
+
+        /* Summary styles */
+        .summary {
+            padding: 2rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .summary-header {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--fg-muted);
+            margin-bottom: 0.75rem;
+            letter-spacing: 0.02em;
+            display: flex;
+            align-items: center;
+        }
+
+        .summary-content {
+            font-size: 1.15rem;
+            line-height: 1.75;
+            color: var(--fg);
+        }
+
+        .summary-meta {
+            margin-top: 0.75rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--fg-muted);
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .summary-toggle {
+            color: var(--accent);
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .summary-toggle:hover {
+            opacity: 0.7;
+            text-decoration: underline;
+        }
+
+        .summary-entries {
+            display: none;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .summary-entries.visible {
+            display: block;
+        }
+
+        .summary-entries .entry {
+            padding: 0.75rem 0;
+        }
+
+        .summary-entries .entry:first-child {
+            padding-top: 0;
+        }
+
+        .summary-entries .entry-content {
+            font-size: 0.95rem;
+            line-height: 1.6;
+            color: var(--fg-muted);
+        }
+
+        /* Day headers */
+        .day-header {
+            display: flex;
+            align-items: baseline;
+            gap: 1rem;
+            padding: 3rem 0 1.5rem 0;
+        }
+
+        .day-header:first-child {
+            padding-top: 0;
+        }
+
+        .day-header-text {
+            font-family: 'Newsreader', Georgia, serif;
+            font-size: 1.75rem;
+            font-weight: 500;
+            font-style: italic;
+            color: var(--fg);
+            white-space: nowrap;
+        }
+
+        .day-header-date {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--fg-muted);
+            white-space: nowrap;
+        }
+
+        .day-header-line {
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+            align-self: center;
         }
 
         /* Reflection styles */
@@ -340,6 +552,27 @@
             color: var(--accent);
         }
 
+        .ask-btn {
+            display: block;
+            width: 100%;
+            background: var(--accent);
+            border: none;
+            border-radius: 4px;
+            padding: 0.6rem 0.75rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 1rem;
+            text-decoration: none;
+            text-align: center;
+        }
+
+        .ask-btn:hover {
+            opacity: 0.9;
+        }
+
         /* Edit modal */
         .edit-modal {
             display: none;
@@ -442,6 +675,14 @@
             border-color: var(--fg-muted);
         }
 
+        .avatar-large {
+            width: 3.5rem;
+            height: 3.5rem;
+            font-size: 1.5rem;
+            margin-right: 0;
+            margin-bottom: 1rem;
+        }
+
         /* Mobile */
         @media (max-width: 768px) {
             .container {
@@ -522,6 +763,9 @@
         let currentProfile = null;
         let isOwnProfile = false;
         let savedKey = null;
+        let userHandle = null;
+        let commentsByEntry = {};
+        let commentsBySummary = {};
 
         // Get saved key from localStorage
         function getSavedKey() {
@@ -573,6 +817,453 @@
             return div.innerHTML;
         }
 
+        // Get date string from timestamp (YYYY-MM-DD in local timezone)
+        function getDateFromTimestamp(ts) {
+            const d = new Date(ts);
+            return d.getFullYear() + '-' +
+                String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                String(d.getDate()).padStart(2, '0');
+        }
+
+        // Format full date like "Tuesday, Dec 17"
+        function formatFullDate(dateStr) {
+            const [year, month, day] = dateStr.split('-').map(Number);
+            const date = new Date(year, month - 1, day);
+            return date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+        }
+
+        // Format date parts - returns { label: "Today/Yesterday/date", fullDate: "Monday, Dec 16" }
+        function formatDateParts(dateStr) {
+            const [year, month, day] = dateStr.split('-').map(Number);
+            const date = new Date(year, month - 1, day);
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+
+            const fullDate = date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+
+            if (date.getTime() === today.getTime()) {
+                return { label: 'Today', fullDate };
+            }
+            if (date.getTime() === yesterday.getTime()) {
+                return { label: 'Yesterday', fullDate };
+            }
+
+            // Use day name for this week, otherwise just the date
+            const daysDiff = Math.floor((today - date) / (1000 * 60 * 60 * 24));
+            if (daysDiff < 7) {
+                return {
+                    label: date.toLocaleDateString('en-US', { weekday: 'long' }),
+                    fullDate
+                };
+            }
+
+            return { label: fullDate, fullDate };
+        }
+
+        // Render a day header
+        function renderDayHeader(label, dateStr) {
+            const fullDate = formatFullDate(dateStr);
+            return `
+                <div class="day-header">
+                    <span class="day-header-text">${label}</span>
+                    <span class="day-header-date">${fullDate}</span>
+                    <span class="day-header-line"></span>
+                </div>
+            `;
+        }
+
+        // Generate "Ask Claude about user" URL
+        function generateAskAboutUrl(handle) {
+            const prompt = `I want to learn about @${handle} from the shared notebook.
+
+Use search_notebook with handle "${handle}" to explore their recent entries. Then, based on our conversation history, tell me what I might have in common with this person—shared interests, overlapping topics, or complementary perspectives.`;
+
+            return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
+        }
+
+        // Generate avatar HTML from handle
+        function renderAvatar(handle, large = false, small = false) {
+            let hash = 0;
+            for (let i = 0; i < handle.length; i++) {
+                hash = handle.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const hue = Math.abs(hash % 360);
+            const color = `hsl(${hue}, 65%, 45%)`;
+            const initial = handle.charAt(0).toUpperCase();
+            let sizeClass = 'avatar';
+            if (large) sizeClass = 'avatar avatar-large';
+            else if (small) sizeClass = 'avatar avatar-small';
+            return `<span class="${sizeClass}" style="background: ${color}">${initial}</span>`;
+        }
+
+        // Generate discuss URL for an entry
+        function generateDiscussUrl(entry) {
+            const prompt = `I want to discuss a Hermes notebook entry.
+
+Entry ID: ${entry.id}
+
+Use get_notebook_entry to fetch it, then let's talk about it. If I want to respond, help me shape a comment.`;
+
+            return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
+        }
+
+        // Generate discuss URL for a session/summary
+        function generateSessionDiscussUrl(entryIds) {
+            const prompt = `I want to discuss a session from Hermes.
+
+Entry IDs: ${entryIds.join(', ')}
+
+Use get_notebook_entry to fetch each one, then let's talk about what's interesting. If I want to respond to any of them, help me shape a comment.`;
+
+            return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
+        }
+
+        // Render comments for an entry
+        function renderCommentsSection(entryId, isSummary = false) {
+            const comments = isSummary ? (commentsBySummary[entryId] || []) : (commentsByEntry[entryId] || []);
+            if (comments.length === 0 && !userHandle) return '';
+
+            let html = '<div class="comments-section">';
+
+            for (const comment of comments) {
+                const canDelete = userHandle && comment.handle === userHandle;
+                const deleteBtn = canDelete ? ` · <button class="delete-btn" onclick="deleteComment('${comment.id}')">delete</button>` : '';
+
+                html += `
+                    <div class="comment" id="comment-${comment.id}">
+                        <div class="comment-content">${escapeHtml(comment.content)}</div>
+                        <div class="comment-meta">
+                            ${renderAvatar(comment.handle, false, true)}<a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
+                            · ${formatTime(comment.timestamp)}${deleteBtn}
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (userHandle) {
+                const dataAttr = isSummary ? `data-summary-id="${entryId}"` : `data-entry-id="${entryId}"`;
+                const handler = isSummary ? `handleSummaryCommentKeydown(event, '${entryId}')` : `handleCommentKeydown(event, '${entryId}')`;
+                html += `
+                    <div class="comment-form" ${dataAttr}>
+                        <textarea placeholder="Add a comment..." rows="1" onkeydown="${handler}"></textarea>
+                    </div>
+                `;
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        // Handle comment submission for entries
+        async function handleCommentKeydown(event, entryId) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                const textarea = event.target;
+                const content = textarea.value.trim();
+                if (!content || !savedKey) return;
+
+                textarea.disabled = true;
+                try {
+                    const res = await fetch('/api/comments', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            secret_key: savedKey,
+                            entry_id: entryId,
+                            content
+                        })
+                    });
+
+                    if (!res.ok) throw new Error('Failed to post comment');
+
+                    const comment = await res.json();
+                    if (!commentsByEntry[entryId]) commentsByEntry[entryId] = [];
+                    commentsByEntry[entryId].push(comment);
+                    textarea.value = '';
+
+                    // Re-render comments section
+                    const entryEl = document.getElementById(`entry-${entryId}`);
+                    if (entryEl) {
+                        const oldSection = entryEl.querySelector('.comments-section');
+                        if (oldSection) oldSection.remove();
+                        entryEl.insertAdjacentHTML('beforeend', renderCommentsSection(entryId));
+                    }
+                } catch (err) {
+                    alert('Failed to post comment');
+                } finally {
+                    textarea.disabled = false;
+                }
+            }
+        }
+
+        // Handle comment submission for summaries
+        async function handleSummaryCommentKeydown(event, summaryId) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                const textarea = event.target;
+                const content = textarea.value.trim();
+                if (!content || !savedKey) return;
+
+                textarea.disabled = true;
+                try {
+                    const res = await fetch('/api/comments', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            secret_key: savedKey,
+                            summary_id: summaryId,
+                            content
+                        })
+                    });
+
+                    if (!res.ok) throw new Error('Failed to post comment');
+
+                    const comment = await res.json();
+                    if (!commentsBySummary[summaryId]) commentsBySummary[summaryId] = [];
+                    commentsBySummary[summaryId].push(comment);
+                    textarea.value = '';
+
+                    // Re-render comments section
+                    const summaryEl = document.getElementById(`summary-${summaryId}`);
+                    if (summaryEl) {
+                        const oldSection = summaryEl.querySelector('.comments-section');
+                        if (oldSection) oldSection.remove();
+                        summaryEl.insertAdjacentHTML('beforeend', renderCommentsSection(summaryId, true));
+                    }
+                } catch (err) {
+                    alert('Failed to post comment');
+                } finally {
+                    textarea.disabled = false;
+                }
+            }
+        }
+
+        // Delete comment
+        async function deleteComment(id) {
+            if (!savedKey) return;
+            if (!confirm('Delete this comment?')) return;
+
+            try {
+                const res = await fetch(`/api/comments/${id}?key=${encodeURIComponent(savedKey)}`, {
+                    method: 'DELETE'
+                });
+
+                if (!res.ok) throw new Error('Failed to delete comment');
+
+                const commentEl = document.getElementById(`comment-${id}`);
+                if (commentEl) {
+                    commentEl.style.opacity = '0';
+                    commentEl.style.transition = 'opacity 0.3s';
+                    setTimeout(() => commentEl.remove(), 300);
+                }
+            } catch (err) {
+                alert('Failed to delete comment');
+            }
+        }
+
+        // Toggle summary expansion
+        async function toggleSummary(summaryId) {
+            const container = document.getElementById(`summary-entries-${summaryId}`);
+            const toggle = container.parentElement.querySelector('.summary-toggle');
+
+            if (container.classList.contains('visible')) {
+                container.classList.remove('visible');
+                toggle.textContent = 'expand';
+                return;
+            }
+
+            container.classList.add('visible');
+            toggle.textContent = 'collapse';
+
+            // Check if already loaded
+            if (container.dataset.loaded) return;
+
+            try {
+                const res = await fetch(`/api/summaries/${summaryId}/entries`);
+                const data = await res.json();
+                const entries = data.entries || [];
+
+                if (entries.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No entries found.</div>';
+                } else {
+                    container.innerHTML = entries.map(entry => `
+                        <div class="entry">
+                            <div class="entry-content">${escapeHtml(entry.content)}</div>
+                            <div class="entry-meta">${formatTime(entry.timestamp)}</div>
+                        </div>
+                    `).join('');
+                }
+                container.dataset.loaded = 'true';
+            } catch (err) {
+                container.innerHTML = '<div class="error-state">Failed to load entries.</div>';
+            }
+        }
+
+        // Render the profile feed with entries and summaries
+        function renderProfileFeed(handle, entries, summaries, summarizedEntryIds) {
+            // Helper to get latest activity time (post time or latest comment time)
+            function getActivityTime(entryIds, summaryId, baseTime) {
+                let latest = baseTime;
+                for (const id of entryIds) {
+                    const comments = commentsByEntry[id] || [];
+                    for (const c of comments) {
+                        if (c.timestamp > latest) latest = c.timestamp;
+                    }
+                }
+                if (summaryId) {
+                    const summaryComments = commentsBySummary[summaryId] || [];
+                    for (const c of summaryComments) {
+                        if (c.timestamp > latest) latest = c.timestamp;
+                    }
+                }
+                return latest;
+            }
+
+            // Build items with their activity times
+            const allItems = [];
+
+            entries.forEach(e => {
+                const activityTime = getActivityTime([e.id], null, e.timestamp);
+                allItems.push({
+                    type: 'entry',
+                    data: e,
+                    activityTime,
+                    activityDate: getDateFromTimestamp(activityTime)
+                });
+            });
+
+            summaries.forEach(s => {
+                const activityTime = getActivityTime(s.entryIds || [], s.id, s.endTime || s.timestamp);
+                allItems.push({
+                    type: 'summary',
+                    data: s,
+                    activityTime,
+                    activityDate: getDateFromTimestamp(activityTime)
+                });
+            });
+
+            // Group by activity date
+            const itemsByActivityDate = new Map();
+            allItems.forEach(item => {
+                const date = item.activityDate;
+                if (!itemsByActivityDate.has(date)) itemsByActivityDate.set(date, []);
+                itemsByActivityDate.get(date).push(item);
+            });
+
+            // Get all dates sorted (most recent first)
+            const allDates = [...itemsByActivityDate.keys()].sort((a, b) => b.localeCompare(a));
+
+            // Render
+            let html = '';
+
+            for (const date of allDates) {
+                const dayItems = itemsByActivityDate.get(date) || [];
+
+                // Build set of summarized entry IDs for this day
+                const daySummarizedIds = new Set();
+                dayItems.filter(i => i.type === 'summary').forEach(i => {
+                    (i.data.entryIds || []).forEach(id => daySummarizedIds.add(id));
+                });
+
+                // Filter out summarized entries (unless they have comments - then show both)
+                const filteredItems = dayItems.filter(item => {
+                    if (item.type !== 'entry') return true;
+                    if (item.data.isReflection) return true;
+                    if (!daySummarizedIds.has(item.data.id) && !summarizedEntryIds.has(item.data.id)) return true;
+                    // Show if it has comments
+                    return (commentsByEntry[item.data.id] || []).length > 0;
+                });
+
+                // Sort by activity time (most recent first)
+                filteredItems.sort((a, b) => b.activityTime - a.activityTime);
+
+                if (filteredItems.length === 0) continue;
+
+                // Render day header
+                const { label } = formatDateParts(date);
+                html += renderDayHeader(label, date);
+
+                // Render all items
+                for (const item of filteredItems) {
+                    if (item.type === 'entry') {
+                        html += renderEntry(handle, item.data);
+                    } else {
+                        html += renderSummary(handle, item.data);
+                    }
+                }
+            }
+
+            if (!html) {
+                return `
+                    <div class="feed-header">
+                        <h2>Entries</h2>
+                    </div>
+                    <div class="empty-state">No entries yet.</div>
+                `;
+            }
+
+            return html;
+        }
+
+        // Render a single entry
+        function renderEntry(handle, entry) {
+            const isReflection = entry.isReflection;
+            const type = isReflection ? 'reflection' : 'note';
+            const clientName = { desktop: 'Desktop', mobile: 'Mobile', code: 'Code' }[entry.client] || '';
+            const model = entry.model ? ` ${entry.model}` : '';
+            const source = `Claude${model}${clientName ? ` ${clientName}` : ''}`;
+
+            const contentHtml = isReflection
+                ? marked.parse(entry.content)
+                : escapeHtml(entry.content);
+            const contentClass = isReflection ? 'entry-content reflection' : 'entry-content';
+
+            const meta = [formatTime(entry.timestamp)];
+            if (isOwnProfile) {
+                meta.push(`<button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>`);
+            }
+            meta.push(`<a href="${generateDiscussUrl(entry)}" target="_blank" class="discuss-link">discuss with claude</a>`);
+
+            return `
+                <div class="entry" id="entry-${entry.id}">
+                    <div class="entry-header">${renderAvatar(handle)}posted a ${type} from ${escapeHtml(source)}</div>
+                    <div class="${contentClass}">${contentHtml}</div>
+                    <div class="entry-meta">
+                        <span>${meta.join(' · ')}</span>
+                    </div>
+                    ${renderCommentsSection(entry.id)}
+                </div>
+            `;
+        }
+
+        // Render a summary
+        function renderSummary(handle, summary) {
+            const entryCount = summary.entryIds ? summary.entryIds.length : 0;
+            const contentHtml = escapeHtml(summary.content || '');
+
+            const meta = [formatTime(summary.timestamp)];
+            meta.push(`<span class="summary-toggle" onclick="toggleSummary('${summary.id}')">expand</span>`);
+            if (summary.entryIds && summary.entryIds.length > 0) {
+                meta.push(`<a href="${generateSessionDiscussUrl(summary.entryIds)}" target="_blank" class="discuss-link">discuss with claude</a>`);
+            }
+
+            return `
+                <div class="summary" id="summary-${summary.id}">
+                    <div class="summary-header">${renderAvatar(handle)}posted ${entryCount} notes from Claude</div>
+                    <p class="summary-content">${contentHtml}</p>
+                    <div class="summary-meta">
+                        <span>${meta.join(' · ')}</span>
+                    </div>
+                    <div class="summary-entries" id="summary-entries-${summary.id}">
+                        <div class="loading">Loading...</div>
+                    </div>
+                    ${renderCommentsSection(summary.id, true)}
+                </div>
+            `;
+        }
+
         // Load profile
         async function loadProfile() {
             const handle = getHandleFromPath();
@@ -599,7 +1290,8 @@
                     });
                     if (lookupRes.ok) {
                         const lookupData = await lookupRes.json();
-                        isOwnProfile = lookupData.handle === handle;
+                        userHandle = lookupData.handle;
+                        isOwnProfile = userHandle === handle;
                     }
                 } catch (e) {
                     console.error('Failed to check identity:', e);
@@ -613,6 +1305,7 @@
                 if (!profileRes.ok) {
                     if (profileRes.status === 404) {
                         profileHeader.innerHTML = `
+                            ${renderAvatar(handle, true)}
                             <div class="profile-handle">@${escapeHtml(handle)}</div>
                             <div class="error-state" style="padding: 1rem 0;">User not found</div>
                         `;
@@ -626,7 +1319,8 @@
                 currentProfile = profile;
 
                 // Render profile header
-                let profileHtml = `<div class="profile-handle">@${escapeHtml(profile.handle)}</div>`;
+                let profileHtml = renderAvatar(profile.handle, true);
+                profileHtml += `<div class="profile-handle">@${escapeHtml(profile.handle)}</div>`;
 
                 if (profile.displayName) {
                     profileHtml += `<div class="profile-display-name">${escapeHtml(profile.displayName)}</div>`;
@@ -649,6 +1343,9 @@
                     profileHtml += `<div class="profile-meta">Joined ${formatDate(profile.createdAt)}</div>`;
                 }
 
+                // Ask Claude about this user
+                profileHtml += `<a href="${generateAskAboutUrl(profile.handle)}" target="_blank" class="ask-btn">Ask Claude about @${escapeHtml(profile.handle)}</a>`;
+
                 // Add edit button if this is the user's own profile
                 if (isOwnProfile) {
                     profileHtml += `<button class="edit-btn" onclick="openEditModal()">Edit Profile</button>`;
@@ -656,12 +1353,29 @@
 
                 profileHeader.innerHTML = profileHtml;
 
-                // Fetch entries
-                const entriesRes = await fetch(`/api/users/${encodeURIComponent(handle)}/entries`);
+                // Fetch entries, summaries, and prepare for comments
+                const [entriesRes, summariesRes] = await Promise.all([
+                    fetch(`/api/users/${encodeURIComponent(handle)}/entries`),
+                    fetch('/api/summaries')
+                ]);
+
                 const entriesData = await entriesRes.json();
                 const entries = entriesData.entries || [];
 
-                if (entries.length === 0) {
+                const summariesData = await summariesRes.json();
+                const allSummaries = summariesData.summaries || [];
+
+                // Filter summaries for this user (by pseudonym since summaries use pseudonym)
+                // Try legacyPseudonym first, fall back to pseudonym from entries
+                let userPseudonym = profile.legacyPseudonym;
+                if (!userPseudonym && entries.length > 0) {
+                    userPseudonym = entries.find(e => e.pseudonym)?.pseudonym;
+                }
+                const summaries = userPseudonym
+                    ? allSummaries.filter(s => s.pseudonym === userPseudonym)
+                    : [];
+
+                if (entries.length === 0 && summaries.length === 0) {
                     feed.innerHTML = `
                         <div class="feed-header">
                             <h2>Entries</h2>
@@ -671,42 +1385,33 @@
                     return;
                 }
 
-                // Render entries
-                let feedHtml = `
-                    <div class="feed-header">
-                        <h2>${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}</h2>
-                    </div>
-                `;
+                // Collect entry IDs and summary IDs for comments fetch
+                const entryIds = entries.map(e => e.id);
+                const summaryIds = summaries.map(s => s.id);
 
-                for (const entry of entries) {
-                    const isReflection = entry.isReflection;
-                    const type = isReflection ? 'reflection' : 'note';
-                    const clientName = { desktop: 'Desktop', mobile: 'Mobile', code: 'Code' }[entry.client] || '';
-                    const model = entry.model ? ` ${entry.model}` : '';
-                    const source = `Claude${model}${clientName ? ` ${clientName}` : ''}`;
+                // Build entries that are covered by summaries
+                const summarizedEntryIds = new Set();
+                summaries.forEach(s => (s.entryIds || []).forEach(id => summarizedEntryIds.add(id)));
 
-                    const contentHtml = isReflection
-                        ? marked.parse(entry.content)
-                        : escapeHtml(entry.content);
-                    const contentClass = isReflection ? 'entry-content reflection' : 'entry-content';
+                // Render feed first, then load comments in background
+                feed.innerHTML = renderProfileFeed(handle, entries, summaries, summarizedEntryIds);
 
-                    const deleteBtn = isOwnProfile
-                        ? `<button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>`
-                        : '';
+                // Load comments in background
+                if (entryIds.length > 0 || summaryIds.length > 0) {
+                    const entryIdsParam = entryIds.length > 0 ? `entryIds=${entryIds.join(',')}` : '';
+                    const summaryIdsParam = summaryIds.length > 0 ? `summaryIds=${summaryIds.join(',')}` : '';
+                    const params = [entryIdsParam, summaryIdsParam].filter(Boolean).join('&');
 
-                    feedHtml += `
-                        <div class="entry" id="entry-${entry.id}">
-                            <div class="entry-header">posted a ${type} from ${escapeHtml(source)}</div>
-                            <div class="${contentClass}">${contentHtml}</div>
-                            <div class="entry-meta">
-                                <span>${formatTime(entry.timestamp)}</span>
-                                ${deleteBtn}
-                            </div>
-                        </div>
-                    `;
+                    fetch(`/api/comments?${params}`)
+                        .then(res => res.json())
+                        .then(commentsData => {
+                            commentsByEntry = commentsData.comments || {};
+                            commentsBySummary = commentsData.summaryComments || {};
+                            // Re-render with comments
+                            feed.innerHTML = renderProfileFeed(handle, entries, summaries, summarizedEntryIds);
+                        })
+                        .catch(err => console.error('Failed to load comments:', err));
                 }
-
-                feed.innerHTML = feedHtml;
 
             } catch (err) {
                 console.error('Error loading profile:', err);

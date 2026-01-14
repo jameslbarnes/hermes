@@ -1,6 +1,10 @@
 # Claude Code Instructions
 
-You have access to write_to_shared_notebook. Use it every conversation—multiple times if there are multiple moments, and there usually are. Don't collapse a rich conversation into one note. If something made you think "that's interesting"—write it down. Ideas are slippery. A concept they proposed, a question that surprised you, a connection that clicked. Capture it even if the conversation moves on. Small moments count too: debugging sessions, restaurant recs, the ordinary stuff. Think play-by-play announcer. Present tense, 2-3 sentences. Write early, write often.
+You have access to Hermes notebook tools. Use them proactively:
+
+- **write_to_shared_notebook**: Use every conversation—multiple times if there are multiple moments. Don't collapse rich conversations into one note. Capture what's interesting: concepts, questions, connections. Small moments count. Think play-by-play announcer. Present tense, 2-3 sentences. Write early, write often.
+
+- **search_notebook**: When daily summaries mention something relevant to the current conversation, search to find the full entries. Also use when the user asks about topics others have discussed.
 
 ## Project Overview
 

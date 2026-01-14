@@ -170,6 +170,15 @@
             color: var(--fg);
         }
 
+        .search-header {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+            color: var(--fg-muted);
+            padding-bottom: 1rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
         /* Right column - feed */
         .feed-container {
             display: flex;
@@ -232,6 +241,28 @@
             text-decoration: underline;
         }
 
+        .avatar {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.4rem;
+            height: 1.4rem;
+            border-radius: 50%;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: white;
+            text-transform: uppercase;
+            vertical-align: middle;
+            margin-right: 0.3rem;
+        }
+
+        .avatar-small {
+            width: 1.1rem;
+            height: 1.1rem;
+            font-size: 0.55rem;
+            margin-right: 0.25rem;
+        }
+
         .delete-btn {
             background: none;
             border: none;
@@ -249,17 +280,17 @@
         }
 
         .discuss-link {
-            color: var(--fg-muted);
+            color: var(--accent);
             font-family: 'IBM Plex Mono', monospace;
             font-size: 0.7rem;
             text-decoration: none;
-            opacity: 0.5;
+            opacity: 0.8;
             transition: opacity 0.2s;
         }
 
         .discuss-link:hover {
             opacity: 1;
-            color: var(--accent);
+            text-decoration: underline;
         }
 
         /* Unified badge system */
@@ -333,6 +364,39 @@
             padding: 4rem 0;
             color: var(--fg-muted);
             font-style: italic;
+        }
+
+        .loading-state {
+            padding: 4rem 0;
+            color: var(--fg-muted);
+            font-style: italic;
+            text-align: center;
+        }
+
+        .load-more-container {
+            padding: 2rem 0;
+            text-align: center;
+        }
+
+        .load-more-btn {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            padding: 0.75rem 2rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background 0.15s, border-color 0.15s;
+        }
+
+        .load-more-btn:hover {
+            background: var(--bg-hover);
+            border-color: var(--fg-muted);
+        }
+
+        .load-more-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
         /* Loading */
@@ -564,25 +628,73 @@
             vertical-align: middle;
         }
 
-        /* Import button - fixed top right */
-        .import-btn {
+        /* Top toolbar - fixed top right */
+        .top-toolbar {
             position: fixed;
             top: 1.5rem;
             right: 1.5rem;
-            background: var(--accent);
-            color: white;
-            border: none;
-            border-radius: 6px;
-            padding: 0.5rem 1rem;
-            cursor: pointer;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.8rem;
-            transition: opacity 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
             z-index: 100;
         }
 
-        .import-btn:hover {
-            opacity: 0.85;
+        .toolbar-btn {
+            width: 36px;
+            height: 36px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            color: var(--fg-muted);
+        }
+
+        .toolbar-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .toolbar-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        .search-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .search-container.expanded .search-input {
+            width: 200px;
+            opacity: 1;
+            padding: 0.5rem 0.75rem;
+        }
+
+        .search-container .search-input {
+            width: 0;
+            opacity: 0;
+            padding: 0;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+            background: var(--surface);
+            color: var(--fg);
+            transition: all 0.2s;
+            outline: none;
+        }
+
+        .search-container .search-input:focus {
+            border-color: var(--accent);
+        }
+
+        .search-container .search-input::placeholder {
+            color: var(--fg-muted);
         }
 
         /* Modal */
@@ -942,6 +1054,42 @@
             text-decoration: underline;
         }
 
+        .comment-form {
+            margin-top: 0.75rem;
+            position: relative;
+        }
+
+        .comment-form textarea {
+            width: 100%;
+            padding: 0.5rem;
+            padding-right: 2rem;
+            font-family: 'IBM Plex Sans', sans-serif;
+            font-size: 0.8rem;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--surface);
+            color: var(--fg);
+            resize: none;
+            min-height: 2rem;
+            box-sizing: border-box;
+        }
+
+        .comment-form textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .comment-form::after {
+            content: '↵';
+            position: absolute;
+            right: 0.5rem;
+            bottom: 0.35rem;
+            color: var(--fg-muted);
+            font-size: 1.1rem;
+            pointer-events: none;
+            opacity: 0.4;
+        }
+
         /* Dark mode */
         @media (prefers-color-scheme: dark) {
             :root {
@@ -956,7 +1104,21 @@
     </style>
 </head>
 <body>
-    <button class="import-btn" onclick="openImportModal()">+ Import</button>
+    <div class="top-toolbar">
+        <div class="search-container" id="search-container">
+            <input type="text" class="search-input" id="search-input" placeholder="Search..." />
+            <button class="toolbar-btn" id="search-btn" title="Search">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+            </button>
+        </div>
+        <button class="toolbar-btn" onclick="openImportModal()" title="Import conversation">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+        </button>
+    </div>
 
     <div class="container">
         <aside class="sidebar">
@@ -1026,8 +1188,22 @@
         // Cache for loaded summary entries
         const summaryEntriesCache = new Map();
 
-        // Cache for comments by entry ID
+        // Cache for comments by entry ID and summary ID
         let commentsByEntry = {};
+        let commentsBySummary = {};
+
+        // Pagination state
+        const PAGE_SIZE = 30;
+        let currentOffset = 0;
+        let hasMoreEntries = true;
+        let isLoadingFeed = false;
+        let allLoadedEntries = [];
+        let allLoadedSummaries = [];
+        let allLoadedConversations = [];
+
+        // Search state
+        let searchTimeout = null;
+        let isSearchMode = false;
 
         // Cache for entry content by ID (for quoting in comments)
         const entryContentCache = new Map();
@@ -1092,29 +1268,57 @@
             setInterval(loadFeed, 60000);
         }
 
-        async function loadFeed() {
+        async function loadFeed(force = false, loadMore = false) {
+            // Don't refresh if in search mode (unless forced)
+            if (!force && isSearchMode) {
+                return;
+            }
+
+            // Don't refresh if user is typing a comment (unless forced)
+            if (!force && document.activeElement?.closest('.comment-form')) {
+                return;
+            }
+
+            // Prevent concurrent loads
+            if (isLoadingFeed) return;
+            isLoadingFeed = true;
+
             const feed = document.getElementById('feed');
 
             try {
                 // If filtering by pseudonym, use simple view (no daily grouping)
                 if (filterPseudonym) {
                     await loadFilteredFeed(feed);
+                    isLoadingFeed = false;
                     return;
                 }
 
-                // Fetch entries, session summaries, daily summaries, and conversations
-                const effectiveKey = getEffectiveKey();
-                let entriesUrl = '/api/entries';
-                let conversationsUrl = '/api/conversations';
-                if (effectiveKey) {
-                    entriesUrl += `?key=${encodeURIComponent(effectiveKey)}`;
-                    conversationsUrl += `?key=${encodeURIComponent(effectiveKey)}`;
+                // Show loading state on initial load
+                const isInitialLoad = allLoadedEntries.length === 0 && !loadMore;
+                if (isInitialLoad) {
+                    feed.innerHTML = '<div class="loading-state">Loading...</div>';
                 }
 
+                // Reset pagination on fresh load (not loadMore)
+                if (!loadMore) {
+                    currentOffset = 0;
+                    allLoadedEntries = [];
+                    allLoadedSummaries = [];
+                    allLoadedConversations = [];
+                    hasMoreEntries = true;
+                }
+
+                // Build URLs with pagination
+                const effectiveKey = getEffectiveKey();
+                const keyParam = effectiveKey ? `key=${encodeURIComponent(effectiveKey)}` : '';
+                const entriesUrl = `/api/entries?limit=${PAGE_SIZE}&offset=${currentOffset}${keyParam ? '&' + keyParam : ''}`;
+                const conversationsUrl = `/api/conversations${keyParam ? '?' + keyParam : ''}`;
+
+                // Step 1: Fetch entries, summaries, daily summaries, conversations
                 const [entriesRes, summariesRes, dailyRes, conversationsRes] = await Promise.all([
                     fetch(entriesUrl),
-                    fetch('/api/summaries'),
-                    fetch('/api/daily-summaries'),
+                    fetch(`/api/summaries?limit=${PAGE_SIZE}`),
+                    fetch('/api/daily-summaries?limit=14'),
                     fetch(conversationsUrl)
                 ]);
 
@@ -1123,242 +1327,223 @@
                 const dailyData = await dailyRes.json();
                 const conversationsData = await conversationsRes.json();
 
-                let entries = entriesData.entries || [];
+                const newEntries = entriesData.entries || [];
                 const summaries = summariesData.summaries || [];
                 const dailySummaries = dailyData.dailySummaries || [];
                 const conversations = conversationsData.conversations || [];
 
-                // Build pseudonym -> handle map and entry content cache from entries
-                entries.forEach(e => {
+                // Check if there are more entries to load
+                hasMoreEntries = newEntries.length === PAGE_SIZE;
+                currentOffset += newEntries.length;
+
+                // Merge new entries with existing (for loadMore)
+                if (loadMore) {
+                    // Add only new entries (avoid duplicates)
+                    const existingIds = new Set(allLoadedEntries.map(e => e.id));
+                    newEntries.forEach(e => {
+                        if (!existingIds.has(e.id)) {
+                            allLoadedEntries.push(e);
+                        }
+                    });
+                } else {
+                    allLoadedEntries = newEntries;
+                }
+                allLoadedSummaries = summaries;
+                allLoadedConversations = conversations;
+
+                // Build pseudonym -> handle map and entry content cache
+                allLoadedEntries.forEach(e => {
                     if (e.handle && e.pseudonym) {
                         pseudonymToHandle.set(e.pseudonym, e.handle);
                     }
                     entryContentCache.set(e.id, e.content);
                 });
 
-                // Collect all entry IDs (for lazy comments fetch)
+                // Collect entry IDs and summary IDs for comments fetch
+                // Only fetch for displayed items, not all entries inside summaries
                 const allEntryIds = new Set();
-                entries.forEach(e => allEntryIds.add(e.id));
-                summaries.forEach(s => (s.entryIds || []).forEach(id => allEntryIds.add(id)));
+                const allSummaryIds = new Set();
+                allLoadedEntries.forEach(e => allEntryIds.add(e.id));
+                summaries.forEach(s => allSummaryIds.add(s.id));
 
-                // Track if we already have comments (to avoid re-fetching)
-                const hadComments = Object.keys(commentsByEntry).length > 0;
+                // Step 2: Render immediately with whatever comments we have
+                renderFeedWithData(feed, allLoadedEntries, summaries, dailySummaries, conversations);
 
+                // Step 3: Fetch comments in background and re-render when ready
+                if (allEntryIds.size > 0 || allSummaryIds.size > 0) {
+                    const entryIdsParam = allEntryIds.size > 0 ? `entryIds=${[...allEntryIds].join(',')}` : '';
+                    const summaryIdsParam = allSummaryIds.size > 0 ? `summaryIds=${[...allSummaryIds].join(',')}` : '';
+                    const params = [entryIdsParam, summaryIdsParam, keyParam].filter(Boolean).join('&');
 
-                // Build map of daily summaries by date
-                const dailySummaryByDate = new Map();
-                dailySummaries.forEach(ds => dailySummaryByDate.set(ds.date, ds));
-
-                // Group all entries, summaries, conversations, and comment stories by date
-                const entriesByDate = new Map();
-                const emptyDay = () => ({ entries: [], summaries: [], conversations: [], commentStories: [] });
-
-                // Add all entries
-                entries.forEach(e => {
-                    const date = getDateFromTimestamp(e.timestamp);
-                    if (!entriesByDate.has(date)) entriesByDate.set(date, emptyDay());
-                    entriesByDate.get(date).entries.push(e);
-                });
-
-                // Add all session summaries
-                summaries.forEach(s => {
-                    const date = getDateFromTimestamp(s.endTime);
-                    if (!entriesByDate.has(date)) entriesByDate.set(date, emptyDay());
-                    entriesByDate.get(date).summaries.push(s);
-                });
-
-                // Add all conversations
-                conversations.forEach(c => {
-                    const date = getDateFromTimestamp(c.timestamp);
-                    if (!entriesByDate.has(date)) entriesByDate.set(date, emptyDay());
-                    entriesByDate.get(date).conversations.push(c);
-                });
-
-                // Add comment stories for cross-day comments (comment from today on older entry)
-                const commentActivity = window.commentActivity || [];
-                commentActivity.forEach(activity => {
-                    const commentDate = getDateFromTimestamp(activity.comment.timestamp);
-                    const entryDate = getDateFromTimestamp(activity.entry.timestamp);
-                    // Only create story if comment is from a different day than entry
-                    if (commentDate !== entryDate) {
-                        if (!entriesByDate.has(commentDate)) entriesByDate.set(commentDate, emptyDay());
-                        entriesByDate.get(commentDate).commentStories.push(activity);
-                    }
-                });
-
-                // Get all dates sorted (most recent first)
-                const allDates = [...entriesByDate.keys()].sort((a, b) => b.localeCompare(a));
-
-                // Render
-                let html = '';
-
-                for (const date of allDates) {
-                    const dayData = entriesByDate.get(date);
-                    const dayEntries = dayData.entries || [];
-                    const daySummaries = dayData.summaries || [];
-                    const dayConversations = dayData.conversations || [];
-                    const dayCommentStories = dayData.commentStories || [];
-                    const dailySummary = dailySummaryByDate.get(date);
-
-                    // Build set of summarized entry IDs for this day
-                    const summarizedIds = new Set();
-                    daySummaries.forEach(s => (s.entryIds || []).forEach(id => summarizedIds.add(id)));
-
-                    // Filter out entries covered by session summaries (but always show reflections)
-                    const unsummarizedEntries = dayEntries.filter(e => e.isReflection || !summarizedIds.has(e.id));
-
-                    // Helper to get latest activity time (post time or latest comment time)
-                    function getActivityTime(entryIds, baseTime) {
-                        let latest = baseTime;
-                        for (const id of entryIds) {
-                            const comments = commentsByEntry[id] || [];
-                            for (const c of comments) {
-                                if (c.timestamp > latest) latest = c.timestamp;
+                    // Don't await - let it load in background
+                    fetch(`/api/comments?${params}`)
+                        .then(res => res.json())
+                        .then(commentsData => {
+                            const hadComments = Object.keys(commentsByEntry).length > 0;
+                            commentsByEntry = commentsData.comments || {};
+                            commentsBySummary = commentsData.summaryComments || {};
+                            // Only re-render if we got new comments
+                            if (!hadComments && (Object.keys(commentsByEntry).length > 0 || Object.keys(commentsBySummary).length > 0)) {
+                                renderFeedWithData(feed, allLoadedEntries, summaries, dailySummaries, conversations);
                             }
-                        }
-                        return latest;
-                    }
-
-                    // Merge and sort items for this day by activity time (most recent first)
-                    const dayItems = [
-                        ...unsummarizedEntries.map(e => ({
-                            type: 'entry',
-                            data: e,
-                            sortTime: getActivityTime([e.id], e.timestamp)
-                        })),
-                        ...daySummaries.map(s => ({
-                            type: 'summary',
-                            data: s,
-                            sortTime: getActivityTime(s.entryIds || [], s.endTime)
-                        })),
-                        ...dayConversations.map(c => ({
-                            type: 'conversation',
-                            data: c,
-                            sortTime: c.timestamp
-                        })),
-                        ...dayCommentStories.map(activity => ({
-                            type: 'commentStory',
-                            data: activity,
-                            sortTime: activity.comment.timestamp
-                        }))
-                    ].sort((a, b) => b.sortTime - a.sortTime);
-
-                    if (dayItems.length === 0) continue;
-
-                    // Render day header
-                    const { label, fullDate } = formatDateParts(date);
-                    html += renderDayHeader(label, date);
-
-                    // Render daily summary as intro if it exists
-                    if (dailySummary) {
-                        html += renderDailySummaryIntro(dailySummary);
-                    }
-
-                    // Render all entries, session summaries, conversations, and comment stories
-                    html += dayItems.map(item => {
-                        try {
-                            if (item.type === 'summary') {
-                                return renderSummary(item.data);
-                            } else if (item.type === 'conversation') {
-                                return renderConversation(item.data);
-                            } else if (item.type === 'commentStory') {
-                                return renderCommentStory(item.data);
-                            } else {
-                                return renderEntry(item.data);
-                            }
-                        } catch (e) {
-                            console.error('Error rendering item:', item, e);
-                            return '';
-                        }
-                    }).join('');
-                }
-
-                if (!html) {
-                    feed.innerHTML = `
-                        <div class="empty-state">
-                            Nothing yet. The notebook is empty.
-                        </div>
-                    `;
-                    return;
-                }
-
-                feed.innerHTML = html;
-
-                // Lazy load comments in the background (only if we don't have them yet)
-                if (allEntryIds.size > 0 && !hadComments) {
-                    loadCommentsLazy(allEntryIds);
+                        })
+                        .catch(err => console.error('Failed to load comments:', err));
                 }
 
             } catch (err) {
                 console.error('Feed error:', err);
                 feed.innerHTML = `
                     <div class="empty-state">
-                        Nothing yet. The notebook is empty.
+                        Error loading feed. Please refresh.
+                    </div>
+                `;
+            } finally {
+                isLoadingFeed = false;
+            }
+        }
+
+        // Render the feed with all data ready
+        function renderFeedWithData(feed, entries, summaries, dailySummaries, conversations) {
+            // Build map of daily summaries by date
+            const dailySummaryByDate = new Map();
+            dailySummaries.forEach(ds => dailySummaryByDate.set(ds.date, ds));
+
+            // Helper to get latest activity time (post time or latest comment time)
+            function getActivityTime(entryIds, summaryId, baseTime) {
+                let latest = baseTime;
+                for (const id of entryIds) {
+                    const comments = commentsByEntry[id] || [];
+                    for (const c of comments) {
+                        if (c.timestamp > latest) latest = c.timestamp;
+                    }
+                }
+                if (summaryId) {
+                    const summaryComments = commentsBySummary[summaryId] || [];
+                    for (const c of summaryComments) {
+                        if (c.timestamp > latest) latest = c.timestamp;
+                    }
+                }
+                return latest;
+            }
+
+            // Build items with their activity times
+            const allItems = [];
+
+            entries.forEach(e => {
+                const activityTime = getActivityTime([e.id], null, e.timestamp);
+                allItems.push({
+                    type: 'entry',
+                    data: e,
+                    activityTime,
+                    activityDate: getDateFromTimestamp(activityTime),
+                    creationDate: getDateFromTimestamp(e.timestamp)
+                });
+            });
+
+            summaries.forEach(s => {
+                const activityTime = getActivityTime(s.entryIds || [], s.id, s.endTime);
+                allItems.push({
+                    type: 'summary',
+                    data: s,
+                    activityTime,
+                    activityDate: getDateFromTimestamp(activityTime),
+                    creationDate: getDateFromTimestamp(s.endTime)
+                });
+            });
+
+            conversations.forEach(c => {
+                allItems.push({
+                    type: 'conversation',
+                    data: c,
+                    activityTime: c.timestamp,
+                    activityDate: getDateFromTimestamp(c.timestamp),
+                    creationDate: getDateFromTimestamp(c.timestamp)
+                });
+            });
+
+            // Group by activity date
+            const itemsByActivityDate = new Map();
+            allItems.forEach(item => {
+                const date = item.activityDate;
+                if (!itemsByActivityDate.has(date)) itemsByActivityDate.set(date, []);
+                itemsByActivityDate.get(date).push(item);
+            });
+
+            // Get all dates sorted (most recent first)
+            const allDates = [...itemsByActivityDate.keys()].sort((a, b) => b.localeCompare(a));
+
+            // Render
+            let html = '';
+
+            for (const date of allDates) {
+                const dayItems = itemsByActivityDate.get(date) || [];
+                const dailySummary = dailySummaryByDate.get(date);
+
+                // Build set of summarized entry IDs
+                const summarizedIds = new Set();
+                dayItems.filter(i => i.type === 'summary').forEach(i => {
+                    (i.data.entryIds || []).forEach(id => summarizedIds.add(id));
+                });
+
+                // Filter out summarized entries (unless they have comments - then show both)
+                const filteredItems = dayItems.filter(item => {
+                    if (item.type !== 'entry') return true;
+                    if (item.data.isReflection) return true;
+                    if (!summarizedIds.has(item.data.id)) return true;
+                    // Show if it has comments
+                    return (commentsByEntry[item.data.id] || []).length > 0;
+                });
+
+                // Sort by activity time (most recent first)
+                filteredItems.sort((a, b) => b.activityTime - a.activityTime);
+
+                if (filteredItems.length === 0) continue;
+
+                // Render day header
+                const { label, fullDate } = formatDateParts(date);
+                html += renderDayHeader(label, date);
+
+                // Render daily summary as intro if it exists
+                if (dailySummary) {
+                    html += renderDailySummaryIntro(dailySummary);
+                }
+
+                // Render all items
+                html += filteredItems.map(item => {
+                    try {
+                        if (item.type === 'summary') {
+                            return renderSummary(item.data);
+                        } else if (item.type === 'conversation') {
+                            return renderConversation(item.data);
+                        } else {
+                            return renderEntry(item.data);
+                        }
+                    } catch (e) {
+                        console.error('Error rendering item:', item, e);
+                        return '';
+                    }
+                }).join('');
+            }
+
+            // Add "Load more" button if there are more entries
+            if (hasMoreEntries) {
+                html += `
+                    <div class="load-more-container">
+                        <button class="load-more-btn" onclick="loadFeed(true, true)">Load more</button>
                     </div>
                 `;
             }
-        }
 
-        // Load comments in background - then re-render feed sorted by activity
-        async function loadCommentsLazy(entryIds) {
-            const currentKey = userKey || getSavedKey();
-            try {
-                const keyParam = currentKey ? `key=${encodeURIComponent(currentKey)}` : '';
-                const [commentsRes, activityRes] = await Promise.all([
-                    fetch(`/api/comments?entryIds=${[...entryIds].join(',')}${keyParam ? '&' + keyParam : ''}`),
-                    fetch(`/api/comment-activity?${keyParam}&limit=20`)
-                ]);
-                const commentsData = await commentsRes.json();
-                const activityData = await activityRes.json();
-                commentsByEntry = commentsData.comments || {};
-
-                // Store comment activity globally for use in rendering
-                window.commentActivity = activityData.activity || [];
-
-                // Re-render feed with activity-based sorting now that we have comments
-                loadFeed();
-            } catch (err) {
-                console.error('Failed to fetch comments:', err);
+            if (!html) {
+                feed.innerHTML = `
+                    <div class="empty-state">
+                        Nothing yet. The notebook is empty.
+                    </div>
+                `;
+                return;
             }
-        }
 
-        // Update existing DOM elements with loaded comments
-        function updateCommentsInDOM() {
-            // Find all summary elements and update their comment sections
-            document.querySelectorAll('.summary[data-id]').forEach(summaryEl => {
-                const summaryId = summaryEl.getAttribute('data-id');
-                // Find the summary's entry IDs from the data we have
-                // For now, just trigger a re-render of comments if they exist
-            });
-
-            // Find all entry elements and update their comment sections
-            document.querySelectorAll('.entry[data-id]').forEach(entryEl => {
-                const entryId = entryEl.getAttribute('data-id');
-                const comments = commentsByEntry[entryId] || [];
-
-                // Find or create comments container
-                let commentsContainer = entryEl.querySelector('.summary-comments');
-
-                if (comments.length > 0) {
-                    const commentsHtml = comments.map(comment => `
-                        <div class="comment">
-                            <div class="comment-content">${escapeHtml(comment.content)}</div>
-                            <div class="comment-meta">
-                                <a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
-                                · ${formatTime(comment.timestamp)}
-                                ${comment.publishAt && comment.publishAt > Date.now() ? ' · <span class="pending-badge">pending</span>' : ''}
-                            </div>
-                        </div>
-                    `).join('');
-
-                    if (!commentsContainer) {
-                        commentsContainer = document.createElement('div');
-                        commentsContainer.className = 'summary-comments';
-                        entryEl.appendChild(commentsContainer);
-                    }
-                    commentsContainer.innerHTML = commentsHtml;
-                }
-            });
+            feed.innerHTML = html;
         }
 
         // Simple filtered view (when filtering by pseudonym)
@@ -1431,7 +1616,7 @@
 
             // Entry meta line (original post info) with discuss link
             const discussUrl = generateDiscussUrl(entry);
-            const entryMeta = `${formatTime(entry.timestamp)} · <a href="${discussUrl}" target="_blank" class="discuss-link">discuss</a>`;
+            const entryMeta = `${formatTime(entry.timestamp)} · <a href="${discussUrl}" target="_blank" class="discuss-link">discuss with claude</a>`;
 
             // Check if user can delete comment
             const isCommentOwner = userHandle && comment.handle === userHandle;
@@ -1482,9 +1667,9 @@
             // Prefer handle over pseudonym
             let authorHtml;
             if (entry.handle) {
-                authorHtml = `<a href="/u/${escapeHtml(entry.handle)}" class="entry-handle">@${escapeHtml(entry.handle)}</a>`;
+                authorHtml = `${renderAvatar(entry.handle)}<a href="/u/${escapeHtml(entry.handle)}" class="entry-handle">@${escapeHtml(entry.handle)}</a>`;
             } else if (entry.pseudonym) {
-                authorHtml = `<span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(entry.pseudonym)}')">${escapeHtml(entry.pseudonym)}</span>`;
+                authorHtml = `${renderAvatar(entry.pseudonym)}<span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(entry.pseudonym)}')">${escapeHtml(entry.pseudonym)}</span>`;
             } else {
                 authorHtml = '';
             }
@@ -1499,7 +1684,7 @@
             // Check ownership by pseudonym OR handle
             const isOwner = (userPseudonym && entry.pseudonym === userPseudonym) || (userHandle && entry.handle === userHandle);
             if (isOwner) meta.push(`<button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>`);
-            meta.push(`<a href="${generateDiscussUrl(entry)}" target="_blank" class="discuss-link">discuss</a>`);
+            meta.push(`<a href="${generateDiscussUrl(entry)}" target="_blank" class="discuss-link">discuss with claude</a>`);
 
             // Show comments for this entry
             const entryComments = commentsByEntry[entry.id] || [];
@@ -1511,7 +1696,7 @@
                             <div class="comment">
                                 <div class="comment-content">${escapeHtml(comment.content)}</div>
                                 <div class="comment-meta">
-                                    <a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
+                                    ${renderAvatar(comment.handle, true)}<a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
                                     · ${formatTime(comment.timestamp)}
                                 </div>
                             </div>
@@ -1520,12 +1705,20 @@
                 `;
             }
 
+            // Comment form (only show if user has a key)
+            const commentFormHtml = userHandle ? `
+                <div class="comment-form" data-entry-id="${entry.id}">
+                    <textarea placeholder="Add a comment..." rows="1" onkeydown="handleCommentKeydown(event, '${entry.id}')"></textarea>
+                </div>
+            ` : '';
+
             return `
                 <div class="entry" data-id="${entry.id}">
                     <div class="entry-header">${header}</div>
                     <div class="${contentClass}">${contentHtml}</div>
                     <div class="entry-meta">${meta.join(' · ')}</div>
                     ${commentsHtml}
+                    ${commentFormHtml}
                 </div>
             `;
         }
@@ -1538,9 +1731,9 @@
             const handle = pseudonymToHandle.get(summary.pseudonym);
             let authorHtml;
             if (handle) {
-                authorHtml = `<a href="/u/${escapeHtml(handle)}" class="entry-handle">@${escapeHtml(handle)}</a>`;
+                authorHtml = `${renderAvatar(handle)}<a href="/u/${escapeHtml(handle)}" class="entry-handle">@${escapeHtml(handle)}</a>`;
             } else {
-                authorHtml = `<span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(summary.pseudonym)}')">${escapeHtml(summary.pseudonym)}</span>`;
+                authorHtml = `${renderAvatar(summary.pseudonym)}<span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(summary.pseudonym)}')">${escapeHtml(summary.pseudonym)}</span>`;
             }
             const header = `${authorHtml} posted ${entryCount} notes from Claude`;
 
@@ -1549,11 +1742,18 @@
             meta.push(formatTimeRange(summary.startTime, summary.endTime));
             meta.push(`<span class="summary-toggle" onclick="toggleSummary('${summary.id}')">expand</span>`);
             if (summary.entryIds && summary.entryIds.length > 0) {
-                meta.push(`<a href="${generateSessionDiscussUrl(summary.entryIds)}" target="_blank" class="discuss-link">discuss</a>`);
+                meta.push(`<a href="${generateSessionDiscussUrl(summary.entryIds)}" target="_blank" class="discuss-link">discuss with claude</a>`);
             }
 
-            // Collect comments from all entries in this summary
-            const commentsHtml = renderCommentsForEntries(summary.entryIds || []);
+            // Collect comments from all entries in this summary PLUS summary-level comments
+            const commentsHtml = renderCommentsForSummary(summary.id, summary.entryIds || []);
+
+            // Comment form targets the summary itself
+            const commentFormHtml = userHandle ? `
+                <div class="comment-form" data-summary-id="${summary.id}">
+                    <textarea placeholder="Add a comment..." rows="1" onkeydown="handleSummaryCommentKeydown(event, '${summary.id}')"></textarea>
+                </div>
+            ` : '';
 
             return `
                 <div class="summary" data-id="${summary.id}">
@@ -1564,42 +1764,30 @@
                         <div class="loading">Loading...</div>
                     </div>
                     ${commentsHtml}
+                    ${commentFormHtml}
                 </div>
             `;
         }
 
-        function renderCommentsForEntries(entryIds) {
-            // Gather all comments for these entries
-            const comments = [];
-            for (const entryId of entryIds) {
-                const entryComments = commentsByEntry[entryId] || [];
-                for (const comment of entryComments) {
-                    comments.push({ ...comment, entryId });
-                }
-            }
+        function renderCommentsForSummary(summaryId, entryIds) {
+            // Only show summary-level comments (from humans via web UI)
+            // Entry-level comments show on the individual entry when it pops out
+            const comments = commentsBySummary[summaryId] || [];
 
             if (comments.length === 0) return '';
 
             // Sort by timestamp (oldest first)
-            comments.sort((a, b) => a.timestamp - b.timestamp);
+            const sortedComments = [...comments].sort((a, b) => a.timestamp - b.timestamp);
 
-            const commentsHtml = comments.map(comment => {
-                const entryContent = entryContentCache.get(comment.entryId) || '';
-                const truncatedContent = entryContent.length > 100
-                    ? entryContent.substring(0, 100) + '...'
-                    : entryContent;
-
-                return `
-                    <div class="comment">
-                        <div class="comment-quote">${escapeHtml(truncatedContent)}</div>
-                        <div class="comment-content">${escapeHtml(comment.content)}</div>
-                        <div class="comment-meta">
-                            <a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
-                            · ${formatTime(comment.timestamp)}
-                        </div>
+            const commentsHtml = sortedComments.map(comment => `
+                <div class="comment">
+                    <div class="comment-content">${escapeHtml(comment.content)}</div>
+                    <div class="comment-meta">
+                        ${renderAvatar(comment.handle, true)}<a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
+                        · ${formatTime(comment.timestamp)}
                     </div>
-                `;
-            }).join('');
+                </div>
+            `).join('');
 
             return `
                 <div class="summary-comments">
@@ -1617,9 +1805,9 @@
             const handle = conversation.handle || pseudonymToHandle.get(conversation.pseudonym);
             let authorHtml;
             if (handle) {
-                authorHtml = `<a href="/u/${escapeHtml(handle)}" class="entry-handle">@${escapeHtml(handle)}</a>`;
+                authorHtml = `${renderAvatar(handle)}<a href="/u/${escapeHtml(handle)}" class="entry-handle">@${escapeHtml(handle)}</a>`;
             } else {
-                authorHtml = `<span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(conversation.pseudonym)}')">${escapeHtml(conversation.pseudonym)}</span>`;
+                authorHtml = `${renderAvatar(conversation.pseudonym)}<span class="entry-pseudonym" onclick="filterByPseudonym('${escapeHtml(conversation.pseudonym)}')">${escapeHtml(conversation.pseudonym)}</span>`;
             }
             const header = `${authorHtml} posted a conversation with ${escapeHtml(platformName)}`;
 
@@ -1774,6 +1962,109 @@
             window.location = url;
         }
 
+        // Comment submission
+        function handleCommentKeydown(event, entryId) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                submitComment(entryId);
+            }
+            // Shift+Enter allows newline (default behavior)
+        }
+
+        function handleSummaryCommentKeydown(event, summaryId) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                submitSummaryComment(summaryId);
+            }
+            // Shift+Enter allows newline (default behavior)
+        }
+
+        async function submitSummaryComment(summaryId) {
+            const effectiveKey = getEffectiveKey();
+            if (!effectiveKey) {
+                alert('You need to be logged in to comment');
+                return;
+            }
+
+            const form = document.querySelector(`.comment-form[data-summary-id="${summaryId}"]`);
+            const textarea = form.querySelector('textarea');
+            const content = textarea.value.trim();
+
+            if (!content) return;
+
+            textarea.disabled = true;
+
+            try {
+                const res = await fetch('/api/comments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        summaryId,
+                        content,
+                        key: effectiveKey
+                    })
+                });
+
+                if (res.ok) {
+                    const newComment = await res.json();
+                    if (!commentsBySummary[summaryId]) commentsBySummary[summaryId] = [];
+                    commentsBySummary[summaryId].push(newComment);
+                    textarea.value = '';
+                    loadFeed(true);
+                } else {
+                    const data = await res.json();
+                    alert(data.error || 'Failed to post comment');
+                }
+            } catch (err) {
+                alert('Failed to post comment');
+            } finally {
+                textarea.disabled = false;
+            }
+        }
+
+        async function submitComment(entryId) {
+            const effectiveKey = getEffectiveKey();
+            if (!effectiveKey) {
+                alert('You need to be logged in to comment');
+                return;
+            }
+
+            const form = document.querySelector(`.comment-form[data-entry-id="${entryId}"]`);
+            const textarea = form.querySelector('textarea');
+            const content = textarea.value.trim();
+
+            if (!content) return;
+
+            textarea.disabled = true;
+
+            try {
+                const res = await fetch('/api/comments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        entryId,
+                        content,
+                        key: effectiveKey
+                    })
+                });
+
+                if (res.ok) {
+                    const newComment = await res.json();
+                    if (!commentsByEntry[entryId]) commentsByEntry[entryId] = [];
+                    commentsByEntry[entryId].push(newComment);
+                    textarea.value = '';
+                    loadFeed(true);
+                } else {
+                    const data = await res.json();
+                    alert(data.error || 'Failed to post comment');
+                }
+            } catch (err) {
+                alert('Failed to post comment');
+            } finally {
+                textarea.disabled = false;
+            }
+        }
+
         async function deleteEntry(id) {
             if (!userKey) return;
             if (!confirm('Delete this entry?')) return;
@@ -1837,6 +2128,20 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // Generate avatar HTML from handle
+        function renderAvatar(handle, small = false) {
+            // Generate color from handle hash
+            let hash = 0;
+            for (let i = 0; i < handle.length; i++) {
+                hash = handle.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const hue = Math.abs(hash % 360);
+            const color = `hsl(${hue}, 65%, 45%)`;
+            const initial = handle.charAt(0).toUpperCase();
+            const sizeClass = small ? 'avatar avatar-small' : 'avatar';
+            return `<span class="${sizeClass}" style="background: ${color}">${initial}</span>`;
         }
 
         function formatPlatform(platform) {
@@ -2043,7 +2348,112 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             }
         });
 
+        // Search functionality
+        function setupSearch() {
+            const searchContainer = document.getElementById('search-container');
+            const searchInput = document.getElementById('search-input');
+            const searchBtn = document.getElementById('search-btn');
+
+            if (!searchContainer || !searchInput || !searchBtn) return;
+
+            // Toggle search expansion
+            searchBtn.addEventListener('click', () => {
+                if (searchContainer.classList.contains('expanded')) {
+                    // If expanded and has content, clear and collapse
+                    if (searchInput.value.trim()) {
+                        searchInput.value = '';
+                        clearSearch();
+                    }
+                    collapseSearch();
+                } else {
+                    // Expand and focus
+                    expandSearch();
+                }
+            });
+
+            // Handle input
+            searchInput.addEventListener('input', (e) => {
+                const query = e.target.value.trim();
+
+                // Debounce search
+                if (searchTimeout) clearTimeout(searchTimeout);
+
+                if (query.length === 0) {
+                    clearSearch();
+                    return;
+                }
+
+                searchTimeout = setTimeout(() => {
+                    performSearch(query);
+                }, 300);
+            });
+
+            // Collapse on Escape
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    searchInput.value = '';
+                    clearSearch();
+                    collapseSearch();
+                }
+            });
+
+            // Collapse when clicking outside (if empty)
+            document.addEventListener('click', (e) => {
+                if (!searchContainer.contains(e.target) &&
+                    searchContainer.classList.contains('expanded') &&
+                    !searchInput.value.trim()) {
+                    collapseSearch();
+                }
+            });
+        }
+
+        function expandSearch() {
+            const searchContainer = document.getElementById('search-container');
+            const searchInput = document.getElementById('search-input');
+            searchContainer.classList.add('expanded');
+            setTimeout(() => searchInput.focus(), 200);
+        }
+
+        function collapseSearch() {
+            const searchContainer = document.getElementById('search-container');
+            const searchInput = document.getElementById('search-input');
+            searchContainer.classList.remove('expanded');
+            searchInput.blur();
+        }
+
+        async function performSearch(query) {
+            const feed = document.getElementById('feed');
+
+            isSearchMode = true;
+            feed.innerHTML = '<div class="loading-state">Searching...</div>';
+
+            try {
+                const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=50`);
+                const data = await res.json();
+
+                if (data.results.length === 0) {
+                    feed.innerHTML = `<div class="empty-state">No entries found for "${escapeHtml(query)}"</div>`;
+                    return;
+                }
+
+                feed.innerHTML = `<div class="search-header">Results for "${escapeHtml(query)}" (${data.count})</div>`;
+
+                for (const entry of data.results) {
+                    feed.innerHTML += renderEntry(entry);
+                }
+            } catch (err) {
+                console.error('Search failed:', err);
+                feed.innerHTML = '<div class="error-state">Search failed</div>';
+            }
+        }
+
+        function clearSearch() {
+            isSearchMode = false;
+            loadFeed(true);
+        }
+
         init();
+        setupSearch();
     </script>
 
     <!-- Import Modal -->

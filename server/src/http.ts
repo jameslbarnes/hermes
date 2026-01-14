@@ -19,11 +19,10 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import Anthropic from '@anthropic-ai/sdk';
-import { Resend } from 'resend';
 import { derivePseudonym, generateSecretKey, isValidSecretKey, hashSecretKey, isValidHandle, normalizeHandle } from './identity.js';
 import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary, type Conversation, type User, tokenize } from './storage.js';
 import { scrapeConversation, detectPlatform, isValidShareUrl, ScrapeError } from './scraper.js';
-import { createNotificationService, verifyUnsubscribeToken, verifyEmailToken, type NotificationService } from './notifications.js';
+import { createNotificationService, createSendGridClient, verifyUnsubscribeToken, verifyEmailToken, type NotificationService } from './notifications.js';
 
 // Store active MCP sessions
 const mcpSessions = new Map<string, { transport: SSEServerTransport; secretKey: string }>();
@@ -197,17 +196,17 @@ const anthropic = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   : null;
 
-// Initialize Resend client for email notifications
-const resend = process.env.RESEND_API_KEY
-  ? new Resend(process.env.RESEND_API_KEY)
+// Initialize SendGrid client for email notifications
+const emailClient = process.env.SENDGRID_API_KEY
+  ? createSendGridClient(process.env.SENDGRID_API_KEY)
   : null;
 
 // Initialize notification service
 const notificationService: NotificationService = createNotificationService({
   storage,
-  resend,
+  emailClient,
   anthropic,
-  fromEmail: process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev',  // TODO: change to notify@teleport.computer once MX record is set
+  fromEmail: process.env.SENDGRID_FROM_EMAIL || 'notify@hermes.ing',
   baseUrl: BASE_URL,
   jwtSecret: process.env.JWT_SECRET || 'hermes-default-secret-change-in-production',
 });

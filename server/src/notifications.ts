@@ -6,8 +6,23 @@
  * - Daily digest generation and sending
  */
 
-import { Resend } from 'resend';
+import sgMail from '@sendgrid/mail';
 import Anthropic from '@anthropic-ai/sdk';
+
+// Simple email client interface
+interface EmailClient {
+  send(params: { from: string; to: string; subject: string; html: string }): Promise<void>;
+}
+
+// Create SendGrid email client
+export function createSendGridClient(apiKey: string): EmailClient {
+  sgMail.setApiKey(apiKey);
+  return {
+    async send({ from, to, subject, html }) {
+      await sgMail.send({ from, to, subject, html });
+    }
+  };
+}
 import { Storage, User, JournalEntry, Comment } from './storage';
 import jwt from 'jsonwebtoken';
 
@@ -35,7 +50,7 @@ export interface NotificationService {
 
 interface NotificationConfig {
   storage: Storage;
-  resend: Resend | null;
+  emailClient: EmailClient | null;
   anthropic: Anthropic | null;
   fromEmail: string;
   baseUrl: string;
@@ -46,7 +61,7 @@ interface NotificationConfig {
  * Create a notification service
  */
 export function createNotificationService(config: NotificationConfig): NotificationService {
-  const { storage, resend, anthropic, fromEmail, baseUrl, jwtSecret } = config;
+  const { storage, emailClient, anthropic, fromEmail, baseUrl, jwtSecret } = config;
 
   /**
    * Generate unsubscribe token for email footer
@@ -378,15 +393,15 @@ Draw a connection between what they've been working on and what others are explo
         return;
       }
 
-      if (!resend) {
-        console.warn('[Notify] No Resend client configured');
+      if (!emailClient) {
+        console.warn('[Notify] No email client configured');
         return;
       }
 
       try {
         const unsubscribeToken = generateUnsubscribeToken(entryOwner.handle, 'comments');
 
-        await resend.emails.send({
+        await emailClient.send({
           from: `Hermes <${fromEmail}>`,
           to: entryOwner.email,
           subject: `@${comment.handle} commented on your entry`,
@@ -407,8 +422,8 @@ Draw a connection between what they've been working on and what others are explo
       let sent = 0;
       let failed = 0;
 
-      if (!resend) {
-        console.warn('[Digest] No Resend client configured');
+      if (!emailClient) {
+        console.warn('[Digest] No email client configured');
         return { sent, failed };
       }
 
@@ -446,7 +461,7 @@ Draw a connection between what they've been working on and what others are explo
 
           const unsubscribeToken = generateUnsubscribeToken(user.handle, 'digest');
 
-          await resend.emails.send({
+          await emailClient.send({
             from: `Hermes <${fromEmail}>`,
             to: user.email!,
             subject: 'Your Hermes Daily Digest',
@@ -472,8 +487,8 @@ Draw a connection between what they've been working on and what others are explo
      * Send verification email when user sets/updates their email
      */
     async sendVerificationEmail(handle: string, email: string): Promise<boolean> {
-      if (!resend) {
-        console.warn('[Verify] No Resend client configured');
+      if (!emailClient) {
+        console.warn('[Verify] No email client configured');
         return false;
       }
 
@@ -486,7 +501,7 @@ Draw a connection between what they've been working on and what others are explo
       try {
         const verificationToken = generateVerificationToken(handle, email);
 
-        await resend.emails.send({
+        await emailClient.send({
           from: `Hermes <${fromEmail}>`,
           to: email,
           subject: 'Verify your email for Hermes',

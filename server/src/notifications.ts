@@ -217,7 +217,7 @@ export function createNotificationService(config: NotificationConfig): Notificat
     <p>This link will expire in 24 hours.</p>
   </div>
 
-  <a href="${baseUrl}/verify-email?token=${verificationToken}" class="btn">Verify Email</a>
+  <a href="${baseUrl}/api/verify-email?token=${verificationToken}" class="btn">Verify Email</a>
 
   <div class="footer">
     <p>If you didn't request this, you can safely ignore this email.</p>

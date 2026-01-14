@@ -197,9 +197,12 @@ const anthropic = process.env.ANTHROPIC_API_KEY
   : null;
 
 // Initialize SendGrid client for email notifications
+console.log(`[Email] SENDGRID_API_KEY present: ${!!process.env.SENDGRID_API_KEY}`);
+console.log(`[Email] SENDGRID_FROM_EMAIL: ${process.env.SENDGRID_FROM_EMAIL || '(not set, using default)'}`);
 const emailClient = process.env.SENDGRID_API_KEY
   ? createSendGridClient(process.env.SENDGRID_API_KEY)
   : null;
+console.log(`[Email] Email client initialized: ${!!emailClient}`);
 
 // Initialize notification service
 const notificationService: NotificationService = createNotificationService({

@@ -510,8 +510,10 @@ Draw a connection between what they've been working on and what others are explo
 
         console.log(`[Verify] Verification email sent to ${email} for @${handle}`);
         return true;
-      } catch (err) {
-        console.error(`[Verify] Failed to send verification email to ${email}:`, err);
+      } catch (err: any) {
+        console.error(`[Verify] Failed to send verification email to ${email}`);
+        console.error(`[Verify] From: ${fromEmail}`);
+        console.error(`[Verify] Error:`, err?.response?.body || err?.message || err);
         return false;
       }
     },

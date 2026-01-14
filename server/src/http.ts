@@ -2146,6 +2146,7 @@ const server = createServer(async (req, res) => {
         pseudonym,
         handle: user?.handle || null,
         displayName: user?.displayName || null,
+        email: user?.email || null,
         hasAccount: !!user,
       }));
       return;

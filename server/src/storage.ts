@@ -58,12 +58,19 @@ export interface EmailPrefs {
   digest: boolean;           // Receive daily digest
 }
 
+export interface EmailVerification {
+  token: string;             // Verification token
+  email: string;             // Email being verified
+  expiresAt: number;         // Token expiration timestamp
+}
+
 export interface User {
   handle: string;            // @james (unique, primary key, stored without @)
   secretKeyHash: string;     // SHA-256 hash of the secret key
   displayName?: string;      // "James"
   bio?: string;              // "Building things"
-  email?: string;            // For digest/messaging (encrypted in Firestore)
+  email?: string;            // For digest/messaging
+  emailVerified?: boolean;   // Whether email has been verified via link
   emailPrefs?: EmailPrefs;   // Email notification preferences
   links?: string[];          // External links (Twitter, website, etc.)
   createdAt: number;

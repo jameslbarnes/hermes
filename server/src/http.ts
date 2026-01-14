@@ -23,7 +23,7 @@ import { Resend } from 'resend';
 import { derivePseudonym, generateSecretKey, isValidSecretKey, hashSecretKey, isValidHandle, normalizeHandle } from './identity.js';
 import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary, type Conversation, type User, tokenize } from './storage.js';
 import { scrapeConversation, detectPlatform, isValidShareUrl, ScrapeError } from './scraper.js';
-import { createNotificationService, verifyUnsubscribeToken, type NotificationService } from './notifications.js';
+import { createNotificationService, verifyUnsubscribeToken, verifyEmailToken, type NotificationService } from './notifications.js';
 
 // Store active MCP sessions
 const mcpSessions = new Map<string, { transport: SSEServerTransport; secretKey: string }>();
@@ -2427,6 +2427,117 @@ const server = createServer(async (req, res) => {
       // Redirect to unsubscribe confirmation page
       res.writeHead(302, { Location: `/unsubscribe.html?type=${type}` });
       res.end();
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/send-verification - Send email verification
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/send-verification') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      await new Promise<void>(resolve => req.on('end', resolve));
+
+      const { key, email } = JSON.parse(body);
+
+      if (!key || !email) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Key and email required' }));
+        return;
+      }
+
+      // Validate the key and get the user
+      if (!isValidSecretKey(key)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid secret key' }));
+        return;
+      }
+
+      const keyHash = await hashSecretKey(key);
+      const user = await storage.getUserByKeyHash(keyHash);
+
+      if (!user) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'User not found' }));
+        return;
+      }
+
+      // Basic email validation
+      if (!email.includes('@') || email.length < 5) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid email address' }));
+        return;
+      }
+
+      // Store the pending email (unverified)
+      await storage.updateUser(user.handle, {
+        email,
+        emailVerified: false
+      });
+
+      // Send verification email
+      const sent = await notificationService.sendVerificationEmail(user.handle, email);
+
+      if (sent) {
+        res.writeHead(200);
+        res.end(JSON.stringify({
+          success: true,
+          message: 'Verification email sent. Check your inbox.'
+        }));
+      } else {
+        res.writeHead(500);
+        res.end(JSON.stringify({
+          error: 'Failed to send verification email. Please try again.'
+        }));
+      }
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/verify-email - Handle email verification link
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/verify-email') {
+      const token = url.searchParams.get('token');
+
+      if (!token) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Verification token required' }));
+        return;
+      }
+
+      const jwtSecret = process.env.JWT_SECRET || 'hermes-default-secret-change-in-production';
+      const decoded = verifyEmailToken(token, jwtSecret);
+
+      if (!decoded) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid or expired verification link' }));
+        return;
+      }
+
+      // Verify the user exists and the email matches
+      const user = await storage.getUser(decoded.handle);
+      if (!user) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'User not found' }));
+        return;
+      }
+
+      // Check if the pending email matches
+      if (user.email !== decoded.email) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Email address has changed. Please request a new verification email.' }));
+        return;
+      }
+
+      // Mark email as verified
+      await storage.updateUser(decoded.handle, { emailVerified: true });
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        success: true,
+        handle: decoded.handle,
+        email: decoded.email
+      }));
       return;
     }
 

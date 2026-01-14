@@ -281,7 +281,7 @@
                 </div>
                 <div style="margin-bottom: 1rem;">
                     <label style="display: block; font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-muted); margin-bottom: 0.5rem;">Email (optional)</label>
-                    <p style="font-size: 0.8rem; color: var(--fg-muted); margin-bottom: 0.5rem;">Get notified when someone comments on your entries</p>
+                    <p style="font-size: 0.8rem; color: var(--fg-muted); margin-bottom: 0.5rem;">Get notified when someone comments on your entries. We'll send a verification link.</p>
                     <input type="email" id="email-input" placeholder="you@example.com"
                            style="width: 100%; padding: 0.6rem 0.75rem; font-family: 'IBM Plex Mono', monospace; font-size: 0.9rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--fg);">
                 </div>
@@ -321,11 +321,11 @@
                 <div id="email-editor" style="display: none; margin-top: 1rem;">
                     <div style="margin-bottom: 1rem;">
                         <label style="display: block; font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-muted); margin-bottom: 0.5rem;">Email</label>
-                        <p style="font-size: 0.8rem; color: var(--fg-muted); margin-bottom: 0.5rem;">Get notified when someone comments on your entries</p>
+                        <p style="font-size: 0.8rem; color: var(--fg-muted); margin-bottom: 0.5rem;">Get notified when someone comments on your entries. We'll send a verification link.</p>
                         <input type="email" id="edit-email" placeholder="you@example.com"
                                style="width: 100%; padding: 0.6rem 0.75rem; font-family: 'IBM Plex Mono', monospace; font-size: 0.9rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--fg);">
                     </div>
-                    <button class="generate-btn" onclick="saveEmail()">Save Email</button>
+                    <button class="generate-btn" onclick="saveEmail()">Send Verification</button>
                     <button class="copy-btn" style="margin-left: 0.5rem;" onclick="hideEmailEditor()">Cancel</button>
                 </div>
             </div>
@@ -362,7 +362,7 @@
                 </div>
                 <div style="margin-bottom: 1rem;">
                     <label style="display: block; font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-muted); margin-bottom: 0.5rem;">Email (optional)</label>
-                    <p style="font-size: 0.8rem; color: var(--fg-muted); margin-bottom: 0.5rem;">Get notified when someone comments on your entries</p>
+                    <p style="font-size: 0.8rem; color: var(--fg-muted); margin-bottom: 0.5rem;">Get notified when someone comments on your entries. We'll send a verification link.</p>
                     <input type="email" id="claim-email-input" placeholder="you@example.com"
                            style="width: 100%; padding: 0.6rem 0.75rem; font-family: 'IBM Plex Mono', monospace; font-size: 0.9rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--fg);">
                 </div>
@@ -666,6 +666,24 @@ GET /api/search?q=keyword</code>
                 showIdentityDisplay(registerData.handle, registerData.displayName, keyData.secret_key, null);
                 updateCommands(keyData.secret_key, registerData.handle);
 
+                // Send verification email if email was provided
+                if (email) {
+                    try {
+                        await fetch('/api/send-verification', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                key: keyData.secret_key,
+                                email: email
+                            })
+                        });
+                        alert('Account created! Check your email inbox for a verification link to enable notifications.');
+                    } catch (e) {
+                        // Verification email failed but account was created
+                        console.error('Failed to send verification email:', e);
+                    }
+                }
+
             } catch (err) {
                 alert(err.message || 'Failed to create account. Please try again.');
                 btn.textContent = 'Create Account';
@@ -706,7 +724,25 @@ GET /api/search?q=keyword</code>
                 currentHandle = data.handle;
                 showIdentityDisplay(data.handle, data.displayName, currentKey, data.legacyPseudonym);
 
-                if (data.migratedEntries > 0) {
+                // Send verification email if email was provided
+                if (email) {
+                    try {
+                        await fetch('/api/send-verification', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                key: currentKey,
+                                email: email
+                            })
+                        });
+                        alert(`Handle claimed! ${data.migratedEntries > 0 ? `${data.migratedEntries} entries migrated. ` : ''}Check your email for a verification link to enable notifications.`);
+                    } catch (e) {
+                        console.error('Failed to send verification email:', e);
+                        if (data.migratedEntries > 0) {
+                            alert(`Success! ${data.migratedEntries} entries migrated to @${data.handle}`);
+                        }
+                    }
+                } else if (data.migratedEntries > 0) {
                     alert(`Success! ${data.migratedEntries} entries migrated to @${data.handle}`);
                 }
 
@@ -869,25 +905,52 @@ Generated: ${new Date().toISOString()}
             if (!currentKey) return;
             const email = document.getElementById('edit-email').value.trim();
 
+            if (!email) {
+                // Clear email - update directly
+                try {
+                    const res = await fetch('/api/identity/update', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            secret_key: currentKey,
+                            email: ''
+                        })
+                    });
+
+                    if (!res.ok) {
+                        const data = await res.json();
+                        throw new Error(data.error || 'Failed to clear email');
+                    }
+
+                    alert('Email removed.');
+                    hideEmailEditor();
+                } catch (err) {
+                    alert(err.message || 'Failed to clear email. Please try again.');
+                }
+                return;
+            }
+
+            // Send verification email
             try {
-                const res = await fetch('/api/identity/update', {
+                const res = await fetch('/api/send-verification', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        secret_key: currentKey,
+                        key: currentKey,
                         email: email
                     })
                 });
 
+                const data = await res.json();
+
                 if (!res.ok) {
-                    const data = await res.json();
-                    throw new Error(data.error || 'Failed to update email');
+                    throw new Error(data.error || 'Failed to send verification email');
                 }
 
-                alert('Email updated successfully!');
+                alert('Verification email sent! Check your inbox and click the link to verify.');
                 hideEmailEditor();
             } catch (err) {
-                alert(err.message || 'Failed to update email. Please try again.');
+                alert(err.message || 'Failed to send verification email. Please try again.');
             }
         }
     </script>

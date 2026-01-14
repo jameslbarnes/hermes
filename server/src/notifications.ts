@@ -30,6 +30,7 @@ function canSendEmailTo(handle: string): boolean {
 export interface NotificationService {
   notifyCommentPosted(comment: Comment, entry: JournalEntry): Promise<void>;
   sendDailyDigests(): Promise<{ sent: number; failed: number }>;
+  sendVerificationEmail(handle: string, email: string): Promise<boolean>;
 }
 
 interface NotificationConfig {
@@ -162,6 +163,49 @@ export function createNotificationService(config: NotificationConfig): Notificat
   <div class="footer">
     <p>Your daily digest from Hermes.</p>
     <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=digest">Unsubscribe from daily digest</a>
+  </div>
+</body>
+</html>
+    `.trim();
+  }
+
+  /**
+   * Generate email verification token
+   */
+  function generateVerificationToken(handle: string, email: string): string {
+    return jwt.sign({ handle, email, purpose: 'verify-email' }, jwtSecret, { expiresIn: '24h' });
+  }
+
+  /**
+   * Render verification email HTML
+   */
+  function renderVerificationEmail(handle: string, verificationToken: string): string {
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Georgia, serif; line-height: 1.6; color: #1a1a1a; max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { color: #7c5cbf; font-size: 18px; font-weight: bold; margin-bottom: 20px; }
+    .message { margin-bottom: 30px; }
+    .btn { display: inline-block; background: #7c5cbf; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500; }
+    .footer { font-size: 12px; color: #999; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; }
+  </style>
+</head>
+<body>
+  <div class="header">Verify your email for Hermes</div>
+
+  <div class="message">
+    <p>Hi @${handle},</p>
+    <p>Click the button below to verify your email address and start receiving notifications from Hermes.</p>
+    <p>This link will expire in 24 hours.</p>
+  </div>
+
+  <a href="${baseUrl}/verify-email?token=${verificationToken}" class="btn">Verify Email</a>
+
+  <div class="footer">
+    <p>If you didn't request this, you can safely ignore this email.</p>
   </div>
 </body>
 </html>
@@ -318,6 +362,11 @@ Draw a connection between what they've been working on and what others are explo
         return; // No email registered
       }
 
+      // Only send to verified emails
+      if (!entryOwner.emailVerified) {
+        return; // Email not verified
+      }
+
       // Check email preferences
       if (entryOwner.emailPrefs && !entryOwner.emailPrefs.comments) {
         return; // User disabled comment notifications
@@ -367,6 +416,11 @@ Draw a connection between what they've been working on and what others are explo
       console.log(`[Digest] Processing ${usersWithEmail.length} users with email`);
 
       for (const user of usersWithEmail) {
+        // Only send to verified emails
+        if (!user.emailVerified) {
+          continue; // Email not verified
+        }
+
         // Check email preferences
         if (user.emailPrefs && !user.emailPrefs.digest) {
           continue; // User disabled digest
@@ -413,7 +467,62 @@ Draw a connection between what they've been working on and what others are explo
 
       return { sent, failed };
     },
+
+    /**
+     * Send verification email when user sets/updates their email
+     */
+    async sendVerificationEmail(handle: string, email: string): Promise<boolean> {
+      if (!resend) {
+        console.warn('[Verify] No Resend client configured');
+        return false;
+      }
+
+      // Rate limiting (counts against daily email limit)
+      if (!canSendEmailTo(handle)) {
+        console.log(`[Verify] Rate limited for @${handle}`);
+        return false;
+      }
+
+      try {
+        const verificationToken = generateVerificationToken(handle, email);
+
+        await resend.emails.send({
+          from: `Hermes <${fromEmail}>`,
+          to: email,
+          subject: 'Verify your email for Hermes',
+          html: renderVerificationEmail(handle, verificationToken),
+        });
+
+        console.log(`[Verify] Verification email sent to ${email} for @${handle}`);
+        return true;
+      } catch (err) {
+        console.error(`[Verify] Failed to send verification email to ${email}:`, err);
+        return false;
+      }
+    },
   };
+}
+
+/**
+ * Verify email verification token
+ */
+export function verifyEmailToken(
+  token: string,
+  jwtSecret: string
+): { handle: string; email: string } | null {
+  try {
+    const decoded = jwt.verify(token, jwtSecret) as {
+      handle: string;
+      email: string;
+      purpose: string;
+    };
+    if (decoded.purpose !== 'verify-email') {
+      return null;
+    }
+    return { handle: decoded.handle, email: decoded.email };
+  } catch {
+    return null;
+  }
 }
 
 /**

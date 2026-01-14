@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify Email - Hermes</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #faf9f7;
+            --surface: #ffffff;
+            --border: #e8e6e3;
+            --fg: #1a1a1a;
+            --fg-muted: #6b6b6b;
+            --accent: #7c5cbf;
+            --success: #4caf50;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0a0a0b;
+                --surface: #111113;
+                --border: #2a2a2e;
+                --fg: #e4e4e7;
+                --fg-muted: #8b8b8b;
+                --accent: #a78bfa;
+                --success: #81c784;
+            }
+        }
+
+        body {
+            font-family: 'Newsreader', Georgia, serif;
+            background: var(--bg);
+            color: var(--fg);
+            min-height: 100vh;
+            padding: 3rem 2rem;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            text-align: center;
+            padding-top: 4rem;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 500;
+            font-style: italic;
+            margin-bottom: 1rem;
+        }
+
+        .message {
+            color: var(--fg-muted);
+            line-height: 1.6;
+            margin-bottom: 2rem;
+        }
+
+        .status {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .status.success {
+            border-color: rgba(129, 199, 132, 0.5);
+            background: rgba(129, 199, 132, 0.1);
+        }
+
+        .status.error {
+            border-color: rgba(229, 115, 115, 0.5);
+            background: rgba(229, 115, 115, 0.1);
+        }
+
+        .status.loading {
+            color: var(--fg-muted);
+        }
+
+        .handle {
+            font-family: 'IBM Plex Mono', monospace;
+            color: var(--accent);
+            font-weight: 500;
+        }
+
+        .email {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.9rem;
+            color: var(--fg-muted);
+        }
+
+        .back-link {
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+
+        .back-link:hover {
+            opacity: 0.8;
+        }
+
+        .checkmark {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Email Verification</h1>
+
+        <div id="status" class="status loading">
+            Verifying your email...
+        </div>
+
+        <a href="/" class="back-link">Back to the notebook</a>
+    </div>
+
+    <script>
+        async function verifyEmail() {
+            const params = new URLSearchParams(window.location.search);
+            const token = params.get('token');
+            const statusEl = document.getElementById('status');
+
+            if (!token) {
+                statusEl.className = 'status error';
+                statusEl.innerHTML = 'Invalid verification link. Please use the link from your email.';
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/verify-email?token=${encodeURIComponent(token)}`);
+                const data = await res.json();
+
+                if (res.ok) {
+                    statusEl.className = 'status success';
+                    statusEl.innerHTML = `
+                        <div class="checkmark">&#10003;</div>
+                        <p>Your email has been verified!</p>
+                        <p style="margin-top: 0.75rem;">
+                            <span class="handle">@${data.handle}</span>
+                        </p>
+                        <p class="email">${data.email}</p>
+                        <p style="margin-top: 1rem; font-size: 0.9rem; color: var(--fg-muted);">
+                            You'll now receive notifications when someone comments on your entries.
+                        </p>
+                    `;
+                } else {
+                    statusEl.className = 'status error';
+                    statusEl.innerHTML = data.error || 'Failed to verify email. The link may have expired.';
+                }
+            } catch (err) {
+                statusEl.className = 'status error';
+                statusEl.innerHTML = 'An error occurred. Please try again later.';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', verifyEmail);
+    </script>
+</body>
+</html>

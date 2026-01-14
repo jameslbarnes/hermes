@@ -207,7 +207,7 @@ const notificationService: NotificationService = createNotificationService({
   storage,
   resend,
   anthropic,
-  fromEmail: process.env.RESEND_FROM_EMAIL || 'notify@hermes.teleport.computer',
+  fromEmail: process.env.RESEND_FROM_EMAIL || 'notify@teleport.computer',
   baseUrl: BASE_URL,
   jwtSecret: process.env.JWT_SECRET || 'hermes-default-secret-change-in-production',
 });
@@ -2809,17 +2809,17 @@ const server = createServer(async (req, res) => {
           RecordType4: 'TXT',
           Address4: 'db82f581256a3c9244c4d7129a67336990d08cdf:443',
           TTL4: '60',
-          // Resend email records for hermes.teleport.computer
-          HostName5: 'resend._domainkey.hermes',
+          // Resend email records for teleport.computer (simpler subdomain)
+          HostName5: 'resend._domainkey',
           RecordType5: 'TXT',
-          Address5: 'p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDM/+ZycEuu8aNaQibT2vvskdrmTep7+sJKO+bj8foMYTmYObop5xef7ySZwQY47KjS6b8TGvqJP4IEMG41VNQLIuM97PA+ihioH4/f6qPpGBMDZh6/eV2WwHldY5WjGqfvzhANwXNqgSrElVcweSuyT348bssj90+LNxZMm8QCUwIDAQAB',
+          Address5: 'p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDaoLYiKKzDJzXMgKk4CNNCGnUr4WO2OWxtwfcX/K3XMpfXthOtlWw2tQtW+JX0/Zj2utoczaTJbQoqbAEj2ZN/oauRteQR9GC1leQ4i0LW3hGWbS/36mAYnyA1GmaoeYKA1yTOHGwhh1Y+wU5xCSC3bzacyE9sBiAnn/z1ZAUeCQIDAQAB',
           TTL5: '1799',
-          HostName6: 'send.hermes',
+          HostName6: 'send',
           RecordType6: 'MX',
           Address6: 'feedback-smtp.us-east-1.amazonses.com',
           MXPref6: '10',
           TTL6: '1799',
-          HostName7: 'send.hermes',
+          HostName7: 'send',
           RecordType7: 'TXT',
           Address7: 'v=spf1 include:amazonses.com ~all',
           TTL7: '1799',
@@ -2931,9 +2931,9 @@ async function fixDnsOnStartup() {
   console.log('  2. hermes -> CNAME dstack');
   console.log('  3. _dstack-app-address.hermes -> TXT');
   console.log('  4. _tapp-address.hermes -> TXT');
-  console.log('  5. resend._domainkey.hermes -> TXT (DKIM)');
-  console.log('  6. send.hermes -> MX feedback-smtp.us-east-1.amazonses.com (priority 10)');
-  console.log('  7. send.hermes -> TXT v=spf1 include:amazonses.com ~all');
+  console.log('  5. resend._domainkey -> TXT (DKIM)');
+  console.log('  6. send -> MX feedback-smtp.us-east-1.amazonses.com (priority 10)');
+  console.log('  7. send -> TXT v=spf1 include:amazonses.com ~all');
   console.log('  8. _dmarc -> TXT v=DMARC1; p=none;');
 
   try {
@@ -2961,17 +2961,17 @@ async function fixDnsOnStartup() {
       RecordType4: 'TXT',
       Address4: 'db82f581256a3c9244c4d7129a67336990d08cdf:443',
       TTL4: '60',
-      // Resend email records for hermes.teleport.computer
-      HostName5: 'resend._domainkey.hermes',
+      // Resend email records for teleport.computer (simpler subdomain)
+      HostName5: 'resend._domainkey',
       RecordType5: 'TXT',
-      Address5: 'p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDM/+ZycEuu8aNaQibT2vvskdrmTep7+sJKO+bj8foMYTmYObop5xef7ySZwQY47KjS6b8TGvqJP4IEMG41VNQLIuM97PA+ihioH4/f6qPpGBMDZh6/eV2WwHldY5WjGqfvzhANwXNqgSrElVcweSuyT348bssj90+LNxZMm8QCUwIDAQAB',
+      Address5: 'p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDaoLYiKKzDJzXMgKk4CNNCGnUr4WO2OWxtwfcX/K3XMpfXthOtlWw2tQtW+JX0/Zj2utoczaTJbQoqbAEj2ZN/oauRteQR9GC1leQ4i0LW3hGWbS/36mAYnyA1GmaoeYKA1yTOHGwhh1Y+wU5xCSC3bzacyE9sBiAnn/z1ZAUeCQIDAQAB',
       TTL5: '1799',
-      HostName6: 'send.hermes',
+      HostName6: 'send',
       RecordType6: 'MX',
       Address6: 'feedback-smtp.us-east-1.amazonses.com',
       MXPref6: '10',
       TTL6: '1799',
-      HostName7: 'send.hermes',
+      HostName7: 'send',
       RecordType7: 'TXT',
       Address7: 'v=spf1 include:amazonses.com ~all',
       TTL7: '1799',

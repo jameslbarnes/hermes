@@ -2910,8 +2910,11 @@ function readBody(req: import('http').IncomingMessage): Promise<string> {
 
 // Fix DNS records on startup (dstack-ingress may have overwritten them)
 async function fixDnsOnStartup() {
+  console.log('DNS fix: Starting DNS fix on startup...');
   const apiKey = process.env.NAMECHEAP_API_KEY;
   const clientIp = process.env.NAMECHEAP_CLIENT_IP;
+
+  console.log(`DNS fix: API key present: ${!!apiKey}, Client IP: ${clientIp || 'not set'}`);
 
   if (!apiKey || !clientIp) {
     console.log('DNS fix: Namecheap credentials not configured, skipping');
@@ -2922,8 +2925,18 @@ async function fixDnsOnStartup() {
   console.log('DNS fix: Waiting 30s for dstack-ingress to settle...');
   await new Promise(resolve => setTimeout(resolve, 30000));
 
+  console.log('DNS fix: Setting DNS records for teleport.computer...');
+  console.log('DNS fix: Records to set:');
+  console.log('  1. tee -> A 98.89.30.212');
+  console.log('  2. hermes -> CNAME dstack');
+  console.log('  3. _dstack-app-address.hermes -> TXT');
+  console.log('  4. _tapp-address.hermes -> TXT');
+  console.log('  5. resend._domainkey.hermes -> TXT (DKIM)');
+  console.log('  6. send.hermes -> MX feedback-smtp.us-east-1.amazonses.com (priority 10)');
+  console.log('  7. send.hermes -> TXT v=spf1 include:amazonses.com ~all');
+  console.log('  8. _dmarc -> TXT v=DMARC1; p=none;');
+
   try {
-    console.log('DNS fix: Setting correct DNS records...');
     const params = new URLSearchParams({
       ApiUser: 'sxysun9',
       ApiKey: apiKey,
@@ -2968,15 +2981,24 @@ async function fixDnsOnStartup() {
       TTL8: '1799',
     });
 
+    console.log('DNS fix: Calling Namecheap API...');
     const response = await fetch(`https://api.namecheap.com/xml.response?${params.toString()}`);
     const xml = await response.text();
+    console.log(`DNS fix: API response status: ${response.status}`);
+
     if (xml.includes('IsSuccess="true"')) {
-      console.log('DNS fix: Successfully set DNS records');
+      console.log('DNS fix: SUCCESS - All DNS records set correctly');
+      console.log('DNS fix: MX record for send.hermes should now be live');
+      console.log('DNS fix: Run domain.verify() in Resend to confirm SPF');
+    } else if (xml.includes('IP is not associated')) {
+      console.error('DNS fix: FAILED - Client IP not whitelisted in Namecheap');
+      console.error(`DNS fix: Tried to use IP: ${clientIp}`);
     } else {
-      console.error('DNS fix: API returned error:', xml.slice(0, 500));
+      console.error('DNS fix: FAILED - API returned error');
+      console.error('DNS fix: Response:', xml.slice(0, 800));
     }
   } catch (err) {
-    console.error('DNS fix: Failed to set DNS records:', err);
+    console.error('DNS fix: EXCEPTION - Failed to set DNS records:', err);
   }
 }
 

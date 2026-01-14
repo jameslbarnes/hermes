@@ -279,6 +279,12 @@
                     <textarea id="bio-input" placeholder="A short bio about yourself..."
                               style="width: 100%; padding: 0.6rem 0.75rem; font-family: 'Newsreader', Georgia, serif; font-size: 0.9rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--fg); resize: vertical; min-height: 80px;"></textarea>
                 </div>
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-muted); margin-bottom: 0.5rem;">Email (optional)</label>
+                    <p style="font-size: 0.8rem; color: var(--fg-muted); margin-bottom: 0.5rem;">Get notified when someone comments on your entries</p>
+                    <input type="email" id="email-input" placeholder="you@example.com"
+                           style="width: 100%; padding: 0.6rem 0.75rem; font-family: 'IBM Plex Mono', monospace; font-size: 0.9rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--fg);">
+                </div>
                 <button class="generate-btn" id="register-btn" onclick="registerUser()" disabled>Create Account</button>
             </div>
 
@@ -340,6 +346,12 @@
                     <label style="display: block; font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-muted); margin-bottom: 0.5rem;">Bio (optional)</label>
                     <textarea id="claim-bio-input" placeholder="A short bio about yourself..."
                               style="width: 100%; padding: 0.6rem 0.75rem; font-family: 'Newsreader', Georgia, serif; font-size: 0.9rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--fg); resize: vertical; min-height: 80px;"></textarea>
+                </div>
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-muted); margin-bottom: 0.5rem;">Email (optional)</label>
+                    <p style="font-size: 0.8rem; color: var(--fg-muted); margin-bottom: 0.5rem;">Get notified when someone comments on your entries</p>
+                    <input type="email" id="claim-email-input" placeholder="you@example.com"
+                           style="width: 100%; padding: 0.6rem 0.75rem; font-family: 'IBM Plex Mono', monospace; font-size: 0.9rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--fg);">
                 </div>
                 <button class="generate-btn" id="claim-btn" onclick="claimHandle()" disabled>Claim Handle</button>
                 <button class="copy-btn" style="margin-left: 0.5rem;" onclick="skipClaim()">Skip for now</button>
@@ -599,6 +611,7 @@ GET /api/search?q=keyword</code>
             const handle = document.getElementById('handle-input').value;
             const displayName = document.getElementById('display-name-input').value.trim();
             const bio = document.getElementById('bio-input').value.trim();
+            const email = document.getElementById('email-input').value.trim();
 
             btn.textContent = 'Creating...';
             btn.disabled = true;
@@ -615,6 +628,7 @@ GET /api/search?q=keyword</code>
                 };
                 if (displayName) registerBody.displayName = displayName;
                 if (bio) registerBody.bio = bio;
+                if (email) registerBody.email = email;
 
                 const registerRes = await fetch('/api/identity/register', {
                     method: 'POST',
@@ -647,6 +661,7 @@ GET /api/search?q=keyword</code>
             const handle = document.getElementById('claim-handle-input').value;
             const displayName = document.getElementById('claim-display-name-input').value.trim();
             const bio = document.getElementById('claim-bio-input').value.trim();
+            const email = document.getElementById('claim-email-input').value.trim();
 
             btn.textContent = 'Claiming...';
             btn.disabled = true;
@@ -658,6 +673,7 @@ GET /api/search?q=keyword</code>
                 };
                 if (displayName) claimBody.displayName = displayName;
                 if (bio) claimBody.bio = bio;
+                if (email) claimBody.email = email;
 
                 const res = await fetch('/api/identity/claim', {
                     method: 'POST',

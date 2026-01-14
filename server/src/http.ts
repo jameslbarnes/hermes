@@ -19,9 +19,11 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import Anthropic from '@anthropic-ai/sdk';
+import { Resend } from 'resend';
 import { derivePseudonym, generateSecretKey, isValidSecretKey, hashSecretKey, isValidHandle, normalizeHandle } from './identity.js';
 import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary, type Conversation, type User, tokenize } from './storage.js';
 import { scrapeConversation, detectPlatform, isValidShareUrl, ScrapeError } from './scraper.js';
+import { createNotificationService, verifyUnsubscribeToken, type NotificationService } from './notifications.js';
 
 // Store active MCP sessions
 const mcpSessions = new Map<string, { transport: SSEServerTransport; secretKey: string }>();
@@ -195,6 +197,31 @@ const anthropic = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   : null;
 
+// Initialize Resend client for email notifications
+const resend = process.env.RESEND_API_KEY
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
+
+// Initialize notification service
+const notificationService: NotificationService = createNotificationService({
+  storage,
+  resend,
+  anthropic,
+  fromEmail: process.env.RESEND_FROM_EMAIL || 'notify@hermes.teleport.computer',
+  baseUrl: BASE_URL,
+  jwtSecret: process.env.JWT_SECRET || 'hermes-default-secret-change-in-production',
+});
+
+// Start daily digest job (runs hourly, sends at 14:00 UTC)
+const DIGEST_HOUR_UTC = 14;
+setInterval(async () => {
+  const now = new Date();
+  if (now.getUTCHours() === DIGEST_HOUR_UTC && now.getUTCMinutes() === 0) {
+    console.log('[Digest] Starting daily digest job...');
+    const result = await notificationService.sendDailyDigests();
+    console.log(`[Digest] Complete. Sent: ${result.sent}, Failed: ${result.failed}`);
+  }
+}, 60 * 1000); // Check every minute
 
 // Track last entry timestamp per pseudonym (in memory, rebuilt from DB on demand)
 const lastEntryTimestamp = new Map<string, number>();
@@ -1032,14 +1059,6 @@ function createMCPServer(secretKey: string) {
         };
       }
 
-      // Prevent commenting on own entries (but allow replying to comments on own entries)
-      if (entry.pseudonym === pseudonym && !parentCommentId) {
-        return {
-          content: [{ type: 'text' as const, text: 'You cannot comment on your own entries.' }],
-          isError: true,
-        };
-      }
-
       // If replying to a comment, verify parent exists
       if (parentCommentId) {
         const parentComments = await storage.getCommentsForEntry(entryId);
@@ -1060,12 +1079,13 @@ function createMCPServer(secretKey: string) {
         timestamp: Date.now(),
       });
 
-      const delayMinutes = Math.round(STAGING_DELAY_MS / 1000 / 60);
+      // Fire-and-forget notification
+      notificationService.notifyCommentPosted(saved, entry).catch(() => {});
 
       return {
         content: [{
           type: 'text' as const,
-          text: `Comment posted (publishes in ${delayMinutes} minutes):\n\n"${comment.trim()}"\n\nComment ID: ${saved.id}`,
+          text: `Comment posted:\n\n"${comment.trim()}"\n\nComment ID: ${saved.id}`,
         }],
       };
     }
@@ -1090,13 +1110,19 @@ function createMCPServer(secretKey: string) {
         };
       }
 
-      // Get comments by this user's handle to verify ownership
-      const userComments = await storage.getCommentsByHandle(deleteUser.handle);
-      const commentToDelete = userComments.find(c => c.id === commentId);
+      // Fetch comment by ID and verify ownership
+      const commentToDelete = await storage.getCommentById(commentId);
 
       if (!commentToDelete) {
         return {
-          content: [{ type: 'text' as const, text: 'Comment not found or you can only delete your own comments.' }],
+          content: [{ type: 'text' as const, text: 'Comment not found.' }],
+          isError: true,
+        };
+      }
+
+      if (commentToDelete.handle !== deleteUser.handle) {
+        return {
+          content: [{ type: 'text' as const, text: 'You can only delete your own comments.' }],
           isError: true,
         };
       }
@@ -1474,57 +1500,136 @@ const server = createServer(async (req, res) => {
     // ═══════════════════════════════════════════════════════════════
 
     // ─────────────────────────────────────────────────────────────
-    // GET /api/comments?entryIds=id1,id2,id3&key=KEY - Get comments for entries
+    // GET /api/comments?entryIds=...&summaryIds=...&key=KEY - Get comments for entries and summaries
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/comments') {
       const entryIdsParam = url.searchParams.get('entryIds');
+      const summaryIdsParam = url.searchParams.get('summaryIds');
       const key = url.searchParams.get('key');
 
-      if (!entryIdsParam) {
-        res.writeHead(400);
-        res.end(JSON.stringify({ error: 'entryIds parameter required (comma-separated)' }));
-        return;
-      }
+      const entryIds = entryIdsParam ? entryIdsParam.split(',').map(id => id.trim()).filter(Boolean) : [];
+      const summaryIds = summaryIdsParam ? summaryIdsParam.split(',').map(id => id.trim()).filter(Boolean) : [];
 
-      const entryIds = entryIdsParam.split(',').map(id => id.trim()).filter(Boolean);
-      if (entryIds.length === 0) {
+      if (entryIds.length === 0 && summaryIds.length === 0) {
         res.writeHead(200);
-        res.end(JSON.stringify({ comments: {} }));
+        res.end(JSON.stringify({ comments: {}, summaryComments: {} }));
         return;
       }
 
-      // Look up user's handle if key provided (to show their pending comments)
-      let userHandle: string | null = null;
-      if (key) {
-        const keyHash = hashSecretKey(key);
-        const user = await storage.getUserByKeyHash(keyHash);
-        userHandle = user?.handle || null;
-      }
+      // Fetch all comments in parallel for speed
+      const [entryResults, summaryResults] = await Promise.all([
+        // Fetch comments for all entries in parallel
+        Promise.all(entryIds.map(async (entryId) => {
+          const comments = await storage.getCommentsForEntry(entryId);
+          return { entryId, comments };
+        })),
+        // Fetch comments for all summaries in parallel
+        Promise.all(summaryIds.map(async (summaryId) => {
+          try {
+            const comments = await storage.getCommentsForSummary(summaryId);
+            return { summaryId, comments };
+          } catch (error: any) {
+            // Index may still be building - return empty
+            if (error?.code === 9 || error?.details?.includes('index')) {
+              return { summaryId, comments: [] };
+            }
+            throw error;
+          }
+        }))
+      ]);
 
-      // Fetch comments for each entry
+      // Build response objects
       const commentsByEntry: Record<string, any[]> = {};
-      for (const entryId of entryIds) {
-        const comments = await storage.getCommentsForEntry(entryId);
-        // Include published comments OR pending comments owned by this user
-        const visibleComments = comments.filter(c => {
-          const isPublished = !c.publishAt || c.publishAt <= Date.now();
-          const isOwnPending = userHandle && c.handle === userHandle;
-          return isPublished || isOwnPending;
-        });
-        if (visibleComments.length > 0) {
-          commentsByEntry[entryId] = visibleComments.map(c => ({
+      for (const { entryId, comments } of entryResults) {
+        if (comments.length > 0) {
+          commentsByEntry[entryId] = comments.map(c => ({
             id: c.id,
             parentCommentId: c.parentCommentId,
             handle: c.handle,
             content: c.content,
             timestamp: c.timestamp,
-            publishAt: c.publishAt, // Include so frontend can show pending state
+          }));
+        }
+      }
+
+      const commentsBySummary: Record<string, any[]> = {};
+      for (const { summaryId, comments } of summaryResults) {
+        if (comments.length > 0) {
+          commentsBySummary[summaryId] = comments.map(c => ({
+            id: c.id,
+            parentCommentId: c.parentCommentId,
+            handle: c.handle,
+            content: c.content,
+            timestamp: c.timestamp,
           }));
         }
       }
 
       res.writeHead(200);
-      res.end(JSON.stringify({ comments: commentsByEntry }));
+      res.end(JSON.stringify({ comments: commentsByEntry, summaryComments: commentsBySummary }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/comments - Post a comment (for human users via web UI)
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/comments') {
+      const body = await readBody(req);
+      const { entryId, summaryId, content, key, parentCommentId } = JSON.parse(body);
+
+      // Must have either entryId or summaryId (but not both required)
+      if ((!entryId && !summaryId) || !content || !key) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Either entryId or summaryId required, plus content and key' }));
+        return;
+      }
+
+      // Look up user by key
+      const keyHash = hashSecretKey(key);
+      const user = await storage.getUserByKeyHash(keyHash);
+
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'You need a handle to post comments. Visit /setup.html to claim one.' }));
+        return;
+      }
+
+      // Validate the target exists
+      let entry: JournalEntry | null = null;
+      if (entryId) {
+        entry = await storage.getEntry(entryId);
+        if (!entry) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: 'Entry not found' }));
+          return;
+        }
+      }
+      // Note: summaryId validation would require fetching summaries, skip for now
+
+      // Save the comment
+      const saved = await storage.addComment({
+        entryId: entryId || undefined,
+        summaryId: summaryId || undefined,
+        parentCommentId: parentCommentId || undefined,
+        handle: user.handle,
+        content: content.trim(),
+        timestamp: Date.now(),
+      });
+
+      // Fire-and-forget notification (only for entry comments, not summary comments)
+      if (entry) {
+        notificationService.notifyCommentPosted(saved, entry).catch(() => {});
+      }
+
+      res.writeHead(201);
+      res.end(JSON.stringify({
+        id: saved.id,
+        entryId: saved.entryId,
+        summaryId: saved.summaryId,
+        handle: user.handle,
+        content: content.trim(),
+        timestamp: saved.timestamp,
+      }));
       return;
     }
 
@@ -1535,13 +1640,11 @@ const server = createServer(async (req, res) => {
       const entryId = decodeURIComponent(url.pathname.slice('/api/comments/'.length));
 
       const comments = await storage.getCommentsForEntry(entryId);
-      // Only include published comments
-      const publishedComments = comments.filter(c => !c.publishAt || c.publishAt <= Date.now());
 
       res.writeHead(200);
       res.end(JSON.stringify({
         entryId,
-        comments: publishedComments.map(c => ({
+        comments: comments.map(c => ({
           id: c.id,
           parentCommentId: c.parentCommentId,
           handle: c.handle,
@@ -1575,13 +1678,18 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      // Get comments by this user's handle to verify ownership
-      const userComments = await storage.getCommentsByHandle(user.handle);
-      const commentToDelete = userComments.find(c => c.id === commentId);
+      // Fetch comment by ID and verify ownership
+      const commentToDelete = await storage.getCommentById(commentId);
 
       if (!commentToDelete) {
         res.writeHead(404);
-        res.end(JSON.stringify({ error: 'Comment not found or you can only delete your own comments' }));
+        res.end(JSON.stringify({ error: 'Comment not found' }));
+        return;
+      }
+
+      if (commentToDelete.handle !== user.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'You can only delete your own comments' }));
         return;
       }
 
@@ -2281,6 +2389,47 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // GET /api/unsubscribe - Handle unsubscribe from email notifications
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/unsubscribe') {
+      const token = url.searchParams.get('token');
+      const type = url.searchParams.get('type') as 'comments' | 'digest' | null;
+
+      if (!token || !type) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Token and type required' }));
+        return;
+      }
+
+      const jwtSecret = process.env.JWT_SECRET || 'hermes-default-secret-change-in-production';
+      const decoded = verifyUnsubscribeToken(token, jwtSecret);
+
+      if (!decoded) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid or expired unsubscribe link' }));
+        return;
+      }
+
+      // Update user's email preferences
+      const user = await storage.getUser(decoded.handle);
+      if (!user) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'User not found' }));
+        return;
+      }
+
+      const currentPrefs = user.emailPrefs || { comments: true, digest: true };
+      const newPrefs = { ...currentPrefs, [type]: false };
+
+      await storage.updateUser(decoded.handle, { emailPrefs: newPrefs });
+
+      // Redirect to unsubscribe confirmation page
+      res.writeHead(302, { Location: `/unsubscribe.html?type=${type}` });
+      res.end();
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // GET /api/users/:handle - Get public profile
     // ─────────────────────────────────────────────────────────────
     const userProfileMatch = url.pathname.match(/^\/api\/users\/([^/]+)$/);
@@ -2310,6 +2459,7 @@ const server = createServer(async (req, res) => {
         bio: user.bio,
         links: user.links,
         createdAt: user.createdAt,
+        legacyPseudonym: user.legacyPseudonym,
         recentEntries: entries.map(e => ({
           id: e.id,
           content: e.content,
@@ -2547,6 +2697,24 @@ const server = createServer(async (req, res) => {
           RecordType4: 'TXT',
           Address4: 'db82f581256a3c9244c4d7129a67336990d08cdf:443',
           TTL4: '60',
+          // Resend email records for hermes.teleport.computer
+          HostName5: 'resend._domainkey.hermes',
+          RecordType5: 'TXT',
+          Address5: 'p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDM/+ZycEuu8aNaQibT2vvskdrmTep7+sJKO+bj8foMYTmYObop5xef7ySZwQY47KjS6b8TGvqJP4IEMG41VNQLIuM97PA+ihioH4/f6qPpGBMDZh6/eV2WwHldY5WjGqfvzhANwXNqgSrElVcweSuyT348bssj90+LNxZMm8QCUwIDAQAB',
+          TTL5: '1799',
+          HostName6: 'send.hermes',
+          RecordType6: 'MX',
+          Address6: 'feedback-smtp.us-east-1.amazonses.com',
+          MXPref6: '10',
+          TTL6: '1799',
+          HostName7: 'send.hermes',
+          RecordType7: 'TXT',
+          Address7: 'v=spf1 include:amazonses.com ~all',
+          TTL7: '1799',
+          HostName8: '_dmarc',
+          RecordType8: 'TXT',
+          Address8: 'v=DMARC1; p=none;',
+          TTL8: '1799',
         });
 
         const apiUrl = `https://api.namecheap.com/xml.response?${params.toString()}`;
@@ -2668,6 +2836,24 @@ async function fixDnsOnStartup() {
       RecordType4: 'TXT',
       Address4: 'db82f581256a3c9244c4d7129a67336990d08cdf:443',
       TTL4: '60',
+      // Resend email records for hermes.teleport.computer
+      HostName5: 'resend._domainkey.hermes',
+      RecordType5: 'TXT',
+      Address5: 'p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDM/+ZycEuu8aNaQibT2vvskdrmTep7+sJKO+bj8foMYTmYObop5xef7ySZwQY47KjS6b8TGvqJP4IEMG41VNQLIuM97PA+ihioH4/f6qPpGBMDZh6/eV2WwHldY5WjGqfvzhANwXNqgSrElVcweSuyT348bssj90+LNxZMm8QCUwIDAQAB',
+      TTL5: '1799',
+      HostName6: 'send.hermes',
+      RecordType6: 'MX',
+      Address6: 'feedback-smtp.us-east-1.amazonses.com',
+      MXPref6: '10',
+      TTL6: '1799',
+      HostName7: 'send.hermes',
+      RecordType7: 'TXT',
+      Address7: 'v=spf1 include:amazonses.com ~all',
+      TTL7: '1799',
+      HostName8: '_dmarc',
+      RecordType8: 'TXT',
+      Address8: 'v=DMARC1; p=none;',
+      TTL8: '1799',
     });
 
     const response = await fetch(`https://api.namecheap.com/xml.response?${params.toString()}`);

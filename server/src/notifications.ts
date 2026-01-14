@@ -9,7 +9,7 @@
 import { Resend } from 'resend';
 import Anthropic from '@anthropic-ai/sdk';
 import { Storage, User, JournalEntry, Comment } from './storage';
-import * as jwt from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 
 // Rate limiting: max emails per user per day
 const MAX_EMAILS_PER_USER_PER_DAY = 10;

@@ -2548,6 +2548,17 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // POST /api/trigger-digest - Manually trigger daily digest (for testing)
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/trigger-digest') {
+      console.log('[Digest] Manual trigger requested');
+      const result = await notificationService.sendDailyDigests();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, ...result }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // GET /api/users/:handle - Get public profile
     // ─────────────────────────────────────────────────────────────
     const userProfileMatch = url.pathname.match(/^\/api\/users\/([^/]+)$/);

@@ -146,6 +146,23 @@ export function createNotificationService(config: NotificationConfig): Notificat
       `
       : '';
 
+    // Build prompt for Claude deep link
+    const relatedSummary = relatedEntries.map(e => {
+      const author = e.handle ? `@${e.handle}` : e.pseudonym;
+      return `${author}: ${e.content.slice(0, 200)}${e.content.length > 200 ? '...' : ''}`;
+    }).join('\n\n');
+
+    const claudePrompt = `Here's my Hermes daily digest:
+
+${digestContent}
+
+Recent entries from others:
+${relatedSummary}
+
+What stands out to you? Any connections or threads worth exploring?`;
+
+    const claudeUrl = `https://claude.ai/new?q=${encodeURIComponent(claudePrompt)}`;
+
     return `
 <!DOCTYPE html>
 <html>
@@ -173,7 +190,7 @@ export function createNotificationService(config: NotificationConfig): Notificat
 
   ${relatedHtml}
 
-  <a href="${baseUrl}" class="btn">Open Hermes</a>
+  <a href="${claudeUrl}" class="btn">Discuss with Claude</a>
 
   <div class="footer">
     <p>Your daily digest from Hermes.</p>

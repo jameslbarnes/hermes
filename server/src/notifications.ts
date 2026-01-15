@@ -140,7 +140,7 @@ export function createNotificationService(config: NotificationConfig): Notificat
           ${relatedEntries.map(e => {
             const author = e.handle ? `@${e.handle}` : e.pseudonym;
             const preview = e.content.length > 150 ? e.content.slice(0, 150) + '...' : e.content;
-            return `<div class="related-entry"><span class="author">${author}:</span> ${preview}</div>`;
+            return `<a href="${baseUrl}/e/${e.id}" style="text-decoration: none; color: inherit;"><div class="related-entry"><span class="author">${author}:</span> ${preview}</div></a>`;
           }).join('')}
         </div>
       `

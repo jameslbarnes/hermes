@@ -1187,6 +1187,31 @@ const server = createServer(async (req, res) => {
 
   try {
     // ─────────────────────────────────────────────────────────────
+    // GET /api/entry/:id - Get single entry by ID (for permalinks)
+    // ─────────────────────────────────────────────────────────────
+    const entryByIdMatch = url.pathname.match(/^\/api\/entry\/([^/]+)$/);
+    if (req.method === 'GET' && entryByIdMatch) {
+      const entryId = decodeURIComponent(entryByIdMatch[1]);
+      const entry = await storage.getEntry(entryId);
+
+      if (!entry) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Entry not found' }));
+        return;
+      }
+
+      // Get author info
+      const user = await storage.getUserByPseudonym(entry.pseudonym);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        ...entry,
+        handle: user?.handle || null
+      }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // GET /api/entries - List recent entries
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/entries') {
@@ -2879,6 +2904,11 @@ const server = createServer(async (req, res) => {
       // Profile pages: /u/:handle -> profile.html
       if (filePath.startsWith('/u/')) {
         filePath = '/profile.html';
+      }
+
+      // Entry permalinks: /e/:id -> entry.html
+      if (filePath.startsWith('/e/')) {
+        filePath = '/entry.html';
       }
 
       const fullPath = join(STATIC_DIR, filePath);

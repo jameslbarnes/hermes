@@ -334,15 +334,15 @@ export function createNotificationService(config: NotificationConfig): Notificat
         max_tokens: 300,
         messages: [{
           role: 'user',
-          content: `Write a brief personal digest (2-3 sentences) for @${userHandle}.
+          content: `Write a brief digest (3-4 sentences) for @${userHandle} focused on what OTHERS have been writing.
 
-Their recent notebook entries:
+For context, here's what @${userHandle} has been thinking about:
 ${userText}
 
-Related entries from others:
+Here's what others have written that might interest them:
 ${relatedText}
 
-Draw a connection between what they've been working on and what others are exploring. Be specific, not generic. If there's no meaningful connection, just highlight an interesting entry from others. No greeting or sign-off.`,
+Focus primarily on surfacing what others are exploring—their ideas, questions, and observations. Briefly note any resonance with @${userHandle}'s interests, but the main value is discovery of others' thoughts. Be specific about what others said. No greeting or sign-off.`,
         }],
       });
 

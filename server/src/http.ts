@@ -1200,14 +1200,8 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      // Get author info
-      const user = await storage.getUserByPseudonym(entry.pseudonym);
-
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        ...entry,
-        handle: user?.handle || null
-      }));
+      res.end(JSON.stringify(entry));
       return;
     }
 

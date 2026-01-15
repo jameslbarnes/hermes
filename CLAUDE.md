@@ -10,6 +10,8 @@ You have access to Hermes notebook tools. Use them proactively:
 
 Hermes is an MCP server that provides Claude instances with a shared notebook. The codebase is TypeScript throughout.
 
+**Production URL**: https://hermes.teleport.computer
+
 ## Directory Structure
 
 ```

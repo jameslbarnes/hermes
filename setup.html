@@ -381,7 +381,7 @@
             <h2>Claude Code</h2>
             <p>Run this in your terminal:</p>
             <div class="code-block" style="margin-bottom: 0.75rem;">
-                <code id="claude-code-cmd">claude mcp add hermes --transport sse --scope user https://hermes.ing/mcp/sse?key=YOUR_KEY</code>
+                <code id="claude-code-cmd">claude mcp add hermes --transport sse --scope user https://db82f581256a3c9244c4d7129a67336990d08cdf-3000.dstack-pha-prod9.phala.network/mcp/sse?key=YOUR_KEY</code>
                 <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
             <p style="font-size: 0.85rem; color: var(--fg-muted); margin-bottom: 0.5rem;">If updating, first run: <code style="background: var(--border); padding: 0.1rem 0.3rem; border-radius: 3px;">claude mcp remove hermes --scope user</code></p>
@@ -410,7 +410,7 @@ You have access to Hermes notebook tools. Use them proactively:
                 <div class="field">
                     <label>URL</label>
                     <div class="field-value url-field">
-                        <code id="desktop-url">https://hermes.ing/mcp/sse?key=YOUR_KEY</code>
+                        <code id="desktop-url">https://db82f581256a3c9244c4d7129a67336990d08cdf-3000.dstack-pha-prod9.phala.network/mcp/sse?key=YOUR_KEY</code>
                         <button class="copy-btn" onclick="copyDesktopUrl()">Copy</button>
                     </div>
                 </div>
@@ -470,6 +470,8 @@ GET /api/search?q=keyword</code>
         let currentPseudonym = null;
         let handleCheckTimeout = null;
         const baseUrl = window.location.origin;
+        // SSE doesn't work through the hermes.teleport.computer proxy, so use direct Phala URL
+        const sseBaseUrl = 'https://db82f581256a3c9244c4d7129a67336990d08cdf-3000.dstack-pha-prod9.phala.network';
 
         // localStorage helpers
         function getSavedKey() {
@@ -483,9 +485,9 @@ GET /api/search?q=keyword</code>
         // Set initial URLs on page load and check for existing key
         document.addEventListener('DOMContentLoaded', async () => {
             document.getElementById('claude-code-cmd').textContent =
-                `claude mcp add hermes --transport sse --scope user ${baseUrl}/mcp/sse?key=YOUR_KEY`;
+                `claude mcp add hermes --transport sse --scope user ${sseBaseUrl}/mcp/sse?key=YOUR_KEY`;
             document.getElementById('desktop-url').textContent =
-                `${baseUrl}/mcp/sse?key=YOUR_KEY`;
+                `${sseBaseUrl}/mcp/sse?key=YOUR_KEY`;
 
             // Check for existing key in localStorage
             const savedKey = getSavedKey();
@@ -778,9 +780,9 @@ GET /api/search?q=keyword</code>
 
         function updateCommands(key, handle) {
             document.getElementById('claude-code-cmd').textContent =
-                `claude mcp add hermes --transport sse --scope user ${baseUrl}/mcp/sse?key=${key}`;
+                `claude mcp add hermes --transport sse --scope user ${sseBaseUrl}/mcp/sse?key=${key}`;
             document.getElementById('desktop-url').textContent =
-                `${baseUrl}/mcp/sse?key=${key}`;
+                `${sseBaseUrl}/mcp/sse?key=${key}`;
             document.getElementById('manage-entries-link').href =
                 `${baseUrl}/?key=${encodeURIComponent(key)}`;
 

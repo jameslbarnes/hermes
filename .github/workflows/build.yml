@@ -131,7 +131,8 @@ jobs:
 
       - name: Deploy to Phala Cloud
         run: |
-          phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml --env-file .env.deploy
+          # Only update compose file, preserve existing env vars in Phala
+          phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_API_KEY }}
 

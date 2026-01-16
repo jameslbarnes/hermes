@@ -1320,6 +1320,53 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // POST /api/entries/:id/publish - Publish pending entry immediately
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/entries\/[^/]+\/publish$/)) {
+      const entryId = decodeURIComponent(url.pathname.slice('/api/entries/'.length, -'/publish'.length));
+      const secretKey = url.searchParams.get('key');
+
+      if (!secretKey || !isValidSecretKey(secretKey)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const userPseudonym = derivePseudonym(secretKey);
+      const entry = await storage.getEntry(entryId);
+
+      if (!entry) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Entry not found' }));
+        return;
+      }
+
+      if (entry.pseudonym !== userPseudonym) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'You can only publish your own entries' }));
+        return;
+      }
+
+      // Check if entry is actually pending
+      if (!(storage instanceof StagedStorage) || !storage.isPending(entryId)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Entry is not pending' }));
+        return;
+      }
+
+      const published = await storage.publishEntry(entryId);
+      if (!published) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Failed to publish entry' }));
+        return;
+      }
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ success: true, entry: published }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // GET /api/entries/:pseudonym - Get entries by pseudonym
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname.startsWith('/api/entries/')) {

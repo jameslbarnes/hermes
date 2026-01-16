@@ -279,6 +279,22 @@
             color: #e53935;
         }
 
+        .publish-btn {
+            background: none;
+            border: none;
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            cursor: pointer;
+            opacity: 0.5;
+            transition: opacity 0.2s;
+        }
+
+        .publish-btn:hover {
+            opacity: 1;
+            color: var(--accent);
+        }
+
         .discuss-link {
             color: var(--accent);
             font-family: 'IBM Plex Mono', monospace;
@@ -1683,6 +1699,7 @@
             if (isPending) meta.push(`<span class="pending-badge">publishes ${formatTimeUntil(entry.publishAt)}</span>`);
             // Check ownership by pseudonym OR handle
             const isOwner = (userPseudonym && entry.pseudonym === userPseudonym) || (userHandle && entry.handle === userHandle);
+            if (isOwner && isPending) meta.push(`<button class="publish-btn" onclick="publishEntry('${entry.id}')">publish now</button>`);
             if (isOwner) meta.push(`<button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>`);
             meta.push(`<a href="${generateDiscussUrl(entry)}" target="_blank" class="discuss-link">discuss with claude</a>`);
 
@@ -2081,6 +2098,25 @@
                 }
             } catch (err) {
                 alert('Failed to delete entry');
+            }
+        }
+
+        async function publishEntry(id) {
+            if (!userKey) return;
+            if (!confirm('Publish this entry now? It will immediately become visible to everyone.')) return;
+
+            try {
+                const res = await fetch(`/api/entries/${id}/publish?key=${encodeURIComponent(userKey)}`, {
+                    method: 'POST'
+                });
+                if (res.ok) {
+                    loadFeed();
+                } else {
+                    const data = await res.json();
+                    alert(data.error || 'Failed to publish');
+                }
+            } catch (err) {
+                alert('Failed to publish entry');
             }
         }
 

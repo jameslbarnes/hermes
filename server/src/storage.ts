@@ -1129,6 +1129,31 @@ export class StagedStorage implements Storage {
     return this.pending.has(id);
   }
 
+  /**
+   * Publish a pending entry immediately (move from pending to Firestore)
+   * Returns the published entry, or null if entry was not found in pending
+   */
+  async publishEntry(id: string): Promise<JournalEntry | null> {
+    const entry = this.pending.get(id);
+    if (!entry) return null;
+
+    // Move to Firestore without publishAt field
+    const { publishAt, ...publishedEntry } = entry;
+    const saved = await this.published.addEntry(publishedEntry);
+    this.pending.delete(id);
+
+    // Call the onPublish callback if registered
+    if (this.onPublishCallback) {
+      try {
+        this.onPublishCallback(saved);
+      } catch (err) {
+        console.error('[Storage] onPublish callback error:', err);
+      }
+    }
+
+    return saved;
+  }
+
   async searchEntries(query: string, limit = 50): Promise<JournalEntry[]> {
     // Search only published entries (pending entries are private)
     return this.published.searchEntries(query, limit);

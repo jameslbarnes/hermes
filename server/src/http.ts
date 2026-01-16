@@ -11,8 +11,8 @@
 import 'dotenv/config';
 import { createServer } from 'http';
 import { readFile } from 'fs/promises';
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
-import { join, extname } from 'path';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
+import { join, extname, dirname } from 'path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import {
@@ -3146,6 +3146,11 @@ process.on('SIGTERM', () => {
       const convCount = state.conversations.length;
 
       if (entryCount > 0 || convCount > 0) {
+        // Ensure directory exists
+        const dir = dirname(RECOVERY_FILE);
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true });
+        }
         writeFileSync(RECOVERY_FILE, JSON.stringify(state));
         console.log(`[Shutdown] Saved ${entryCount} entries, ${convCount} conversations to ${RECOVERY_FILE}`);
       } else {

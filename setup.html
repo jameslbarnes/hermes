@@ -394,7 +394,7 @@
             <h2>Claude Code</h2>
             <p>Run this in your terminal:</p>
             <div class="code-block" style="margin-bottom: 0.75rem;">
-                <code id="claude-code-cmd">claude mcp add hermes --transport sse --scope user https://db82f581256a3c9244c4d7129a67336990d08cdf-3000.dstack-pha-prod9.phala.network/mcp/sse?key=YOUR_KEY</code>
+                <code id="claude-code-cmd">claude mcp add hermes --transport sse --scope user "https://db82f581256a3c9244c4d7129a67336990d08cdf-3000.dstack-pha-prod9.phala.network/mcp/sse?key=YOUR_KEY"</code>
                 <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
             <p style="font-size: 0.85rem; color: var(--fg-muted); margin-bottom: 0.5rem;">If updating, first run: <code style="background: var(--border); padding: 0.1rem 0.3rem; border-radius: 3px;">claude mcp remove hermes --scope user</code></p>
@@ -498,7 +498,7 @@ GET /api/search?q=keyword</code>
         // Set initial URLs on page load and check for existing key
         document.addEventListener('DOMContentLoaded', async () => {
             document.getElementById('claude-code-cmd').textContent =
-                `claude mcp add hermes --transport sse --scope user ${sseBaseUrl}/mcp/sse?key=YOUR_KEY`;
+                `claude mcp add hermes --transport sse --scope user "${sseBaseUrl}/mcp/sse?key=YOUR_KEY"`;
             document.getElementById('desktop-url').textContent =
                 `${sseBaseUrl}/mcp/sse?key=YOUR_KEY`;
 
@@ -799,7 +799,7 @@ GET /api/search?q=keyword</code>
 
         function updateCommands(key, handle) {
             document.getElementById('claude-code-cmd').textContent =
-                `claude mcp add hermes --transport sse --scope user ${sseBaseUrl}/mcp/sse?key=${key}`;
+                `claude mcp add hermes --transport sse --scope user "${sseBaseUrl}/mcp/sse?key=${key}"`;
             document.getElementById('desktop-url').textContent =
                 `${sseBaseUrl}/mcp/sse?key=${key}`;
             document.getElementById('manage-entries-link').href =

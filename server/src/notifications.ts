@@ -44,6 +44,7 @@ function canSendEmailTo(handle: string): boolean {
 
 export interface NotificationService {
   notifyCommentPosted(comment: Comment, entry: JournalEntry): Promise<void>;
+  notifyMentions(comment: Comment, entry: JournalEntry | null): Promise<void>;
   sendDailyDigests(): Promise<{ sent: number; failed: number }>;
   sendVerificationEmail(handle: string, email: string): Promise<boolean>;
 }
@@ -117,6 +118,67 @@ export function createNotificationService(config: NotificationConfig): Notificat
 
   <div class="footer">
     <p>You're receiving this because someone commented on your entry.</p>
+    <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=comments">Unsubscribe from comment notifications</a>
+  </div>
+</body>
+</html>
+    `.trim();
+  }
+
+  /**
+   * Render mention notification email HTML
+   */
+  function renderMentionEmail(
+    comment: Comment,
+    entry: JournalEntry | null,
+    mentionedUser: User,
+    unsubscribeToken: string
+  ): string {
+    // Context about what was commented on
+    let contextHtml = '';
+    if (entry) {
+      const entryPreview = entry.content.length > 200
+        ? entry.content.slice(0, 200) + '...'
+        : entry.content;
+      contextHtml = `
+        <div class="entry">
+          <div class="entry-label">On this entry:</div>
+          ${entryPreview}
+        </div>
+      `;
+    }
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Georgia, serif; line-height: 1.6; color: #1a1a1a; max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { color: #6b6b6b; font-size: 14px; margin-bottom: 20px; }
+    .entry { background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; color: #666; }
+    .entry-label { font-size: 12px; color: #6b6b6b; margin-bottom: 8px; }
+    .comment { background: #fff; border-left: 3px solid #7c5cbf; padding: 15px; margin-bottom: 20px; }
+    .comment-author { font-weight: bold; color: #7c5cbf; }
+    .footer { font-size: 12px; color: #999; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; }
+    .footer a { color: #999; }
+    .btn { display: inline-block; background: #7c5cbf; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="header">@${comment.handle} mentioned you in a comment</div>
+
+  ${contextHtml}
+
+  <div class="comment">
+    <div class="comment-author">@${comment.handle} wrote:</div>
+    <p>${comment.content}</p>
+  </div>
+
+  <a href="${baseUrl}" class="btn">View on Hermes</a>
+
+  <div class="footer">
+    <p>You're receiving this because you were mentioned in a comment.</p>
     <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=comments">Unsubscribe from comment notifications</a>
   </div>
 </body>
@@ -378,30 +440,37 @@ Focus primarily on surfacing what others are exploring—their ideas, questions,
      * Send notification when someone comments on an entry
      */
     async notifyCommentPosted(comment: Comment, entry: JournalEntry): Promise<void> {
+      console.log(`[Notify] Comment posted by @${comment.handle} on entry by @${entry.handle}`);
+
       // Don't notify on self-comments
       if (comment.handle === entry.handle) {
+        console.log(`[Notify] Skipping: self-comment`);
         return;
       }
 
       // Entry must have a handle to notify (legacy entries can't receive notifications)
       if (!entry.handle) {
+        console.log(`[Notify] Skipping: entry has no handle`);
         return;
       }
 
       // Get entry owner
       const entryOwner = await storage.getUser(entry.handle);
       if (!entryOwner?.email) {
-        return; // No email registered
+        console.log(`[Notify] Skipping: entry owner @${entry.handle} has no email`);
+        return;
       }
 
       // Only send to verified emails
       if (!entryOwner.emailVerified) {
-        return; // Email not verified
+        console.log(`[Notify] Skipping: email not verified for @${entry.handle}`);
+        return;
       }
 
       // Check email preferences
       if (entryOwner.emailPrefs && !entryOwner.emailPrefs.comments) {
-        return; // User disabled comment notifications
+        console.log(`[Notify] Skipping: @${entry.handle} disabled comment notifications`);
+        return;
       }
 
       // Rate limiting
@@ -429,6 +498,55 @@ Focus primarily on surfacing what others are exploring—their ideas, questions,
       } catch (err) {
         console.error(`[Notify] Failed to send to @${entryOwner.handle}:`, err);
         // Fire-and-forget: don't throw
+      }
+    },
+
+    /**
+     * Notify users who were @mentioned in a comment
+     */
+    async notifyMentions(comment: Comment, entry: JournalEntry | null): Promise<void> {
+      if (!emailClient) return;
+
+      const mentions = comment.mentions || [];
+      if (mentions.length === 0) return;
+
+      for (const handle of mentions) {
+        // Don't notify yourself
+        if (handle === comment.handle) continue;
+
+        // Don't notify the entry owner (they already get a comment notification)
+        if (entry && handle === entry.handle) continue;
+
+        try {
+          const mentionedUser = await storage.getUser(handle);
+          if (!mentionedUser?.email) continue;
+          if (!mentionedUser.emailVerified) continue;
+
+          // Check email preferences
+          if (mentionedUser.emailPrefs && !mentionedUser.emailPrefs.comments) {
+            continue;
+          }
+
+          // Rate limiting
+          if (!canSendEmailTo(handle)) {
+            console.log(`[Mention] Rate limited for @${handle}`);
+            continue;
+          }
+
+          const unsubscribeToken = generateUnsubscribeToken(handle, 'comments');
+
+          await emailClient.send({
+            from: `Hermes <${fromEmail}>`,
+            to: mentionedUser.email,
+            subject: `@${comment.handle} mentioned you in a comment`,
+            html: renderMentionEmail(comment, entry, mentionedUser, unsubscribeToken),
+          });
+
+          console.log(`[Mention] Notification sent to @${handle}`);
+        } catch (err) {
+          console.error(`[Mention] Failed to send to @${handle}:`, err);
+          // Fire-and-forget: continue with other mentions
+        }
       }
     },
 

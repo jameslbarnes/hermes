@@ -463,6 +463,24 @@ function formatPlatformName(platform: string): string {
   return names[platform] || platform;
 }
 
+/**
+ * Parse @mentions from text content
+ * Returns array of handles (without @) that are mentioned
+ */
+function parseMentions(content: string): string[] {
+  // Match @handle where handle is 3-15 lowercase alphanumeric chars
+  const mentionRegex = /@([a-z0-9]{3,15})\b/g;
+  const mentions: string[] = [];
+  let match;
+  while ((match = mentionRegex.exec(content)) !== null) {
+    const handle = match[1];
+    if (!mentions.includes(handle)) {
+      mentions.push(handle);
+    }
+  }
+  return mentions;
+}
+
 // Track last daily summary date to avoid duplicate generation
 let lastDailySummaryDate: string | null = null;
 
@@ -1126,16 +1144,23 @@ function createMCPServer(secretKey: string) {
         }
       }
 
+      // Parse @mentions from comment
+      const mentions = parseMentions(comment);
+
       const saved = await storage.addComment({
         entryId,
         parentCommentId: parentCommentId || undefined,
         handle: commentUser.handle,
         content: comment.trim(),
+        mentions: mentions.length > 0 ? mentions : undefined,
         timestamp: Date.now(),
       });
 
-      // Fire-and-forget notification
+      // Fire-and-forget notifications
       notificationService.notifyCommentPosted(saved, entry).catch(() => {});
+      if (mentions.length > 0) {
+        notificationService.notifyMentions(saved, entry).catch(() => {});
+      }
 
       return {
         content: [{
@@ -1727,6 +1752,9 @@ const server = createServer(async (req, res) => {
       }
       // Note: summaryId validation would require fetching summaries, skip for now
 
+      // Parse @mentions from content
+      const mentions = parseMentions(content);
+
       // Save the comment
       const saved = await storage.addComment({
         entryId: entryId || undefined,
@@ -1734,12 +1762,18 @@ const server = createServer(async (req, res) => {
         parentCommentId: parentCommentId || undefined,
         handle: user.handle,
         content: content.trim(),
+        mentions: mentions.length > 0 ? mentions : undefined,
         timestamp: Date.now(),
       });
 
-      // Fire-and-forget notification (only for entry comments, not summary comments)
+      // Fire-and-forget notifications
       if (entry) {
+        // Notify entry owner of comment
         notificationService.notifyCommentPosted(saved, entry).catch(() => {});
+      }
+      // Notify mentioned users
+      if (mentions.length > 0) {
+        notificationService.notifyMentions(saved, entry).catch(() => {});
       }
 
       res.writeHead(201);
@@ -2685,6 +2719,30 @@ const server = createServer(async (req, res) => {
       const result = await notificationService.sendDailyDigests();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, ...result }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/users/search?q=prefix - Search users for @mention typeahead
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/users/search') {
+      const query = url.searchParams.get('q') || '';
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '10', 10), 20);
+
+      if (query.length < 1) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ users: [] }));
+        return;
+      }
+
+      const users = await storage.searchUsers(query, limit);
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        users: users.map(u => ({
+          handle: u.handle,
+          displayName: u.displayName,
+        }))
+      }));
       return;
     }
 

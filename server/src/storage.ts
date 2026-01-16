@@ -86,6 +86,7 @@ export interface Comment {
   parentCommentId?: string;  // If replying to another comment (for threading)
   handle: string;            // Author of the comment (without @)
   content: string;           // Comment text (max 500 chars)
+  mentions?: string[];       // Handles mentioned in the comment (without @)
   timestamp: number;
   publishAt?: number;        // When comment becomes public (for staged publishing)
 }
@@ -167,6 +168,9 @@ export interface Storage {
 
   /** Get all users with email addresses (for digest sending) */
   getUsersWithEmail(): Promise<User[]>;
+
+  /** Search users by handle prefix (for @mention typeahead) */
+  searchUsers(prefix: string, limit?: number): Promise<User[]>;
 
   // ─────────────────────────────────────────────────────────────
   // Conversation methods
@@ -324,6 +328,13 @@ export class MemoryStorage implements Storage {
 
   async getUsersWithEmail(): Promise<User[]> {
     return Array.from(this.users.values()).filter(u => u.email);
+  }
+
+  async searchUsers(prefix: string, limit = 10): Promise<User[]> {
+    const lowerPrefix = prefix.toLowerCase();
+    return Array.from(this.users.values())
+      .filter(u => u.handle.toLowerCase().startsWith(lowerPrefix))
+      .slice(0, limit);
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -670,6 +681,25 @@ export class FirestoreStorage implements Storage {
     const snapshot = await this.db
       .collection(this.usersCollection)
       .where('email', '!=', null)
+      .get();
+
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        handle: doc.id,
+        ...data,
+      } as User;
+    });
+  }
+
+  async searchUsers(prefix: string, limit = 10): Promise<User[]> {
+    // Firestore prefix search: >= prefix and < prefix + high unicode char
+    const endPrefix = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+    const snapshot = await this.db
+      .collection(this.usersCollection)
+      .where('__name__', '>=', prefix.toLowerCase())
+      .where('__name__', '<', endPrefix.toLowerCase())
+      .limit(limit)
       .get();
 
     return snapshot.docs.map(doc => {
@@ -1222,6 +1252,10 @@ export class StagedStorage implements Storage {
 
   async getUsersWithEmail(): Promise<User[]> {
     return this.published.getUsersWithEmail();
+  }
+
+  async searchUsers(prefix: string, limit = 10): Promise<User[]> {
+    return this.published.searchUsers(prefix, limit);
   }
 
   // ─────────────────────────────────────────────────────────────

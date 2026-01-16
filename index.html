@@ -1079,6 +1079,15 @@
             text-decoration: underline;
         }
 
+        .mention-link {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .mention-link:hover {
+            text-decoration: underline;
+        }
+
         .comment-form {
             margin-top: 0.75rem;
             position: relative;
@@ -1113,6 +1122,46 @@
             font-size: 1.1rem;
             pointer-events: none;
             opacity: 0.4;
+        }
+
+        .mention-dropdown {
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 100;
+            display: none;
+            min-width: 200px;
+        }
+
+        .mention-dropdown.visible {
+            display: block;
+        }
+
+        .mention-option {
+            padding: 0.5rem 0.75rem;
+            cursor: pointer;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+        }
+
+        .mention-option:hover,
+        .mention-option.selected {
+            background: var(--bg);
+        }
+
+        .mention-option .handle {
+            color: var(--accent);
+        }
+
+        .mention-option .name {
+            color: var(--fg-muted);
+            margin-left: 0.5rem;
         }
 
         /* Dark mode */
@@ -1393,6 +1442,7 @@
 
                 // Step 2: Render immediately with whatever comments we have
                 renderFeedWithData(feed, allLoadedEntries, summaries, dailySummaries, conversations);
+                initAllMentions();
 
                 // Step 3: Fetch comments in background and re-render when ready
                 if (allEntryIds.size > 0 || allSummaryIds.size > 0) {
@@ -1410,6 +1460,7 @@
                             // Only re-render if we got new comments
                             if (!hadComments && (Object.keys(commentsByEntry).length > 0 || Object.keys(commentsBySummary).length > 0)) {
                                 renderFeedWithData(feed, allLoadedEntries, summaries, dailySummaries, conversations);
+                                initAllMentions();
                             }
                         })
                         .catch(err => console.error('Failed to load comments:', err));
@@ -1612,6 +1663,7 @@
                     return renderEntry(item.data);
                 }
             }).join('');
+            initAllMentions();
         }
 
         function renderCommentStory(activity) {
@@ -1662,7 +1714,7 @@
                     <div class="summary-meta">${entryMeta}</div>
                     <div class="summary-comments">
                         <div class="comment">
-                            <div class="comment-content">${escapeHtml(comment.content)}</div>
+                            <div class="comment-content">${renderMentions(escapeHtml(comment.content))}</div>
                             <div class="comment-meta">
                                 <a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
                                 · ${commentMeta}
@@ -1720,7 +1772,7 @@
                     <div class="summary-comments">
                         ${entryComments.map(comment => `
                             <div class="comment">
-                                <div class="comment-content">${escapeHtml(comment.content)}</div>
+                                <div class="comment-content">${renderMentions(escapeHtml(comment.content))}</div>
                                 <div class="comment-meta">
                                     ${renderAvatar(comment.handle, true)}<a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
                                     · ${formatTime(comment.timestamp)}
@@ -1807,7 +1859,7 @@
 
             const commentsHtml = sortedComments.map(comment => `
                 <div class="comment">
-                    <div class="comment-content">${escapeHtml(comment.content)}</div>
+                    <div class="comment-content">${renderMentions(escapeHtml(comment.content))}</div>
                     <div class="comment-meta">
                         ${renderAvatar(comment.handle, true)}<a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
                         · ${formatTime(comment.timestamp)}
@@ -1988,8 +2040,171 @@
             window.location = url;
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // @MENTION TYPEAHEAD
+        // ═══════════════════════════════════════════════════════════════
+
+        let mentionState = {
+            active: false,
+            textarea: null,
+            dropdown: null,
+            startPos: 0,
+            selectedIndex: 0,
+            users: []
+        };
+
+        // Initialize mention support on a textarea
+        function initMentions(textarea) {
+            // Create dropdown if not exists
+            let dropdown = textarea.parentElement.querySelector('.mention-dropdown');
+            if (!dropdown) {
+                dropdown = document.createElement('div');
+                dropdown.className = 'mention-dropdown';
+                textarea.parentElement.appendChild(dropdown);
+            }
+
+            textarea.addEventListener('input', (e) => handleMentionInput(e, dropdown));
+            textarea.addEventListener('keydown', (e) => handleMentionKeydown(e, dropdown));
+            textarea.addEventListener('blur', () => {
+                // Delay to allow click on dropdown
+                setTimeout(() => hideMentionDropdown(dropdown), 150);
+            });
+        }
+
+        async function handleMentionInput(event, dropdown) {
+            const textarea = event.target;
+            const text = textarea.value;
+            const cursorPos = textarea.selectionStart;
+
+            // Find @ before cursor
+            const textBeforeCursor = text.slice(0, cursorPos);
+            const atMatch = textBeforeCursor.match(/@(\w*)$/);
+
+            if (atMatch) {
+                const query = atMatch[1];
+                mentionState.active = true;
+                mentionState.textarea = textarea;
+                mentionState.dropdown = dropdown;
+                mentionState.startPos = cursorPos - query.length - 1; // Position of @
+
+                if (query.length >= 1) {
+                    const users = await searchUsers(query);
+                    mentionState.users = users;
+                    mentionState.selectedIndex = 0;
+                    showMentionDropdown(dropdown, users);
+                } else {
+                    hideMentionDropdown(dropdown);
+                }
+            } else {
+                mentionState.active = false;
+                hideMentionDropdown(dropdown);
+            }
+        }
+
+        function handleMentionKeydown(event, dropdown) {
+            if (!mentionState.active || mentionState.users.length === 0) return;
+
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                mentionState.selectedIndex = Math.min(mentionState.selectedIndex + 1, mentionState.users.length - 1);
+                updateDropdownSelection(dropdown);
+            } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                mentionState.selectedIndex = Math.max(mentionState.selectedIndex - 1, 0);
+                updateDropdownSelection(dropdown);
+            } else if (event.key === 'Enter' || event.key === 'Tab') {
+                if (mentionState.users.length > 0) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    insertMention(mentionState.users[mentionState.selectedIndex]);
+                }
+            } else if (event.key === 'Escape') {
+                hideMentionDropdown(dropdown);
+                mentionState.active = false;
+            }
+        }
+
+        async function searchUsers(query) {
+            try {
+                const res = await fetch(`/api/users/search?q=${encodeURIComponent(query)}&limit=5`);
+                if (res.ok) {
+                    const data = await res.json();
+                    return data.users;
+                }
+            } catch (err) {
+                console.error('Failed to search users:', err);
+            }
+            return [];
+        }
+
+        function showMentionDropdown(dropdown, users) {
+            if (users.length === 0) {
+                hideMentionDropdown(dropdown);
+                return;
+            }
+
+            dropdown.innerHTML = users.map((user, i) => `
+                <div class="mention-option ${i === 0 ? 'selected' : ''}" data-handle="${user.handle}">
+                    <span class="handle">@${escapeHtml(user.handle)}</span>
+                    ${user.displayName ? `<span class="name">${escapeHtml(user.displayName)}</span>` : ''}
+                </div>
+            `).join('');
+
+            dropdown.querySelectorAll('.mention-option').forEach((option, i) => {
+                option.addEventListener('click', () => {
+                    mentionState.selectedIndex = i;
+                    insertMention(users[i]);
+                });
+            });
+
+            dropdown.classList.add('visible');
+        }
+
+        function hideMentionDropdown(dropdown) {
+            dropdown.classList.remove('visible');
+            mentionState.users = [];
+        }
+
+        function updateDropdownSelection(dropdown) {
+            dropdown.querySelectorAll('.mention-option').forEach((option, i) => {
+                option.classList.toggle('selected', i === mentionState.selectedIndex);
+            });
+        }
+
+        function insertMention(user) {
+            const textarea = mentionState.textarea;
+            const text = textarea.value;
+            const beforeMention = text.slice(0, mentionState.startPos);
+            const afterMention = text.slice(textarea.selectionStart);
+            const mention = `@${user.handle} `;
+
+            textarea.value = beforeMention + mention + afterMention;
+            textarea.selectionStart = textarea.selectionEnd = beforeMention.length + mention.length;
+            textarea.focus();
+
+            hideMentionDropdown(mentionState.dropdown);
+            mentionState.active = false;
+        }
+
+        // Initialize mentions on all comment forms
+        function initAllMentions() {
+            document.querySelectorAll('.comment-form textarea').forEach(initMentions);
+        }
+
+        // Re-init after feed loads
+        const originalLoadFeed = typeof loadFeed !== 'undefined' ? loadFeed : null;
+
+        // ═══════════════════════════════════════════════════════════════
+        // COMMENT SUBMISSION
+        // ═══════════════════════════════════════════════════════════════
+
         // Comment submission
         function handleCommentKeydown(event, entryId) {
+            // If mention dropdown is active and handling the key, don't submit
+            if (mentionState.active && mentionState.users.length > 0 &&
+                ['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(event.key)) {
+                return; // Let mention handler deal with it
+            }
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 submitComment(entryId);
@@ -1998,6 +2213,11 @@
         }
 
         function handleSummaryCommentKeydown(event, summaryId) {
+            // If mention dropdown is active and handling the key, don't submit
+            if (mentionState.active && mentionState.users.length > 0 &&
+                ['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(event.key)) {
+                return; // Let mention handler deal with it
+            }
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 submitSummaryComment(summaryId);
@@ -2173,6 +2393,12 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // Convert @mentions in escaped HTML to profile links
+        function renderMentions(escapedHtml) {
+            // Match @handle where handle is 3-15 lowercase alphanumeric
+            return escapedHtml.replace(/@([a-z0-9]{3,15})\b/g, '<a href="/u/$1" class="mention-link">@$1</a>');
         }
 
         // Generate avatar HTML from handle

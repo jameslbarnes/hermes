@@ -68,11 +68,13 @@ export interface User {
   handle: string;            // @james (unique, primary key, stored without @)
   secretKeyHash: string;     // SHA-256 hash of the secret key
   displayName?: string;      // "James"
+  pronouns?: string;         // "they/them"
   bio?: string;              // "Building things"
   email?: string;            // For digest/messaging
   emailVerified?: boolean;   // Whether email has been verified via link
   emailPrefs?: EmailPrefs;   // Email notification preferences
   links?: string[];          // External links (Twitter, website, etc.)
+  stagingDelayMs?: number;   // How long entries stay in staging (default 1 hour)
   createdAt: number;
   legacyPseudonym?: string;  // "Quiet Feather#79c30b" if migrated from old system
 }
@@ -117,8 +119,8 @@ export function tokenize(text: string): string[] {
 }
 
 export interface Storage {
-  /** Add a new entry */
-  addEntry(entry: Omit<JournalEntry, 'id'>): Promise<JournalEntry>;
+  /** Add a new entry. stagingDelayMs overrides the default staging delay (StagedStorage only). */
+  addEntry(entry: Omit<JournalEntry, 'id'>, stagingDelayMs?: number): Promise<JournalEntry>;
 
   /** Get a single entry by ID */
   getEntry(id: string): Promise<JournalEntry | null>;
@@ -219,7 +221,7 @@ export class MemoryStorage implements Storage {
   private users: Map<string, User> = new Map(); // handle -> User
   private nextId = 1;
 
-  async addEntry(entry: Omit<JournalEntry, 'id'>): Promise<JournalEntry> {
+  async addEntry(entry: Omit<JournalEntry, 'id'>, _stagingDelayMs?: number): Promise<JournalEntry> {
     const newEntry: JournalEntry = {
       ...entry,
       id: String(this.nextId++),
@@ -458,7 +460,7 @@ export class FirestoreStorage implements Storage {
     this.db = getFirestore();
   }
 
-  async addEntry(entry: Omit<JournalEntry, 'id'>): Promise<JournalEntry> {
+  async addEntry(entry: Omit<JournalEntry, 'id'>, _stagingDelayMs?: number): Promise<JournalEntry> {
     const id = generateEntryId();
     const keywords = tokenize(entry.content);
     const newEntry: JournalEntry = { ...entry, id, keywords };
@@ -1040,12 +1042,13 @@ export class StagedStorage implements Storage {
     }
   }
 
-  async addEntry(entry: Omit<JournalEntry, 'id'>): Promise<JournalEntry> {
+  async addEntry(entry: Omit<JournalEntry, 'id'>, stagingDelayMs?: number): Promise<JournalEntry> {
     const id = generateEntryId();
+    const delay = stagingDelayMs ?? this.publishDelayMs;
     const newEntry: JournalEntry = {
       ...entry,
       id,
-      publishAt: Date.now() + this.publishDelayMs,
+      publishAt: Date.now() + delay,
     };
     this.pending.set(id, newEntry);
     return newEntry;
@@ -1139,6 +1142,29 @@ export class StagedStorage implements Storage {
       clearInterval(this.publishInterval);
       this.publishInterval = null;
     }
+  }
+
+  /**
+   * Get all pending state for recovery (entries and conversations)
+   */
+  getPendingState(): { entries: JournalEntry[]; conversations: Conversation[] } {
+    return {
+      entries: Array.from(this.pending.values()),
+      conversations: Array.from(this.pendingConversations.values()),
+    };
+  }
+
+  /**
+   * Restore pending state from recovery (entries and conversations)
+   */
+  restorePendingState(state: { entries: JournalEntry[]; conversations: Conversation[] }): void {
+    for (const entry of state.entries) {
+      this.pending.set(entry.id, entry);
+    }
+    for (const conversation of state.conversations) {
+      this.pendingConversations.set(conversation.id, conversation);
+    }
+    console.log(`[Storage] Restored ${state.entries.length} pending entries, ${state.conversations.length} pending conversations`);
   }
 
   // ─────────────────────────────────────────────────────────────

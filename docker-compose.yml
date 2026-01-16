@@ -14,4 +14,9 @@ services:
       - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
       - NAMECHEAP_API_KEY=${NAMECHEAP_API_KEY}
       - NAMECHEAP_CLIENT_IP=${NAMECHEAP_CLIENT_IP}
+    volumes:
+      - hermes-data:/data
     restart: unless-stopped
+
+volumes:
+  hermes-data:

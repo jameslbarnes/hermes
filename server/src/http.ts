@@ -11,6 +11,7 @@
 import 'dotenv/config';
 import { createServer } from 'http';
 import { readFile } from 'fs/promises';
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { join, extname } from 'path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
@@ -184,6 +185,25 @@ const storage = useFirestore
   ? new StagedStorage(STAGING_DELAY_MS)
   : new MemoryStorage();
 const STATIC_DIR = join(process.cwd(), '..');
+
+// ═══════════════════════════════════════════════════════════════
+// PENDING ENTRY RECOVERY (survive restarts)
+// ═══════════════════════════════════════════════════════════════
+
+const RECOVERY_FILE = process.env.RECOVERY_FILE || '/data/pending-recovery.json';
+
+// On startup: restore pending entries from recovery file if it exists
+if (storage instanceof StagedStorage && existsSync(RECOVERY_FILE)) {
+  try {
+    const data = readFileSync(RECOVERY_FILE, 'utf-8');
+    const state = JSON.parse(data);
+    storage.restorePendingState(state);
+    unlinkSync(RECOVERY_FILE);
+    console.log(`[Recovery] Restored pending state and deleted recovery file`);
+  } catch (err) {
+    console.error(`[Recovery] Failed to restore pending state:`, err);
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // SUMMARY GENERATION
@@ -759,6 +779,7 @@ function createMCPServer(secretKey: string) {
       // Look up handle fresh (user may have claimed one since connecting)
       const currentUser = await storage.getUserByKeyHash(keyHash);
       const currentHandle = currentUser?.handle || undefined;
+      const userStagingDelay = currentUser?.stagingDelayMs ?? STAGING_DELAY_MS;
 
       const saved = await storage.addEntry({
         pseudonym,
@@ -767,9 +788,9 @@ function createMCPServer(secretKey: string) {
         content: entry.trim(),
         timestamp: Date.now(),
         model: model || undefined,
-      });
+      }, userStagingDelay);
 
-      const delayMinutes = Math.round(STAGING_DELAY_MS / 1000 / 60);
+      const delayMinutes = Math.round(userStagingDelay / 1000 / 60);
 
       return {
         content: [{
@@ -999,6 +1020,7 @@ function createMCPServer(secretKey: string) {
       // Look up handle fresh (user may have claimed one since connecting)
       const essayUser = await storage.getUserByKeyHash(keyHash);
       const essayHandle = essayUser?.handle || undefined;
+      const essayStagingDelay = essayUser?.stagingDelayMs ?? STAGING_DELAY_MS;
 
       const saved = await storage.addEntry({
         pseudonym,
@@ -1008,9 +1030,9 @@ function createMCPServer(secretKey: string) {
         timestamp: Date.now(),
         isReflection: true,
         model: model || undefined,
-      });
+      }, essayStagingDelay);
 
-      const delayMinutes = Math.round(STAGING_DELAY_MS / 1000 / 60);
+      const delayMinutes = Math.round(essayStagingDelay / 1000 / 60);
 
       return {
         content: [{
@@ -2172,6 +2194,7 @@ const server = createServer(async (req, res) => {
         handle: user?.handle || null,
         displayName: user?.displayName || null,
         email: user?.email || null,
+        stagingDelayMs: user?.stagingDelayMs ?? null,
         hasAccount: !!user,
       }));
       return;
@@ -2204,7 +2227,7 @@ const server = createServer(async (req, res) => {
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'POST' && url.pathname === '/api/identity/register') {
       const body = await readBody(req);
-      const { secret_key, handle: rawHandle, displayName, bio, email } = JSON.parse(body);
+      const { secret_key, handle: rawHandle, displayName, pronouns, bio, email } = JSON.parse(body);
 
       // Validate secret key
       if (!isValidSecretKey(secret_key)) {
@@ -2334,11 +2357,11 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // POST /api/identity/update - Update profile (bio, displayName, links)
+    // POST /api/identity/update - Update profile (bio, displayName, links, stagingDelayMs)
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'POST' && url.pathname === '/api/identity/update') {
       const body = await readBody(req);
-      const { secret_key, displayName, bio, links } = JSON.parse(body);
+      const { secret_key, displayName, bio, links, stagingDelayMs } = JSON.parse(body);
 
       if (!isValidSecretKey(secret_key)) {
         res.writeHead(400);
@@ -2355,11 +2378,24 @@ const server = createServer(async (req, res) => {
         return;
       }
 
+      // Validate stagingDelayMs if provided (min 1 hour, max 1 month)
+      if (stagingDelayMs !== undefined) {
+        const delay = Number(stagingDelayMs);
+        const oneHour = 60 * 60 * 1000;
+        const oneMonth = 30 * 24 * 60 * 60 * 1000;
+        if (isNaN(delay) || delay < oneHour || delay > oneMonth) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'stagingDelayMs must be between 3600000 (1 hour) and 2592000000 (1 month)' }));
+          return;
+        }
+      }
+
       // Build update object with only provided fields
-      const updates: Partial<{ displayName: string; bio: string; links: string[] }> = {};
+      const updates: Partial<{ displayName: string; bio: string; links: string[]; stagingDelayMs: number }> = {};
       if (displayName !== undefined) updates.displayName = displayName;
       if (bio !== undefined) updates.bio = bio;
       if (links !== undefined) updates.links = links;
+      if (stagingDelayMs !== undefined) updates.stagingDelayMs = Number(stagingDelayMs);
 
       const updated = await storage.updateUser(user.handle, updates);
 
@@ -2369,6 +2405,7 @@ const server = createServer(async (req, res) => {
         displayName: updated?.displayName,
         bio: updated?.bio,
         links: updated?.links,
+        stagingDelayMs: updated?.stagingDelayMs,
         message: 'Profile updated',
       }));
       return;
@@ -3046,4 +3083,40 @@ async function fixDnsOnStartup() {
 server.listen(PORT, () => {
   console.log(`Hermes server running on port ${PORT}`);
   fixDnsOnStartup();
+});
+
+// ═══════════════════════════════════════════════════════════════
+// GRACEFUL SHUTDOWN (save pending entries before exit)
+// ═══════════════════════════════════════════════════════════════
+
+process.on('SIGTERM', () => {
+  console.log('[Shutdown] SIGTERM received, saving pending state...');
+
+  if (storage instanceof StagedStorage) {
+    try {
+      const state = storage.getPendingState();
+      const entryCount = state.entries.length;
+      const convCount = state.conversations.length;
+
+      if (entryCount > 0 || convCount > 0) {
+        writeFileSync(RECOVERY_FILE, JSON.stringify(state));
+        console.log(`[Shutdown] Saved ${entryCount} entries, ${convCount} conversations to ${RECOVERY_FILE}`);
+      } else {
+        console.log('[Shutdown] No pending entries to save');
+      }
+    } catch (err) {
+      console.error('[Shutdown] Failed to save pending state:', err);
+    }
+  }
+
+  server.close(() => {
+    console.log('[Shutdown] Server closed');
+    process.exit(0);
+  });
+
+  // Force exit after 5 seconds if server doesn't close gracefully
+  setTimeout(() => {
+    console.log('[Shutdown] Forcing exit after timeout');
+    process.exit(0);
+  }, 5000);
 });

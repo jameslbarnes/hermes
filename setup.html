@@ -311,6 +311,18 @@
                     <a href="#" onclick="showEmailEditor(); return false;" style="color: var(--accent);">Edit email</a>
                 </p>
 
+                <!-- Buffer time slider (always visible) -->
+                <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+                    <label style="display: block; font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-muted); margin-bottom: 0.5rem;">Buffer Time</label>
+                    <p style="font-size: 0.8rem; color: var(--fg-muted); margin-bottom: 0.75rem;">How long entries stay private before publishing.</p>
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <input type="range" id="buffer-slider" min="0" max="10" value="0"
+                               style="flex: 1; cursor: pointer;"
+                               oninput="updateBufferLabel()" onchange="saveBufferFromSlider()">
+                        <span id="buffer-label" style="font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem; min-width: 80px; text-align: right;">1 hour</span>
+                    </div>
+                </div>
+
                 <!-- Bio editor section -->
                 <div id="bio-editor" style="display: none; margin-top: 1rem;">
                     <div style="margin-bottom: 1rem;">
@@ -333,6 +345,7 @@
                     <button class="generate-btn" onclick="saveEmail()">Send Verification</button>
                     <button class="copy-btn" style="margin-left: 0.5rem;" onclick="hideEmailEditor()">Cancel</button>
                 </div>
+
             </div>
 
             <!-- Legacy user: offer to claim handle -->
@@ -506,7 +519,7 @@ GET /api/search?q=keyword</code>
                     if (data.hasAccount) {
                         // User has a handle - show identity display
                         currentHandle = data.handle;
-                        showIdentityDisplay(data.handle, data.displayName, savedKey, data.pseudonym);
+                        showIdentityDisplay(data.handle, data.displayName, savedKey, data.pseudonym, data.stagingDelayMs);
                     } else {
                         // Legacy user without handle - offer to claim
                         showClaimFlow(savedKey, data.pseudonym);
@@ -518,7 +531,7 @@ GET /api/search?q=keyword</code>
             }
         });
 
-        function showIdentityDisplay(handle, displayName, key, legacyPseudonym) {
+        function showIdentityDisplay(handle, displayName, key, legacyPseudonym, stagingDelayMs) {
             document.getElementById('new-user-flow').style.display = 'none';
             document.getElementById('claim-handle-flow').style.display = 'none';
             document.getElementById('identity-display').style.display = 'block';
@@ -531,6 +544,9 @@ GET /api/search?q=keyword</code>
                 document.getElementById('legacy-pseudonym').textContent = `(formerly ${legacyPseudonym})`;
                 document.getElementById('legacy-pseudonym').style.display = 'inline';
             }
+
+            // Set buffer slider to user's current setting
+            setBufferSliderFromMs(stagingDelayMs ?? 3600000);
         }
 
         function showClaimFlow(key, pseudonym) {
@@ -678,7 +694,7 @@ GET /api/search?q=keyword</code>
                 currentPseudonym = keyData.pseudonym;
 
                 saveKey(keyData.secret_key);
-                showIdentityDisplay(registerData.handle, registerData.displayName, keyData.secret_key, null);
+                showIdentityDisplay(registerData.handle, registerData.displayName, keyData.secret_key, null, null);
                 updateCommands(keyData.secret_key, registerData.handle);
 
                 // Send verification email if email was provided
@@ -737,7 +753,7 @@ GET /api/search?q=keyword</code>
                 }
 
                 currentHandle = data.handle;
-                showIdentityDisplay(data.handle, data.displayName, currentKey, data.legacyPseudonym);
+                showIdentityDisplay(data.handle, data.displayName, currentKey, data.legacyPseudonym, null);
 
                 // Send verification email if email was provided
                 if (email) {
@@ -776,6 +792,9 @@ GET /api/search?q=keyword</code>
             document.getElementById('handle-display').textContent = currentPseudonym;
             document.getElementById('secret-key').textContent = currentKey;
             document.getElementById('profile-link').style.display = 'none';
+
+            // Legacy users without accounts can't change buffer (need to claim handle first)
+            setBufferSliderFromMs(3600000); // Default 1 hour
         }
 
         function updateCommands(key, handle) {
@@ -970,6 +989,68 @@ Generated: ${new Date().toISOString()}
                 hideEmailEditor();
             } catch (err) {
                 alert(err.message || 'Failed to send verification email. Please try again.');
+            }
+        }
+
+        // Buffer slider steps: 1h, 2h, 4h, 8h, 12h, 1d, 2d, 3d, 1w, 2w, 1mo
+        const BUFFER_STEPS = [
+            { ms: 3600000, label: '1 hour' },
+            { ms: 7200000, label: '2 hours' },
+            { ms: 14400000, label: '4 hours' },
+            { ms: 28800000, label: '8 hours' },
+            { ms: 43200000, label: '12 hours' },
+            { ms: 86400000, label: '1 day' },
+            { ms: 172800000, label: '2 days' },
+            { ms: 259200000, label: '3 days' },
+            { ms: 604800000, label: '1 week' },
+            { ms: 1209600000, label: '2 weeks' },
+            { ms: 2592000000, label: '1 month' },
+        ];
+
+        function updateBufferLabel() {
+            const slider = document.getElementById('buffer-slider');
+            const label = document.getElementById('buffer-label');
+            const step = BUFFER_STEPS[slider.value];
+            label.textContent = step.label;
+        }
+
+        function setBufferSliderFromMs(ms) {
+            const slider = document.getElementById('buffer-slider');
+            // Find closest step
+            let closestIdx = 0;
+            let closestDiff = Math.abs(BUFFER_STEPS[0].ms - ms);
+            for (let i = 1; i < BUFFER_STEPS.length; i++) {
+                const diff = Math.abs(BUFFER_STEPS[i].ms - ms);
+                if (diff < closestDiff) {
+                    closestDiff = diff;
+                    closestIdx = i;
+                }
+            }
+            slider.value = closestIdx;
+            updateBufferLabel();
+        }
+
+        async function saveBufferFromSlider() {
+            if (!currentKey) return;
+            const slider = document.getElementById('buffer-slider');
+            const bufferMs = BUFFER_STEPS[slider.value].ms;
+
+            try {
+                const res = await fetch('/api/identity/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        secret_key: currentKey,
+                        stagingDelayMs: bufferMs
+                    })
+                });
+
+                if (!res.ok) {
+                    const data = await res.json();
+                    throw new Error(data.error || 'Failed to update buffer time');
+                }
+            } catch (err) {
+                console.error('Failed to save buffer time:', err);
             }
         }
     </script>

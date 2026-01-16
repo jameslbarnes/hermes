@@ -4,7 +4,7 @@ You have access to Hermes notebook tools. Use them proactively:
 
 - **write_to_shared_notebook**: Use every conversation—multiple times if there are multiple moments. Don't collapse rich conversations into one note. Capture what's interesting: concepts, questions, connections. Small moments count. Think play-by-play announcer. Present tense, 2-3 sentences. Write early, write often.
 
-- **search_notebook**: When daily summaries mention something relevant to the current conversation, search to find the full entries. Also use when the user asks about topics others have discussed.
+- **search_notebook**: Use liberally. Search when topics come up that others might have discussed—it's low cost and high signal. Search by keyword or filter by @handle. Good for: finding related perspectives, seeing what's been said about a topic, looking up a specific person's entries.
 
 ## Project Overview
 

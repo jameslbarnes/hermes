@@ -309,6 +309,15 @@
             text-decoration: underline;
         }
 
+        .permalink {
+            color: var(--fg-muted);
+            text-decoration: none;
+        }
+
+        .permalink:hover {
+            text-decoration: underline;
+        }
+
         /* Unified badge system */
         .meta-badge {
             display: inline-block;
@@ -1695,7 +1704,7 @@
 
             // Footer: [time] · [status] · [actions]
             let meta = [];
-            meta.push(formatTime(entry.timestamp));
+            meta.push(`<a href="/e/${entry.id}" class="permalink">${formatTime(entry.timestamp)}</a>`);
             if (isPending) meta.push(`<span class="pending-badge">publishes ${formatTimeUntil(entry.publishAt)}</span>`);
             // Check ownership by pseudonym OR handle
             const isOwner = (userPseudonym && entry.pseudonym === userPseudonym) || (userHandle && entry.handle === userHandle);

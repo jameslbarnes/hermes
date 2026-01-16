@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MemoryStorage } from './storage.js';
+import { MemoryStorage, StagedStorage } from './storage.js';
 import { hashSecretKey } from './identity.js';
+
+// Check if Firestore is configured
+const hasFirestore = !!(
+  process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 ||
+  process.env.FIREBASE_SERVICE_ACCOUNT ||
+  process.env.GOOGLE_APPLICATION_CREDENTIALS
+);
 
 describe('MemoryStorage', () => {
   let storage: MemoryStorage;
@@ -448,6 +455,87 @@ describe('MemoryStorage', () => {
         expect(comments).toHaveLength(2);
         expect(comments.every(c => c.handle === 'prolific-commenter')).toBe(true);
       });
+    });
+  });
+});
+
+// StagedStorage tests - require Firestore
+describe.skipIf(!hasFirestore)('StagedStorage', () => {
+  describe('Dynamic buffer time', () => {
+    it('should use custom stagingDelayMs when provided', async () => {
+      const defaultDelay = 60 * 60 * 1000; // 1 hour default
+      const storage = new StagedStorage(defaultDelay);
+
+      const customDelay = 2 * 60 * 60 * 1000; // 2 hours
+      const before = Date.now();
+
+      const entry = await storage.addEntry({
+        pseudonym: 'Test User#abc123',
+        client: 'desktop',
+        content: 'Test with custom delay',
+        timestamp: before,
+        handle: 'testuser',
+      }, customDelay);
+
+      const after = Date.now();
+
+      // publishAt should be approximately now + customDelay
+      expect(entry.publishAt).toBeDefined();
+      expect(entry.publishAt).toBeGreaterThanOrEqual(before + customDelay);
+      expect(entry.publishAt).toBeLessThanOrEqual(after + customDelay);
+    });
+
+    it('should use default delay when stagingDelayMs not provided', async () => {
+      const defaultDelay = 60 * 60 * 1000; // 1 hour default
+      const storage = new StagedStorage(defaultDelay);
+
+      const before = Date.now();
+
+      const entry = await storage.addEntry({
+        pseudonym: 'Test User#abc123',
+        client: 'desktop',
+        content: 'Test with default delay',
+        timestamp: before,
+        handle: 'testuser',
+      });
+
+      const after = Date.now();
+
+      // publishAt should be approximately now + defaultDelay
+      expect(entry.publishAt).toBeDefined();
+      expect(entry.publishAt).toBeGreaterThanOrEqual(before + defaultDelay);
+      expect(entry.publishAt).toBeLessThanOrEqual(after + defaultDelay);
+    });
+
+    it('should respect user-configured buffer times', async () => {
+      const defaultDelay = 60 * 60 * 1000; // 1 hour
+      const storage = new StagedStorage(defaultDelay);
+
+      // Simulate different users with different buffer settings
+      const shortBuffer = 2 * 60 * 60 * 1000;  // 2 hours
+      const longBuffer = 24 * 60 * 60 * 1000;  // 24 hours
+
+      const before = Date.now();
+
+      const entry1 = await storage.addEntry({
+        pseudonym: 'Short Buffer User#111',
+        client: 'desktop',
+        content: 'Quick publish',
+        timestamp: before,
+        handle: 'shortuser',
+      }, shortBuffer);
+
+      const entry2 = await storage.addEntry({
+        pseudonym: 'Long Buffer User#222',
+        client: 'desktop',
+        content: 'Slow publish',
+        timestamp: before,
+        handle: 'longuser',
+      }, longBuffer);
+
+      // Verify different publishAt times
+      expect(entry2.publishAt! - entry1.publishAt!).toBeGreaterThanOrEqual(longBuffer - shortBuffer - 100);
+      expect(entry2.publishAt! - entry1.publishAt!).toBeLessThanOrEqual(longBuffer - shortBuffer + 100);
     });
   });
 });

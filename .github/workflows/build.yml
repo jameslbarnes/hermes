@@ -84,9 +84,9 @@ jobs:
 
   deploy:
     needs: build
-    # Manual deploys only - protects pending entries in memory
-    # Trigger via: Actions → Build and Push → Run workflow → check "Deploy to Phala"
-    if: github.event_name == 'workflow_dispatch' && inputs.deploy == true
+    # Auto-deploy on push to master, or manual deploy via workflow_dispatch
+    # Pending entries survive restarts via graceful shutdown recovery
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && inputs.deploy == true)
     runs-on: ubuntu-latest
 
     steps:

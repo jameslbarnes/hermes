@@ -166,6 +166,12 @@ export interface Storage {
   /** Migrate entries from pseudonym to handle (when user claims handle) */
   migrateEntriesToHandle(pseudonym: string, handle: string): Promise<number>;
 
+  /** Get all users with a legacyPseudonym (for migration) */
+  getUsersWithLegacyPseudonym(): Promise<User[]>;
+
+  /** Count entries with pseudonym but without handle (unmigrated) */
+  countUnmigratedEntries(pseudonym: string, handle: string): Promise<number>;
+
   /** Get all users with email addresses (for digest sending) */
   getUsersWithEmail(): Promise<User[]>;
 
@@ -330,6 +336,14 @@ export class MemoryStorage implements Storage {
       return e;
     });
     return count;
+  }
+
+  async getUsersWithLegacyPseudonym(): Promise<User[]> {
+    return Array.from(this.users.values()).filter(u => u.legacyPseudonym);
+  }
+
+  async countUnmigratedEntries(pseudonym: string, handle: string): Promise<number> {
+    return this.entries.filter(e => e.pseudonym === pseudonym && e.handle !== handle).length;
   }
 
   async getUsersWithEmail(): Promise<User[]> {
@@ -689,6 +703,34 @@ export class FirestoreStorage implements Storage {
 
     await batch.commit();
     return snapshot.size;
+  }
+
+  async getUsersWithLegacyPseudonym(): Promise<User[]> {
+    // Query users where legacyPseudonym exists and is not null
+    const snapshot = await this.db
+      .collection(this.usersCollection)
+      .where('legacyPseudonym', '!=', null)
+      .get();
+
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        handle: doc.id,
+        ...data,
+      } as User;
+    });
+  }
+
+  async countUnmigratedEntries(pseudonym: string, handle: string): Promise<number> {
+    // Count entries with this pseudonym that don't have the handle
+    // Firestore doesn't support != queries well, so we query by pseudonym
+    // and filter in memory
+    const snapshot = await this.db
+      .collection(this.collection)
+      .where('pseudonym', '==', pseudonym)
+      .get();
+
+    return snapshot.docs.filter(doc => doc.data().handle !== handle).length;
   }
 
   async getUsersWithEmail(): Promise<User[]> {
@@ -1272,6 +1314,14 @@ export class StagedStorage implements Storage {
 
   async migrateEntriesToHandle(pseudonym: string, handle: string): Promise<number> {
     return this.published.migrateEntriesToHandle(pseudonym, handle);
+  }
+
+  async getUsersWithLegacyPseudonym(): Promise<User[]> {
+    return this.published.getUsersWithLegacyPseudonym();
+  }
+
+  async countUnmigratedEntries(pseudonym: string, handle: string): Promise<number> {
+    return this.published.countUnmigratedEntries(pseudonym, handle);
   }
 
   async getUsersWithEmail(): Promise<User[]> {

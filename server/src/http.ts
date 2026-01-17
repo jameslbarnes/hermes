@@ -2997,6 +2997,72 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // Admin: Check for unmigrated entries
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/admin/unmigrated') {
+      try {
+        // Get all users with legacyPseudonym
+        const usersWithLegacy = await storage.getUsersWithLegacyPseudonym();
+
+        const results = [];
+        for (const user of usersWithLegacy) {
+          // Count entries with this pseudonym that don't have the handle
+          const unmigrated = await storage.countUnmigratedEntries(user.legacyPseudonym!, user.handle);
+          if (unmigrated > 0) {
+            results.push({
+              handle: user.handle,
+              legacyPseudonym: user.legacyPseudonym,
+              unmigratedCount: unmigrated,
+            });
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          usersWithLegacy: usersWithLegacy.length,
+          usersWithUnmigrated: results.length,
+          unmigrated: results
+        }));
+      } catch (err) {
+        console.error('Unmigrated check error:', err);
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Failed to check unmigrated entries', details: String(err) }));
+      }
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Admin: Migrate all entries for all users
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/admin/migrate-all') {
+      try {
+        const usersWithLegacy = await storage.getUsersWithLegacyPseudonym();
+
+        const results = [];
+        let totalMigrated = 0;
+
+        for (const user of usersWithLegacy) {
+          const count = await storage.migrateEntriesToHandle(user.legacyPseudonym!, user.handle);
+          if (count > 0) {
+            results.push({ handle: user.handle, migrated: count });
+            totalMigrated += count;
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          totalMigrated,
+          users: results
+        }));
+      } catch (err) {
+        console.error('Migration error:', err);
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Failed to migrate entries', details: String(err) }));
+      }
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Health check
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/health') {

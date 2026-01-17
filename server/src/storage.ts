@@ -690,19 +690,38 @@ export class FirestoreStorage implements Storage {
 
   async migrateEntriesToHandle(pseudonym: string, handle: string): Promise<number> {
     // Get all entries with this pseudonym
+    console.log(`[FirestoreStorage] migrateEntriesToHandle: querying for pseudonym="${pseudonym}"`);
     const snapshot = await this.db
       .collection(this.collection)
       .where('pseudonym', '==', pseudonym)
       .get();
 
-    // Update each entry with the handle
-    const batch = this.db.batch();
-    snapshot.docs.forEach(doc => {
-      batch.update(doc.ref, { handle });
-    });
+    console.log(`[FirestoreStorage] Found ${snapshot.size} entries to migrate`);
 
-    await batch.commit();
-    return snapshot.size;
+    if (snapshot.size === 0) {
+      return 0;
+    }
+
+    // Firestore batches are limited to 500 operations
+    // Process in chunks if needed
+    const BATCH_SIZE = 500;
+    let totalMigrated = 0;
+
+    for (let i = 0; i < snapshot.docs.length; i += BATCH_SIZE) {
+      const chunk = snapshot.docs.slice(i, i + BATCH_SIZE);
+      const batch = this.db.batch();
+
+      chunk.forEach(doc => {
+        batch.update(doc.ref, { handle });
+      });
+
+      await batch.commit();
+      totalMigrated += chunk.length;
+      console.log(`[FirestoreStorage] Migrated batch ${Math.floor(i / BATCH_SIZE) + 1}: ${chunk.length} entries`);
+    }
+
+    console.log(`[FirestoreStorage] Migration complete: ${totalMigrated} total entries migrated to @${handle}`);
+    return totalMigrated;
   }
 
   async getUsersWithLegacyPseudonym(): Promise<User[]> {

@@ -1471,8 +1471,13 @@ const server = createServer(async (req, res) => {
       // TODO: Run anonymization filter here
 
       const pseudonym = derivePseudonym(secret_key);
+      const keyHash = hashSecretKey(secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+      const handle = user?.handle || undefined;
+
       const entry = await storage.addEntry({
         pseudonym,
+        handle,
         client: 'desktop', // Default for REST API
         content: content.trim(),
         timestamp: Date.now(),
@@ -2451,7 +2456,9 @@ const server = createServer(async (req, res) => {
       });
 
       // Migrate existing entries to the new handle
+      console.log(`[Migration] Starting migration for ${pseudonym} -> @${handle}`);
       const migratedCount = await storage.migrateEntriesToHandle(pseudonym, handle);
+      console.log(`[Migration] Completed: ${migratedCount} entries migrated for @${handle}`);
 
       res.writeHead(201);
       res.end(JSON.stringify({

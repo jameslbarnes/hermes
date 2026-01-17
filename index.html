@@ -2312,11 +2312,15 @@
         }
 
         async function deleteEntry(id) {
-            if (!userKey) return;
+            const effectiveKey = getEffectiveKey();
+            if (!effectiveKey) {
+                alert('No identity key found');
+                return;
+            }
             if (!confirm('Delete this entry?')) return;
 
             try {
-                const res = await fetch(`/api/entries/${id}?key=${encodeURIComponent(userKey)}`, {
+                const res = await fetch(`/api/entries/${id}?key=${encodeURIComponent(effectiveKey)}`, {
                     method: 'DELETE'
                 });
                 if (res.ok) {
@@ -2331,11 +2335,15 @@
         }
 
         async function publishEntry(id) {
-            if (!userKey) return;
+            const effectiveKey = getEffectiveKey();
+            if (!effectiveKey) {
+                alert('No identity key found');
+                return;
+            }
             if (!confirm('Publish this entry now? It will immediately become visible to everyone.')) return;
 
             try {
-                const res = await fetch(`/api/entries/${id}/publish?key=${encodeURIComponent(userKey)}`, {
+                const res = await fetch(`/api/entries/${id}/publish?key=${encodeURIComponent(effectiveKey)}`, {
                     method: 'POST'
                 });
                 if (res.ok) {

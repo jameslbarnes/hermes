@@ -172,6 +172,12 @@ export interface Storage {
   /** Search users by handle prefix (for @mention typeahead) */
   searchUsers(prefix: string, limit?: number): Promise<User[]>;
 
+  /** Get total user count */
+  getUserCount(): Promise<number>;
+
+  /** Get total comment count */
+  getCommentCount(): Promise<number>;
+
   // ─────────────────────────────────────────────────────────────
   // Conversation methods
   // ─────────────────────────────────────────────────────────────
@@ -335,6 +341,14 @@ export class MemoryStorage implements Storage {
     return Array.from(this.users.values())
       .filter(u => u.handle.toLowerCase().startsWith(lowerPrefix))
       .slice(0, limit);
+  }
+
+  async getUserCount(): Promise<number> {
+    return this.users.size;
+  }
+
+  async getCommentCount(): Promise<number> {
+    return this.comments.length;
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -709,6 +723,16 @@ export class FirestoreStorage implements Storage {
         ...data,
       } as User;
     });
+  }
+
+  async getUserCount(): Promise<number> {
+    const snapshot = await this.db.collection(this.usersCollection).count().get();
+    return snapshot.data().count;
+  }
+
+  async getCommentCount(): Promise<number> {
+    const snapshot = await this.db.collection(this.commentsCollection).count().get();
+    return snapshot.data().count;
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -1256,6 +1280,14 @@ export class StagedStorage implements Storage {
 
   async searchUsers(prefix: string, limit = 10): Promise<User[]> {
     return this.published.searchUsers(prefix, limit);
+  }
+
+  async getUserCount(): Promise<number> {
+    return this.published.getUserCount();
+  }
+
+  async getCommentCount(): Promise<number> {
+    return this.published.getCommentCount();
   }
 
   // ─────────────────────────────────────────────────────────────

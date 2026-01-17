@@ -2937,6 +2937,66 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // Stats for dashboard
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/stats') {
+      try {
+        const [entryCount, userCount, commentCount, recentEntries] = await Promise.all([
+          storage.getEntryCount(),
+          storage.getUserCount(),
+          storage.getCommentCount(),
+          storage.getEntries(100),
+        ]);
+
+        // Calculate entries per day for the last 30 days
+        const now = Date.now();
+        const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+        const entriesLast30Days = recentEntries.filter(e => e.timestamp >= thirtyDaysAgo);
+
+        // Group by date
+        const entriesByDate: Record<string, number> = {};
+        for (const entry of entriesLast30Days) {
+          const date = new Date(entry.timestamp).toISOString().split('T')[0];
+          entriesByDate[date] = (entriesByDate[date] || 0) + 1;
+        }
+
+        // Get unique authors in last 30 days
+        const activeAuthors = new Set(entriesLast30Days.map(e => e.handle || e.pseudonym));
+
+        // Calculate entries per author (top 10)
+        const authorCounts: Record<string, number> = {};
+        for (const entry of recentEntries) {
+          const author = entry.handle || entry.pseudonym;
+          authorCounts[author] = (authorCounts[author] || 0) + 1;
+        }
+        const topAuthors = Object.entries(authorCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([author, count]) => ({ author, count }));
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          totals: {
+            entries: entryCount,
+            users: userCount,
+            comments: commentCount,
+          },
+          last30Days: {
+            entries: entriesLast30Days.length,
+            activeAuthors: activeAuthors.size,
+            entriesByDate,
+          },
+          topAuthors,
+        }));
+      } catch (err) {
+        console.error('Stats error:', err);
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Failed to fetch stats' }));
+      }
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Health check
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/health') {
@@ -3060,7 +3120,7 @@ const server = createServer(async (req, res) => {
       }
 
       // Map routes to HTML files
-      if (['/setup', '/prompt'].includes(filePath)) {
+      if (['/setup', '/prompt', '/dashboard'].includes(filePath)) {
         filePath = `${filePath}.html`;
       }
 

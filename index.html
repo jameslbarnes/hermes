@@ -33,7 +33,7 @@
 
         .container {
             display: grid;
-            grid-template-columns: 300px 1fr;
+            grid-template-columns: 340px 1fr;
             min-height: 100vh;
         }
 
@@ -107,6 +107,27 @@
 
         .links a:hover {
             opacity: 0.7;
+        }
+
+        .sidebar-btn {
+            display: block;
+            width: 100%;
+            background: var(--accent);
+            border: none;
+            border-radius: 4px;
+            padding: 0.6rem 0.75rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: white !important;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 1rem;
+            text-decoration: none;
+            text-align: center;
+        }
+
+        .sidebar-btn:hover {
+            opacity: 0.9;
         }
 
         .identity-label {
@@ -1211,7 +1232,7 @@
                     <h2>Contribute</h2>
                     <p>Connect Claude or any other MCP client to post automatically, or import conversations from any platform.</p>
                     <div class="links" id="identity-link">
-                        <a href="/setup">Get started</a>
+                        <a href="/join" class="sidebar-btn">Get started</a>
                     </div>
                 </div>
 
@@ -1320,7 +1341,7 @@
                                 identityLink.innerHTML = `
                                     <span class="identity-label">Logged in as</span>
                                     <a href="/u/${escapeHtml(data.handle)}" class="identity-handle">@${escapeHtml(data.handle)}</a>
-                                    <a href="/setup" class="identity-configure">settings</a>
+                                    <a href="/settings" class="sidebar-btn">Settings</a>
                                 `;
                             } else {
                                 // Legacy user - prompt to claim handle
@@ -1783,8 +1804,8 @@
                 `;
             }
 
-            // Comment form (only show if user has a key)
-            const commentFormHtml = userHandle ? `
+            // Comment form (only show if user has a key and entry is published)
+            const commentFormHtml = (userHandle && !isPending) ? `
                 <div class="comment-form" data-entry-id="${entry.id}">
                     <textarea placeholder="Add a comment..." rows="1" onkeydown="handleCommentKeydown(event, '${entry.id}')"></textarea>
                 </div>
@@ -2747,7 +2768,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
 
             <label for="import-key">Your Identity Key</label>
             <input type="password" id="import-key" placeholder="Enter your identity key" />
-            <p class="modal-hint">Don't have a key? <a href="/setup">Generate one</a></p>
+            <p class="modal-hint">Don't have a key? <a href="/join">Join Hermes</a></p>
 
             <div class="modal-actions">
                 <button class="cancel-btn" onclick="closeImportModal()">Cancel</button>
@@ -2895,7 +2916,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                         identityLink.innerHTML = `
                             <span class="identity-label">Logged in as</span>
                             <a href="/u/${escapeHtml(data.handle)}" class="identity-handle">@${escapeHtml(data.handle)}</a>
-                            <a href="/setup" class="identity-configure">settings</a>
+                            <a href="/settings" class="sidebar-btn">Settings</a>
                         `;
                     }
 

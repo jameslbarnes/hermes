@@ -495,15 +495,28 @@ GET /api/search?q=keyword</code>
             localStorage.setItem('hermes_key', key);
         }
 
-        // Set initial URLs on page load and check for existing key
+        // REDIRECT: This page has been split into /join, /settings, and /connect
+        // Redirect users to the appropriate new page
         document.addEventListener('DOMContentLoaded', async () => {
+            const savedKey = getSavedKey();
+
+            if (savedKey) {
+                // User has a key - send to settings
+                window.location.replace('/settings');
+                return;
+            } else {
+                // New user - send to join
+                window.location.replace('/join');
+                return;
+            }
+
+            // Legacy code below kept for reference but unreachable due to redirects
             document.getElementById('claude-code-cmd').textContent =
                 `claude mcp add hermes --transport sse --scope user "${sseBaseUrl}/mcp/sse?key=YOUR_KEY"`;
             document.getElementById('desktop-url').textContent =
                 `${sseBaseUrl}/mcp/sse?key=YOUR_KEY`;
 
             // Check for existing key in localStorage
-            const savedKey = getSavedKey();
             if (savedKey) {
                 try {
                     const res = await fetch('/api/identity/lookup', {

@@ -3193,7 +3193,7 @@ const server = createServer(async (req, res) => {
       }
 
       // Map routes to HTML files
-      if (['/setup', '/prompt', '/dashboard'].includes(filePath)) {
+      if (['/setup', '/prompt', '/dashboard', '/join', '/settings', '/connect'].includes(filePath)) {
         filePath = `${filePath}.html`;
       }
 

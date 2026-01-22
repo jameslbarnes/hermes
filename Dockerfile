@@ -26,7 +26,7 @@ RUN npm ci --only=production
 COPY --from=builder /app/server/dist ./dist
 
 # Copy static files to parent dir (where http.ts expects them)
-COPY index.html prompt.html setup.html profile.html entry.html dashboard.html /app/
+COPY index.html prompt.html setup.html profile.html entry.html dashboard.html join.html settings.html connect.html /app/
 
 EXPOSE 3000
 

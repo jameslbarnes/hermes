@@ -1739,6 +1739,7 @@ function createMCPServer(secretKey: string) {
 
     // Handle manage_skills tool
     if (name === 'hermes_skills') {
+      try {
       const action = (args as { action?: string })?.action;
 
       if (!action || !['list', 'get', 'create', 'update', 'delete'].includes(action)) {
@@ -1937,10 +1938,18 @@ function createMCPServer(secretKey: string) {
           }],
         };
       }
+      } catch (error: any) {
+        console.error('hermes_skills error:', error);
+        return {
+          content: [{ type: 'text' as const, text: `Failed to manage skill: ${error?.message || 'Unknown error'}` }],
+          isError: true,
+        };
+      }
     }
 
     // Handle broadcast_skill_result tool
     if (name === 'hermes_broadcast') {
+      try {
       const skillName = (args as { skill_name?: string })?.skill_name;
       const result = (args as { result?: string })?.result;
       const summary = (args as { summary?: string })?.summary;
@@ -2047,6 +2056,13 @@ function createMCPServer(secretKey: string) {
           text: `Broadcast queued for skill "${skill.name}":\n\n${pendingBroadcasts.map(b => `• ${b}`).join('\n')}\n\nWebhooks and emails will fire when the entry leaves the staging buffer (typically 1 hour).`,
         }],
       };
+      } catch (error: any) {
+        console.error('hermes_broadcast error:', error);
+        return {
+          content: [{ type: 'text' as const, text: `Failed to broadcast: ${error?.message || 'Unknown error'}` }],
+          isError: true,
+        };
+      }
     }
 
     // Handle browse_public_skills tool

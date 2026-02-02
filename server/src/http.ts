@@ -61,6 +61,18 @@ function isInternalUrl(urlString: string): boolean {
 // Store active MCP sessions
 const mcpSessions = new Map<string, { transport: SSEServerTransport; secretKey: string }>();
 
+/**
+ * Strip content from entries/conversations with humanVisible: false (for non-authors)
+ * AI tools (MCP) get full content; REST API strips it for privacy
+ */
+function stripHiddenContent<T extends JournalEntry | Conversation>(
+  item: T,
+  isAuthor: boolean
+): T {
+  if (item.humanVisible !== false || isAuthor) return item;
+  return { ...item, content: '' };
+}
+
 // Staging delay: 1 hour in production, 2 minutes for testing if env var set
 const STAGING_DELAY_MS = process.env.STAGING_DELAY_MS
   ? parseInt(process.env.STAGING_DELAY_MS)
@@ -475,7 +487,7 @@ export const SYSTEM_SKILLS: Skill[] = [
   {
     id: 'system_hermes_skills',
     name: 'hermes_skills',
-    description: 'Create, update, list, or delete custom skills (broadcast channels). Skills become tools you can invoke. Skills can have trigger conditions to auto-fire, and can broadcast to the notebook, email subscribers, or webhooks.',
+    description: 'Manage skills: create/update/delete custom skills, or override/disable/enable/reset system skills. Skills become tools you can invoke.',
     instructions: '',
     handlerType: 'builtin',
     inputSchema: {
@@ -483,12 +495,16 @@ export const SYSTEM_SKILLS: Skill[] = [
       properties: {
         action: {
           type: 'string',
-          enum: ['list', 'get', 'create', 'update', 'delete'],
-          description: 'What action to take.',
+          enum: ['list', 'get', 'create', 'update', 'delete', 'edit', 'disable', 'enable', 'reset'],
+          description: 'What action to take. list/get/create/update/delete for custom skills. edit/disable/enable/reset for system skills.',
         },
         skill_id: {
           type: 'string',
           description: 'For get/update/delete: the skill ID.',
+        },
+        system_skill_name: {
+          type: 'string',
+          description: 'For edit/disable/enable/reset: the system skill name (e.g., "hermes_write_entry", "hermes_search").',
         },
         name: {
           type: 'string',
@@ -496,11 +512,11 @@ export const SYSTEM_SKILLS: Skill[] = [
         },
         description: {
           type: 'string',
-          description: 'For create/update: brief description of what the skill does.',
+          description: 'For create/update/override: brief description of what the skill does.',
         },
         instructions: {
           type: 'string',
-          description: 'For create/update: detailed instructions for Claude to follow when this skill is invoked. Can reference other tools.',
+          description: 'For create/update/override: detailed instructions for Claude to follow when this skill is invoked.',
         },
         parameters: {
           type: 'array',
@@ -1198,20 +1214,33 @@ function createMCPServer(secretKey: string) {
       dynamicDescription += `\n\nCUSTOM INSTRUCTIONS FROM USER:\n${user.customPrompt}`;
     }
 
+    // Get user's disabled skills and overrides
+    const disabledSkills = user?.disabledSkills || [];
+    const skillOverrides = user?.skillOverrides || {};
+
     // Generate tools from SYSTEM_SKILLS array
     const builtinTools = SYSTEM_SKILLS
       .filter(skill => skill.handlerType === 'builtin')
+      .filter(skill => !disabledSkills.includes(skill.name)) // Filter out disabled skills
       .map(skill => {
+        // Apply user overrides if any
+        const override = skillOverrides[skill.name];
+
         // Dynamic descriptions for certain tools
-        let description = skill.description;
-        if (skill.name === 'hermes_write_entry') {
+        let description = override?.description || skill.description;
+        if (skill.name === 'hermes_write_entry' && !override?.description) {
           description = dynamicDescription;
-        } else if (skill.name === 'hermes_search') {
+        } else if (skill.name === 'hermes_search' && !override?.description) {
           description = SEARCH_TOOL_DESCRIPTION;
-        } else if (skill.name === 'hermes_write_essay') {
+        } else if (skill.name === 'hermes_write_essay' && !override?.description) {
           description = ESSAY_TOOL_DESCRIPTION;
-        } else if (skill.name === 'hermes_settings') {
+        } else if (skill.name === 'hermes_settings' && !override?.description) {
           description = `View or update the user's Hermes settings. Current settings: humanVisible=${humanVisibleDefault}. Always confirm with the user before making changes.`;
+        }
+
+        // If there's an override with instructions, append them to the description
+        if (override?.instructions) {
+          description += `\n\nCustom instructions: ${override.instructions}`;
         }
 
         return {
@@ -1778,10 +1807,11 @@ function createMCPServer(secretKey: string) {
     if (name === 'hermes_skills') {
       try {
       const action = (args as { action?: string })?.action;
+      const validActions = ['list', 'get', 'create', 'update', 'delete', 'edit', 'disable', 'enable', 'reset'];
 
-      if (!action || !['list', 'get', 'create', 'update', 'delete'].includes(action)) {
+      if (!action || !validActions.includes(action)) {
         return {
-          content: [{ type: 'text' as const, text: 'Action must be list, get, create, update, or delete.' }],
+          content: [{ type: 'text' as const, text: `Action must be one of: ${validActions.join(', ')}.` }],
           isError: true,
         };
       }
@@ -1795,23 +1825,41 @@ function createMCPServer(secretKey: string) {
       }
 
       const skills = skillsUser.skills || [];
+      const disabledSkills = skillsUser.disabledSkills || [];
+      const skillOverrides = skillsUser.skillOverrides || {};
 
       if (action === 'list') {
-        if (skills.length === 0) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: 'No custom skills yet. Use action: "create" to make one. You can model it after existing tools like hermes_write_entry.',
-            }],
-          };
+        // List system skills with their status
+        const systemSkillsList = SYSTEM_SKILLS
+          .filter(s => s.handlerType === 'builtin')
+          .map(s => {
+            const isDisabled = disabledSkills.includes(s.name);
+            const hasOverride = skillOverrides[s.name];
+            let status = '';
+            if (isDisabled) status = ' [DISABLED]';
+            else if (hasOverride) status = ' [CUSTOMIZED]';
+            return `• ${s.name}${status}: ${s.description.slice(0, 80)}${s.description.length > 80 ? '...' : ''}`;
+          })
+          .join('\n');
+
+        // List custom skills
+        let customSkillsList = '';
+        if (skills.length > 0) {
+          customSkillsList = '\n\nCustom skills:\n' + skills.map(s =>
+            `• ${s.name} (skill_${s.name}): ${s.description}${s.triggerCondition ? ` [Triggers: ${s.triggerCondition}]` : ''}`
+          ).join('\n');
         }
-        const skillsList = skills.map(s =>
-          `• ${s.name} (skill_${s.name}): ${s.description}${s.triggerCondition ? ` [Triggers: ${s.triggerCondition}]` : ''}`
-        ).join('\n');
+
         return {
           content: [{
             type: 'text' as const,
-            text: `Your custom skills:\n\n${skillsList}\n\nUse action: "get" with skill_id to see full details.`,
+            text: `System skills:\n${systemSkillsList}${customSkillsList}\n\n` +
+              `Actions:\n` +
+              `• "edit" with system_skill_name + description/instructions: customize a system skill\n` +
+              `• "disable" with system_skill_name: hide a system skill from your toolkit\n` +
+              `• "enable" with system_skill_name: restore a disabled skill\n` +
+              `• "reset" with system_skill_name: restore system defaults\n` +
+              `• "create" with name/description/instructions: make a custom skill`,
           }],
         };
       }
@@ -1991,6 +2039,178 @@ function createMCPServer(secretKey: string) {
           content: [{
             type: 'text' as const,
             text: `Deleted skill "${deletedSkill.name}".`,
+          }],
+        };
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // System skill management actions
+      // ─────────────────────────────────────────────────────────────
+
+      if (action === 'edit') {
+        const systemSkillName = (args as { system_skill_name?: string })?.system_skill_name;
+        const description = (args as { description?: string })?.description;
+        const instructions = (args as { instructions?: string })?.instructions;
+
+        if (!systemSkillName) {
+          return {
+            content: [{ type: 'text' as const, text: 'system_skill_name is required for override action.' }],
+            isError: true,
+          };
+        }
+
+        // Verify it's a valid system skill
+        const systemSkill = SYSTEM_SKILLS.find(s => s.name === systemSkillName && s.handlerType === 'builtin');
+        if (!systemSkill) {
+          const validNames = SYSTEM_SKILLS.filter(s => s.handlerType === 'builtin').map(s => s.name).join(', ');
+          return {
+            content: [{ type: 'text' as const, text: `Unknown system skill: "${systemSkillName}". Valid options: ${validNames}` }],
+            isError: true,
+          };
+        }
+
+        if (!description && !instructions) {
+          return {
+            content: [{ type: 'text' as const, text: 'Provide at least description or instructions to override.' }],
+            isError: true,
+          };
+        }
+
+        // Update skill overrides
+        const updatedOverrides = { ...skillOverrides };
+        updatedOverrides[systemSkillName] = {
+          ...(updatedOverrides[systemSkillName] || {}),
+          ...(description && { description }),
+          ...(instructions && { instructions }),
+        };
+
+        await storage.updateUser(skillsUser.handle, { skillOverrides: updatedOverrides } as any);
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Customized "${systemSkillName}"!\n\n` +
+              (description ? `New description: ${description.slice(0, 100)}...\n` : '') +
+              (instructions ? `Added instructions: ${instructions.slice(0, 100)}...\n` : '') +
+              `\nReconnect to see the changes.`,
+          }],
+        };
+      }
+
+      if (action === 'disable') {
+        const systemSkillName = (args as { system_skill_name?: string })?.system_skill_name;
+
+        if (!systemSkillName) {
+          return {
+            content: [{ type: 'text' as const, text: 'system_skill_name is required for disable action.' }],
+            isError: true,
+          };
+        }
+
+        // Verify it's a valid system skill
+        const systemSkill = SYSTEM_SKILLS.find(s => s.name === systemSkillName && s.handlerType === 'builtin');
+        if (!systemSkill) {
+          const validNames = SYSTEM_SKILLS.filter(s => s.handlerType === 'builtin').map(s => s.name).join(', ');
+          return {
+            content: [{ type: 'text' as const, text: `Unknown system skill: "${systemSkillName}". Valid options: ${validNames}` }],
+            isError: true,
+          };
+        }
+
+        if (disabledSkills.includes(systemSkillName)) {
+          return {
+            content: [{ type: 'text' as const, text: `"${systemSkillName}" is already disabled.` }],
+            isError: true,
+          };
+        }
+
+        const updatedDisabled = [...disabledSkills, systemSkillName];
+        await storage.updateUser(skillsUser.handle, { disabledSkills: updatedDisabled } as any);
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Disabled "${systemSkillName}". It will no longer appear in your toolkit.\n\nUse action:"enable" to restore it.`,
+          }],
+        };
+      }
+
+      if (action === 'enable') {
+        const systemSkillName = (args as { system_skill_name?: string })?.system_skill_name;
+
+        if (!systemSkillName) {
+          return {
+            content: [{ type: 'text' as const, text: 'system_skill_name is required for enable action.' }],
+            isError: true,
+          };
+        }
+
+        if (!disabledSkills.includes(systemSkillName)) {
+          return {
+            content: [{ type: 'text' as const, text: `"${systemSkillName}" is not disabled.` }],
+            isError: true,
+          };
+        }
+
+        const updatedDisabled = disabledSkills.filter(s => s !== systemSkillName);
+        await storage.updateUser(skillsUser.handle, { disabledSkills: updatedDisabled } as any);
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Enabled "${systemSkillName}". It will appear in your toolkit again.\n\nReconnect to see the tool.`,
+          }],
+        };
+      }
+
+      if (action === 'reset') {
+        const systemSkillName = (args as { system_skill_name?: string })?.system_skill_name;
+
+        if (!systemSkillName) {
+          return {
+            content: [{ type: 'text' as const, text: 'system_skill_name is required for reset action.' }],
+            isError: true,
+          };
+        }
+
+        // Verify it's a valid system skill
+        const systemSkill = SYSTEM_SKILLS.find(s => s.name === systemSkillName && s.handlerType === 'builtin');
+        if (!systemSkill) {
+          const validNames = SYSTEM_SKILLS.filter(s => s.handlerType === 'builtin').map(s => s.name).join(', ');
+          return {
+            content: [{ type: 'text' as const, text: `Unknown system skill: "${systemSkillName}". Valid options: ${validNames}` }],
+            isError: true,
+          };
+        }
+
+        // Remove from disabled list if present
+        const updatedDisabled = disabledSkills.filter(s => s !== systemSkillName);
+
+        // Remove override if present
+        const updatedOverrides = { ...skillOverrides };
+        delete updatedOverrides[systemSkillName];
+
+        const wasDisabled = disabledSkills.includes(systemSkillName);
+        const hadOverride = skillOverrides[systemSkillName];
+
+        if (!wasDisabled && !hadOverride) {
+          return {
+            content: [{ type: 'text' as const, text: `"${systemSkillName}" has no customizations to reset.` }],
+          };
+        }
+
+        await storage.updateUser(skillsUser.handle, {
+          disabledSkills: updatedDisabled,
+          skillOverrides: updatedOverrides,
+        } as any);
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Reset "${systemSkillName}" to defaults.\n\n` +
+              (wasDisabled ? '• Re-enabled (was disabled)\n' : '') +
+              (hadOverride ? '• Removed customizations\n' : '') +
+              `\nReconnect to see the changes.`,
           }],
         };
       }
@@ -2380,6 +2600,7 @@ const server = createServer(async (req, res) => {
     const entryByIdMatch = url.pathname.match(/^\/api\/entry\/([^/]+)$/);
     if (req.method === 'GET' && entryByIdMatch) {
       const entryId = decodeURIComponent(entryByIdMatch[1]);
+      const secretKey = url.searchParams.get('key');
       const entry = await storage.getEntry(entryId);
 
       if (!entry) {
@@ -2388,8 +2609,17 @@ const server = createServer(async (req, res) => {
         return;
       }
 
+      // Check if requester is the author (to allow viewing hidden content)
+      let isAuthor = false;
+      if (secretKey && isValidSecretKey(secretKey)) {
+        const userPseudonym = derivePseudonym(secretKey);
+        const keyHash = hashSecretKey(secretKey);
+        const user = await storage.getUserByKeyHash(keyHash);
+        isAuthor = entry.pseudonym === userPseudonym || entry.handle === user?.handle;
+      }
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(entry));
+      res.end(JSON.stringify(stripHiddenContent(entry, isAuthor)));
       return;
     }
 
@@ -2405,15 +2635,28 @@ const server = createServer(async (req, res) => {
       const total = await storage.getEntryCount();
 
       // If user has a key, include their pending entries
-      if (secretKey && isValidSecretKey(secretKey) && storage instanceof StagedStorage) {
-        const userPseudonym = derivePseudonym(secretKey);
-        const pendingEntries = await storage.getPendingEntriesByPseudonym(userPseudonym);
-        // Merge pending entries and sort by timestamp
-        entries = [...pendingEntries, ...entries].sort((a, b) => b.timestamp - a.timestamp);
+      let authorPseudonym: string | null = null;
+      let authorHandle: string | null = null;
+      if (secretKey && isValidSecretKey(secretKey)) {
+        authorPseudonym = derivePseudonym(secretKey);
+        const keyHash = hashSecretKey(secretKey);
+        const user = await storage.getUserByKeyHash(keyHash);
+        authorHandle = user?.handle || null;
+        if (storage instanceof StagedStorage) {
+          const pendingEntries = await storage.getPendingEntriesByPseudonym(authorPseudonym);
+          // Merge pending entries and sort by timestamp
+          entries = [...pendingEntries, ...entries].sort((a, b) => b.timestamp - a.timestamp);
+        }
       }
 
+      // Strip content from hidden entries (except for author's own entries)
+      const strippedEntries = entries.map(e => {
+        const isAuthor = e.pseudonym === authorPseudonym || e.handle === authorHandle;
+        return stripHiddenContent(e, isAuthor);
+      });
+
       res.writeHead(200);
-      res.end(JSON.stringify({ entries, total, limit, offset }));
+      res.end(JSON.stringify({ entries: strippedEntries, total, limit, offset }));
       return;
     }
 
@@ -2542,9 +2785,14 @@ const server = createServer(async (req, res) => {
 
       // Check if user is viewing their own entries (include pending)
       let includePending = false;
+      let authorPseudonym: string | null = null;
+      let authorHandle: string | null = null;
       if (secretKey && isValidSecretKey(secretKey)) {
-        const userPseudonym = derivePseudonym(secretKey);
-        includePending = userPseudonym === pseudonym;
+        authorPseudonym = derivePseudonym(secretKey);
+        const keyHash = hashSecretKey(secretKey);
+        const user = await storage.getUserByKeyHash(keyHash);
+        authorHandle = user?.handle || null;
+        includePending = authorPseudonym === pseudonym;
       }
 
       // Use StagedStorage's extended method if available
@@ -2552,8 +2800,14 @@ const server = createServer(async (req, res) => {
         ? await storage.getEntriesByPseudonym(pseudonym, limit, includePending)
         : await storage.getEntriesByPseudonym(pseudonym, limit);
 
+      // Strip content from hidden entries (except for author's own entries)
+      const strippedEntries = entries.map(e => {
+        const isAuthor = e.pseudonym === authorPseudonym || e.handle === authorHandle;
+        return stripHiddenContent(e, isAuthor);
+      });
+
       res.writeHead(200);
-      res.end(JSON.stringify({ pseudonym, entries }));
+      res.end(JSON.stringify({ pseudonym, entries: strippedEntries }));
       return;
     }
 
@@ -2611,15 +2865,24 @@ const server = createServer(async (req, res) => {
       let conversations = await storage.getConversations(limit, offset);
 
       // If user has a key, include their pending conversations
-      if (secretKey && isValidSecretKey(secretKey) && storage instanceof StagedStorage) {
-        const userPseudonym = derivePseudonym(secretKey);
-        const pendingConversations = await storage.getPendingConversationsByPseudonym(userPseudonym);
-        // Merge pending conversations and sort by timestamp
-        conversations = [...pendingConversations, ...conversations].sort((a, b) => b.timestamp - a.timestamp);
+      let authorPseudonym: string | null = null;
+      if (secretKey && isValidSecretKey(secretKey)) {
+        authorPseudonym = derivePseudonym(secretKey);
+        if (storage instanceof StagedStorage) {
+          const pendingConversations = await storage.getPendingConversationsByPseudonym(authorPseudonym);
+          // Merge pending conversations and sort by timestamp
+          conversations = [...pendingConversations, ...conversations].sort((a, b) => b.timestamp - a.timestamp);
+        }
       }
 
+      // Strip content from hidden conversations (except for author's own)
+      const strippedConversations = conversations.map(c => {
+        const isAuthor = c.pseudonym === authorPseudonym;
+        return stripHiddenContent(c, isAuthor);
+      });
+
       res.writeHead(200);
-      res.end(JSON.stringify({ conversations, limit, offset }));
+      res.end(JSON.stringify({ conversations: strippedConversations, limit, offset }));
       return;
     }
 
@@ -2701,15 +2964,16 @@ const server = createServer(async (req, res) => {
         return;
       }
 
+      // Check if requester is the author
+      let isAuthor = false;
+      if (secretKey && isValidSecretKey(secretKey)) {
+        const userPseudonym = derivePseudonym(secretKey);
+        isAuthor = conversation.pseudonym === userPseudonym;
+      }
+
       // Check if it's a pending conversation - only owner can view
       if (conversation.publishAt && conversation.publishAt > Date.now()) {
-        if (!secretKey || !isValidSecretKey(secretKey)) {
-          res.writeHead(404);
-          res.end(JSON.stringify({ error: 'Conversation not found' }));
-          return;
-        }
-        const userPseudonym = derivePseudonym(secretKey);
-        if (conversation.pseudonym !== userPseudonym) {
+        if (!isAuthor) {
           res.writeHead(404);
           res.end(JSON.stringify({ error: 'Conversation not found' }));
           return;
@@ -2717,7 +2981,7 @@ const server = createServer(async (req, res) => {
       }
 
       res.writeHead(200);
-      res.end(JSON.stringify({ conversation }));
+      res.end(JSON.stringify({ conversation: stripHiddenContent(conversation, isAuthor) }));
       return;
     }
 
@@ -4035,6 +4299,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/search') {
       const query = url.searchParams.get('q') || '';
       const limit = parseInt(url.searchParams.get('limit') || '10');
+      const secretKey = url.searchParams.get('key');
 
       if (!query) {
         res.writeHead(400);
@@ -4042,9 +4307,26 @@ const server = createServer(async (req, res) => {
         return;
       }
 
+      // Check if requester is authenticated
+      let authorPseudonym: string | null = null;
+      let authorHandle: string | null = null;
+      if (secretKey && isValidSecretKey(secretKey)) {
+        authorPseudonym = derivePseudonym(secretKey);
+        const keyHash = hashSecretKey(secretKey);
+        const user = await storage.getUserByKeyHash(keyHash);
+        authorHandle = user?.handle || null;
+      }
+
       const results = await storage.searchEntries(query, limit);
+
+      // Strip content from hidden entries (except for author's own)
+      const strippedResults = results.map(e => {
+        const isAuthor = e.pseudonym === authorPseudonym || e.handle === authorHandle;
+        return stripHiddenContent(e, isAuthor);
+      });
+
       res.writeHead(200);
-      res.end(JSON.stringify({ query, results, count: results.length }));
+      res.end(JSON.stringify({ query, results: strippedResults, count: strippedResults.length }));
       return;
     }
 

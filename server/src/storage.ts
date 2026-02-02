@@ -135,6 +135,8 @@ export interface User {
   defaultHumanVisible?: boolean; // Default visibility for new entries (default true)
   skills?: Skill[];          // User-defined skills/broadcast channels
   customPrompt?: string;     // Additional ambient prompt instructions
+  skillOverrides?: Record<string, Partial<Skill>>;  // Overrides for system skills (key = skill name)
+  disabledSkills?: string[]; // Names of system skills to hide from tool list
 }
 
 export interface Comment {

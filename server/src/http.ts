@@ -1137,6 +1137,7 @@ const MIME_TYPES: Record<string, string> = {
   '.json': 'application/json',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.md': 'text/plain',
 };
 
 // ═══════════════════════════════════════════════════════════════

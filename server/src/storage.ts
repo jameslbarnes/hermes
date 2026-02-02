@@ -8,6 +8,15 @@
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 
+// Config for deferred broadcasts (fired when entry leaves staging buffer)
+export interface BroadcastConfig {
+  skillName: string;
+  emailTo?: string[];
+  webhookUrl?: string;
+  webhookHeaders?: Record<string, string>;
+  summary?: string;          // Optional summary for email/webhook
+}
+
 export interface JournalEntry {
   id: string;
   pseudonym: string;         // Legacy: "Quiet Feather#79c30b" (always present for display fallback)
@@ -19,6 +28,9 @@ export interface JournalEntry {
   publishAt?: number; // When entry becomes public. If undefined or in past, entry is published.
   isReflection?: boolean; // True for longform markdown reflections
   model?: string; // Model that wrote the entry (e.g., "claude-sonnet-4", "opus-4")
+  humanVisible?: boolean; // Show full content in human feed? Default true. False = AI-only (stub shown)
+  topicHints?: string[]; // For AI-only entries: topics covered (e.g., ["auth", "TEE"])
+  broadcastConfig?: BroadcastConfig; // Pending webhooks/emails to fire on publish
 }
 
 export interface Summary {
@@ -51,6 +63,7 @@ export interface Conversation {
   timestamp: number;
   keywords: string[];        // Tokenized from content for search
   publishAt?: number;        // Staging delay (same as entries)
+  humanVisible?: boolean;    // Show full content in human feed? Default false for imports.
 }
 
 export interface EmailPrefs {
@@ -62,6 +75,48 @@ export interface EmailVerification {
   token: string;             // Verification token
   email: string;             // Email being verified
   expiresAt: number;         // Token expiration timestamp
+}
+
+// User-defined skill/broadcast channel
+export interface SkillParameter {
+  name: string;
+  type: 'string' | 'boolean' | 'number' | 'array';
+  description: string;
+  required?: boolean;
+  enum?: string[];           // For constrained choices like ['desktop', 'mobile', 'code']
+  default?: any;             // Default value if not provided
+}
+
+export interface Skill {
+  id: string;                // Unique ID for the skill
+  name: string;              // Tool name (e.g., "hermes_write_entry", "hermes_newsletter")
+  description: string;       // What this skill does
+  instructions: string;      // Detailed instructions for Claude to follow
+  parameters?: SkillParameter[];  // Input parameters Claude fills in
+  inputSchema?: Record<string, any>;  // Full MCP inputSchema (for builtin skills needing complex schemas)
+
+  // Handler type
+  handlerType?: 'builtin' | 'instructions';  // 'builtin' = server handles, 'instructions' = Claude follows instructions
+
+  // Trigger conditions (optional - if set, skill auto-fires when condition is met)
+  triggerCondition?: string; // e.g., "when user mentions Project X"
+
+  // Broadcast targets
+  postToNotebook?: boolean;  // Post output to notebook (default true)
+  humanVisible?: boolean;    // Show in human feed (default to user's setting)
+  emailTo?: string[];        // Email addresses to notify
+  webhookUrl?: string;       // URL to POST to when skill fires
+  webhookHeaders?: Record<string, string>;  // Custom headers for webhook
+
+  // Sharing
+  public?: boolean;          // If true, skill appears in public gallery
+  author?: string;           // Handle of the creator (for public skills)
+  clonedFrom?: string;       // ID of skill this was cloned from
+  cloneCount?: number;       // How many times this skill has been cloned
+
+  // Metadata
+  createdAt: number;
+  updatedAt?: number;
 }
 
 export interface User {
@@ -77,6 +132,9 @@ export interface User {
   stagingDelayMs?: number;   // How long entries stay in staging (default 1 hour)
   createdAt: number;
   legacyPseudonym?: string;  // "Quiet Feather#79c30b" if migrated from old system
+  defaultHumanVisible?: boolean; // Default visibility for new entries (default true)
+  skills?: Skill[];          // User-defined skills/broadcast channels
+  customPrompt?: string;     // Additional ambient prompt instructions
 }
 
 export interface Comment {
@@ -180,6 +238,9 @@ export interface Storage {
 
   /** Get total user count */
   getUserCount(): Promise<number>;
+
+  /** Get all users (for public skills gallery, etc.) */
+  getAllUsers(): Promise<User[]>;
 
   /** Get total comment count */
   getCommentCount(): Promise<number>;
@@ -361,6 +422,10 @@ export class MemoryStorage implements Storage {
     return this.users.size;
   }
 
+  async getAllUsers(): Promise<User[]> {
+    return Array.from(this.users.values());
+  }
+
   async getCommentCount(): Promise<number> {
     return this.comments.length;
   }
@@ -522,6 +587,14 @@ export class FirestoreStorage implements Storage {
 
     if (newEntry.model) {
       docData.model = newEntry.model;
+    }
+
+    if (newEntry.humanVisible !== undefined) {
+      docData.humanVisible = newEntry.humanVisible;
+    }
+
+    if (newEntry.topicHints && newEntry.topicHints.length > 0) {
+      docData.topicHints = newEntry.topicHints;
     }
 
     await this.db.collection(this.collection).doc(id).set(docData);
@@ -791,6 +864,17 @@ export class FirestoreStorage implements Storage {
     return snapshot.data().count;
   }
 
+  async getAllUsers(): Promise<User[]> {
+    const snapshot = await this.db.collection(this.usersCollection).get();
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        handle: doc.id,
+        ...data,
+      } as User;
+    });
+  }
+
   async getCommentCount(): Promise<number> {
     const snapshot = await this.db.collection(this.commentsCollection).count().get();
     return snapshot.data().count;
@@ -938,7 +1022,7 @@ export class FirestoreStorage implements Storage {
     const id = generateEntryId();
     const newConversation: Conversation = { ...conversation, id };
 
-    await this.db.collection(this.conversationsCollection).doc(id).set({
+    const docData: Record<string, any> = {
       pseudonym: newConversation.pseudonym,
       sourceUrl: newConversation.sourceUrl,
       platform: newConversation.platform,
@@ -947,7 +1031,13 @@ export class FirestoreStorage implements Storage {
       summary: newConversation.summary,
       timestamp: newConversation.timestamp,
       keywords: newConversation.keywords,
-    });
+    };
+
+    if (newConversation.humanVisible !== undefined) {
+      docData.humanVisible = newConversation.humanVisible;
+    }
+
+    await this.db.collection(this.conversationsCollection).doc(id).set(docData);
 
     return newConversation;
   }
@@ -1353,6 +1443,10 @@ export class StagedStorage implements Storage {
 
   async getUserCount(): Promise<number> {
     return this.published.getUserCount();
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return this.published.getAllUsers();
   }
 
   async getCommentCount(): Promise<number> {

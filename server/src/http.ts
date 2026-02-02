@@ -25,6 +25,39 @@ import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Bro
 import { scrapeConversation, detectPlatform, isValidShareUrl, ScrapeError } from './scraper.js';
 import { createNotificationService, createSendGridClient, verifyUnsubscribeToken, verifyEmailToken, type NotificationService } from './notifications.js';
 
+// Security: Check if a URL points to internal/private IP ranges
+function isInternalUrl(urlString: string): boolean {
+  try {
+    const url = new URL(urlString);
+    const hostname = url.hostname.toLowerCase();
+
+    // Block localhost variants
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+      return true;
+    }
+
+    // Block private IP ranges
+    const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (ipMatch) {
+      const [, a, b] = ipMatch.map(Number);
+      // 10.x.x.x
+      if (a === 10) return true;
+      // 172.16.x.x - 172.31.x.x
+      if (a === 172 && b >= 16 && b <= 31) return true;
+      // 192.168.x.x
+      if (a === 192 && b === 168) return true;
+      // 127.x.x.x loopback
+      if (a === 127) return true;
+      // 169.254.x.x link-local
+      if (a === 169 && b === 254) return true;
+    }
+
+    return false;
+  } catch {
+    return true; // Invalid URL = blocked
+  }
+}
+
 // Store active MCP sessions
 const mcpSessions = new Map<string, { transport: SSEServerTransport; secretKey: string }>();
 
@@ -827,6 +860,9 @@ async function firePendingBroadcasts(entry: JournalEntry) {
 
   // Fire webhook
   if (config.webhookUrl) {
+    if (isInternalUrl(config.webhookUrl)) {
+      console.log(`[Broadcast] Blocked internal webhook URL: ${config.webhookUrl}`);
+    } else {
     try {
       const response = await fetch(config.webhookUrl, {
         method: 'POST',
@@ -847,6 +883,7 @@ async function firePendingBroadcasts(entry: JournalEntry) {
       console.log(`[Broadcast] Webhook ${response.ok ? 'sent' : `failed (${response.status})`}: ${config.webhookUrl}`);
     } catch (err) {
       console.error(`[Broadcast] Webhook failed:`, err);
+    }
     }
   }
 
@@ -1833,6 +1870,15 @@ function createMCPServer(secretKey: string) {
           };
         }
 
+        // Validate webhook URL if provided
+        const webhookUrl = (args as { webhookUrl?: string })?.webhookUrl;
+        if (webhookUrl && isInternalUrl(webhookUrl)) {
+          return {
+            content: [{ type: 'text' as const, text: 'Webhook URL cannot point to internal/private IP addresses.' }],
+            isError: true,
+          };
+        }
+
         const isPublic = (args as { public?: boolean })?.public ?? false;
         const newSkill = {
           id: `skill_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -1844,7 +1890,7 @@ function createMCPServer(secretKey: string) {
           postToNotebook: (args as { postToNotebook?: boolean })?.postToNotebook ?? true,
           humanVisible: (args as { humanVisible?: boolean })?.humanVisible,
           emailTo: (args as { emailTo?: string[] })?.emailTo,
-          webhookUrl: (args as { webhookUrl?: string })?.webhookUrl,
+          webhookUrl,
           public: isPublic,
           author: skillsUser.handle,
           cloneCount: 0,
@@ -1884,6 +1930,16 @@ function createMCPServer(secretKey: string) {
         }
 
         const existingSkill = skills[skillIndex];
+
+        // Validate webhook URL if being updated
+        const newWebhookUrl = (args as any).webhookUrl;
+        if (newWebhookUrl && isInternalUrl(newWebhookUrl)) {
+          return {
+            content: [{ type: 'text' as const, text: 'Webhook URL cannot point to internal/private IP addresses.' }],
+            isError: true,
+          };
+        }
+
         const updatedSkill = {
           ...existingSkill,
           ...(args as any).name && { name: (args as any).name.toLowerCase().replace(/[^a-z0-9_]/g, '_') },
@@ -1894,7 +1950,7 @@ function createMCPServer(secretKey: string) {
           ...(args as any).postToNotebook !== undefined && { postToNotebook: (args as any).postToNotebook },
           ...(args as any).humanVisible !== undefined && { humanVisible: (args as any).humanVisible },
           ...(args as any).emailTo !== undefined && { emailTo: (args as any).emailTo },
-          ...(args as any).webhookUrl !== undefined && { webhookUrl: (args as any).webhookUrl || undefined },
+          ...(args as any).webhookUrl !== undefined && { webhookUrl: newWebhookUrl || undefined },
           ...(args as any).public !== undefined && { public: (args as any).public },
           updatedAt: Date.now(),
         };
@@ -2011,24 +2067,28 @@ function createMCPServer(secretKey: string) {
       } else {
         // No notebook post - fire broadcasts immediately (no staging delay)
         if (skill.webhookUrl) {
-          try {
-            const response = await fetch(skill.webhookUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(skill.webhookHeaders || {}),
-              },
-              body: JSON.stringify({
-                skill: skill.name,
-                author: broadcastUser?.handle,
-                content: result,
-                summary,
-                timestamp: Date.now(),
-              }),
-            });
-            pendingBroadcasts.push(`Webhook: ${response.ok ? 'sent' : `failed (${response.status})`}`);
-          } catch (err) {
-            pendingBroadcasts.push(`Webhook: failed (${err instanceof Error ? err.message : 'unknown error'})`);
+          if (isInternalUrl(skill.webhookUrl)) {
+            pendingBroadcasts.push(`Webhook: blocked (internal URLs not allowed)`);
+          } else {
+            try {
+              const response = await fetch(skill.webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(skill.webhookHeaders || {}),
+                },
+                body: JSON.stringify({
+                  skill: skill.name,
+                  author: broadcastUser?.handle,
+                  content: result,
+                  summary,
+                  timestamp: Date.now(),
+                }),
+              });
+              pendingBroadcasts.push(`Webhook: ${response.ok ? 'sent' : `failed (${response.status})`}`);
+            } catch (err) {
+              pendingBroadcasts.push(`Webhook: failed (${err instanceof Error ? err.message : 'unknown error'})`);
+            }
           }
         }
 

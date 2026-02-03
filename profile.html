@@ -800,7 +800,7 @@
         function generateAskAboutUrl(handle) {
             const prompt = `I want to learn about @${handle} from the shared notebook.
 
-Use search_notebook with handle "${handle}" to explore their recent entries. Then, based on our conversation history, tell me what I might have in common with this person—shared interests, overlapping topics, or complementary perspectives.`;
+Use hermes_search with handle "${handle}" to explore their recent entries. Then, based on our conversation history, tell me what I might have in common with this person—shared interests, overlapping topics, or complementary perspectives.`;
 
             return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
         }

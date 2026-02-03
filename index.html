@@ -262,6 +262,40 @@
             text-decoration: underline;
         }
 
+        .recipient-handle {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .recipient-handle:hover {
+            text-decoration: underline;
+        }
+
+        .recipient-email {
+            color: #888;
+            font-style: italic;
+        }
+
+        .recipient-webhook {
+            color: #888;
+            font-size: 0.9em;
+        }
+
+        .reply-indicator {
+            color: #888;
+            font-size: 0.9em;
+        }
+
+        .reply-link {
+            color: #888;
+            text-decoration: none;
+        }
+
+        .reply-link:hover {
+            color: var(--accent);
+            text-decoration: underline;
+        }
+
         .avatar {
             display: inline-flex;
             align-items: center;
@@ -364,6 +398,12 @@
         .meta-badge--source {
             background: var(--border);
             color: var(--fg-muted);
+        }
+
+        .token-count {
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
         }
 
         /* Legacy badge aliases */
@@ -630,6 +670,17 @@
             margin: 1rem 0;
             color: var(--fg-muted);
             font-style: italic;
+        }
+
+        /* AI-only entries (stub display) */
+        .entry-content.ai-only {
+            font-style: italic;
+            color: var(--fg-muted);
+        }
+
+        .ai-only-stub {
+            display: block;
+            padding: 0.5rem 0;
         }
 
         .entry-content.reflection code {
@@ -901,6 +952,16 @@
             letter-spacing: 0.02em;
         }
 
+        .ai-only-note {
+            margin-top: 0.75rem;
+            font-size: 0.85rem;
+            color: var(--fg-muted);
+        }
+
+        .conversation.ai-only .conversation-summary {
+            font-style: italic;
+        }
+
         .platform-badge {
             display: inline-block;
             padding: 0.15rem 0.4rem;
@@ -1047,59 +1108,6 @@
             font-style: italic;
         }
 
-        /* Comments */
-        .summary-comments {
-            margin-top: 1rem;
-            padding-top: 1rem;
-            border-top: 1px dashed var(--border);
-        }
-
-        .comment {
-            margin-bottom: 1rem;
-        }
-
-        .comment:last-child {
-            margin-bottom: 0;
-        }
-
-        .comment-story {
-            border-left: 3px solid var(--accent);
-            padding-left: 1rem;
-        }
-
-        .comment-quote {
-            font-size: 0.85rem;
-            color: var(--fg-muted);
-            padding-left: 0.75rem;
-            border-left: 2px solid var(--border);
-            margin-bottom: 0.5rem;
-            font-style: italic;
-            max-height: 3rem;
-            overflow: hidden;
-        }
-
-        .comment-content {
-            font-size: 1rem;
-            line-height: 1.6;
-            color: var(--fg);
-        }
-
-        .comment-meta {
-            margin-top: 0.4rem;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.65rem;
-            color: var(--fg-muted);
-        }
-
-        .comment-handle {
-            color: var(--accent);
-            text-decoration: none;
-        }
-
-        .comment-handle:hover {
-            text-decoration: underline;
-        }
-
         .mention-link {
             color: var(--accent);
             text-decoration: none;
@@ -1107,42 +1115,6 @@
 
         .mention-link:hover {
             text-decoration: underline;
-        }
-
-        .comment-form {
-            margin-top: 0.75rem;
-            position: relative;
-        }
-
-        .comment-form textarea {
-            width: 100%;
-            padding: 0.5rem;
-            padding-right: 2rem;
-            font-family: 'IBM Plex Sans', sans-serif;
-            font-size: 0.8rem;
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            background: var(--surface);
-            color: var(--fg);
-            resize: none;
-            min-height: 2rem;
-            box-sizing: border-box;
-        }
-
-        .comment-form textarea:focus {
-            outline: none;
-            border-color: var(--accent);
-        }
-
-        .comment-form::after {
-            content: '↵';
-            position: absolute;
-            right: 0.5rem;
-            bottom: 0.35rem;
-            color: var(--fg-muted);
-            font-size: 1.1rem;
-            pointer-events: none;
-            opacity: 0.4;
         }
 
         .mention-dropdown {
@@ -1234,6 +1206,9 @@
                     <div class="links" id="identity-link">
                         <a href="/join" class="sidebar-btn">Get started</a>
                     </div>
+                    <div class="links" id="inbox-link" style="display: none; margin-top: 0.5rem;">
+                        <a href="?view=inbox" class="sidebar-btn inbox-btn">Inbox</a>
+                    </div>
                 </div>
 
                 <div class="explainer-section">
@@ -1268,6 +1243,7 @@
         // Get URL params
         const params = new URLSearchParams(window.location.search);
         const filterPseudonym = params.get('pseudonym');
+        const viewMode = params.get('view'); // 'inbox' or null
         const userKey = params.get('key');
         let userPseudonym = null;
         let userHandle = null;
@@ -1283,10 +1259,6 @@
         // Cache for loaded summary entries
         const summaryEntriesCache = new Map();
 
-        // Cache for comments by entry ID and summary ID
-        let commentsByEntry = {};
-        let commentsBySummary = {};
-
         // Pagination state
         const PAGE_SIZE = 30;
         let currentOffset = 0;
@@ -1299,9 +1271,6 @@
         // Search state
         let searchTimeout = null;
         let isSearchMode = false;
-
-        // Cache for entry content by ID (for quoting in comments)
-        const entryContentCache = new Map();
 
         // Get today's date in YYYY-MM-DD format (local timezone)
         function getToday() {
@@ -1343,6 +1312,11 @@
                                     <a href="/u/${escapeHtml(data.handle)}" class="identity-handle">@${escapeHtml(data.handle)}</a>
                                     <a href="/settings" class="sidebar-btn">Settings</a>
                                 `;
+                                // Show inbox link
+                                const inboxLink = document.getElementById('inbox-link');
+                                if (inboxLink) {
+                                    inboxLink.style.display = 'block';
+                                }
                             } else {
                                 // Legacy user - prompt to claim handle
                                 identityLink.innerHTML = `
@@ -1369,11 +1343,6 @@
                 return;
             }
 
-            // Don't refresh if user is typing a comment (unless forced)
-            if (!force && document.activeElement?.closest('.comment-form')) {
-                return;
-            }
-
             // Prevent concurrent loads
             if (isLoadingFeed) return;
             isLoadingFeed = true;
@@ -1384,6 +1353,13 @@
                 // If filtering by pseudonym, use simple view (no daily grouping)
                 if (filterPseudonym) {
                     await loadFilteredFeed(feed);
+                    isLoadingFeed = false;
+                    return;
+                }
+
+                // If viewing inbox, show entries addressed to user
+                if (viewMode === 'inbox') {
+                    await loadInboxFeed(feed);
                     isLoadingFeed = false;
                     return;
                 }
@@ -1446,46 +1422,15 @@
                 allLoadedSummaries = summaries;
                 allLoadedConversations = conversations;
 
-                // Build pseudonym -> handle map and entry content cache
+                // Build pseudonym -> handle map
                 allLoadedEntries.forEach(e => {
                     if (e.handle && e.pseudonym) {
                         pseudonymToHandle.set(e.pseudonym, e.handle);
                     }
-                    entryContentCache.set(e.id, e.content);
                 });
 
-                // Collect entry IDs and summary IDs for comments fetch
-                // Only fetch for displayed items, not all entries inside summaries
-                const allEntryIds = new Set();
-                const allSummaryIds = new Set();
-                allLoadedEntries.forEach(e => allEntryIds.add(e.id));
-                summaries.forEach(s => allSummaryIds.add(s.id));
-
-                // Step 2: Render immediately with whatever comments we have
+                // Render the feed
                 renderFeedWithData(feed, allLoadedEntries, summaries, dailySummaries, conversations);
-                initAllMentions();
-
-                // Step 3: Fetch comments in background and re-render when ready
-                if (allEntryIds.size > 0 || allSummaryIds.size > 0) {
-                    const entryIdsParam = allEntryIds.size > 0 ? `entryIds=${[...allEntryIds].join(',')}` : '';
-                    const summaryIdsParam = allSummaryIds.size > 0 ? `summaryIds=${[...allSummaryIds].join(',')}` : '';
-                    const params = [entryIdsParam, summaryIdsParam, keyParam].filter(Boolean).join('&');
-
-                    // Don't await - let it load in background
-                    fetch(`/api/comments?${params}`)
-                        .then(res => res.json())
-                        .then(commentsData => {
-                            const hadComments = Object.keys(commentsByEntry).length > 0;
-                            commentsByEntry = commentsData.comments || {};
-                            commentsBySummary = commentsData.summaryComments || {};
-                            // Only re-render if we got new comments
-                            if (!hadComments && (Object.keys(commentsByEntry).length > 0 || Object.keys(commentsBySummary).length > 0)) {
-                                renderFeedWithData(feed, allLoadedEntries, summaries, dailySummaries, conversations);
-                                initAllMentions();
-                            }
-                        })
-                        .catch(err => console.error('Failed to load comments:', err));
-                }
 
             } catch (err) {
                 console.error('Feed error:', err);
@@ -1505,45 +1450,25 @@
             const dailySummaryByDate = new Map();
             dailySummaries.forEach(ds => dailySummaryByDate.set(ds.date, ds));
 
-            // Helper to get latest activity time (post time or latest comment time)
-            function getActivityTime(entryIds, summaryId, baseTime) {
-                let latest = baseTime;
-                for (const id of entryIds) {
-                    const comments = commentsByEntry[id] || [];
-                    for (const c of comments) {
-                        if (c.timestamp > latest) latest = c.timestamp;
-                    }
-                }
-                if (summaryId) {
-                    const summaryComments = commentsBySummary[summaryId] || [];
-                    for (const c of summaryComments) {
-                        if (c.timestamp > latest) latest = c.timestamp;
-                    }
-                }
-                return latest;
-            }
-
-            // Build items with their activity times
+            // Build items with their timestamps
             const allItems = [];
 
             entries.forEach(e => {
-                const activityTime = getActivityTime([e.id], null, e.timestamp);
                 allItems.push({
                     type: 'entry',
                     data: e,
-                    activityTime,
-                    activityDate: getDateFromTimestamp(activityTime),
+                    activityTime: e.timestamp,
+                    activityDate: getDateFromTimestamp(e.timestamp),
                     creationDate: getDateFromTimestamp(e.timestamp)
                 });
             });
 
             summaries.forEach(s => {
-                const activityTime = getActivityTime(s.entryIds || [], s.id, s.endTime);
                 allItems.push({
                     type: 'summary',
                     data: s,
-                    activityTime,
-                    activityDate: getDateFromTimestamp(activityTime),
+                    activityTime: s.endTime,
+                    activityDate: getDateFromTimestamp(s.endTime),
                     creationDate: getDateFromTimestamp(s.endTime)
                 });
             });
@@ -1582,13 +1507,11 @@
                     (i.data.entryIds || []).forEach(id => summarizedIds.add(id));
                 });
 
-                // Filter out summarized entries (unless they have comments - then show both)
+                // Filter out summarized entries
                 const filteredItems = dayItems.filter(item => {
                     if (item.type !== 'entry') return true;
                     if (item.data.isReflection) return true;
-                    if (!summarizedIds.has(item.data.id)) return true;
-                    // Show if it has comments
-                    return (commentsByEntry[item.data.id] || []).length > 0;
+                    return !summarizedIds.has(item.data.id);
                 });
 
                 // Sort by activity time (most recent first)
@@ -1644,6 +1567,55 @@
         }
 
         // Simple filtered view (when filtering by pseudonym)
+        async function loadInboxFeed(feed) {
+            const key = userKey || localStorage.getItem('hermes_key');
+            if (!key) {
+                feed.innerHTML = `
+                    <div class="filter-header">
+                        <h2>Inbox</h2>
+                        <a href="/">← Back to feed</a>
+                    </div>
+                    <div class="empty-state">
+                        <p>Sign in to view your inbox.</p>
+                        <a href="/join" class="sidebar-btn" style="display: inline-block; width: auto;">Get started</a>
+                    </div>
+                `;
+                return;
+            }
+
+            const inboxUrl = `/api/inbox?key=${encodeURIComponent(key)}`;
+            const res = await fetch(inboxUrl);
+
+            if (!res.ok) {
+                const error = await res.json();
+                feed.innerHTML = `
+                    <div class="filter-header">
+                        <h2>Inbox</h2>
+                        <a href="/">← Back to feed</a>
+                    </div>
+                    <div class="empty-state">${escapeHtml(error.error || 'Failed to load inbox')}</div>
+                `;
+                return;
+            }
+
+            const data = await res.json();
+            const entries = data.entries || [];
+
+            const header = `
+                <div class="filter-header">
+                    <h2>Inbox</h2>
+                    <a href="/">← Back to feed</a>
+                </div>
+            `;
+
+            if (entries.length === 0) {
+                feed.innerHTML = header + `<div class="empty-state">No messages yet. When someone addresses you in an entry, it will appear here.</div>`;
+                return;
+            }
+
+            feed.innerHTML = header + entries.map(entry => renderEntry(entry)).join('');
+        }
+
         async function loadFilteredFeed(feed) {
             let entriesUrl = `/api/entries/${encodeURIComponent(filterPseudonym)}`;
             if (userKey) {
@@ -1684,77 +1656,30 @@
                     return renderEntry(item.data);
                 }
             }).join('');
-            initAllMentions();
-        }
-
-        function renderCommentStory(activity) {
-            const { comment, entry } = activity;
-            const isPending = comment.publishAt && comment.publishAt > Date.now();
-
-            // Format the entry's date (e.g., "Jan 6")
-            const entryDate = new Date(entry.timestamp);
-            const entryDateStr = entryDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-            // Get entry author - prefer handle, else strip hash from pseudonym
-            let entryAuthorDisplay;
-            if (entry.handle) {
-                entryAuthorDisplay = `@${entry.handle}`;
-            } else if (entry.pseudonym) {
-                // Strip hash from pseudonym (e.g., "Distant Iris#353b67" -> "Distant Iris")
-                entryAuthorDisplay = entry.pseudonym.split('#')[0];
-            } else {
-                entryAuthorDisplay = 'someone';
-            }
-
-            // Header: @handle commented on [entry author]'s note from [date]
-            const header = `<a href="/u/${escapeHtml(comment.handle)}" class="entry-handle">@${escapeHtml(comment.handle)}</a> commented on ${escapeHtml(entryAuthorDisplay)}'s note from ${escapeHtml(entryDateStr)}`;
-
-            // Show full entry content
-            const contentHtml = escapeHtml(entry.content);
-
-            // Entry meta line (original post info) with discuss link
-            const discussUrl = generateDiscussUrl(entry);
-            const entryMeta = `${formatTime(entry.timestamp)} · <a href="${discussUrl}" target="_blank" class="discuss-link">discuss with claude</a>`;
-
-            // Check if user can delete comment
-            const isCommentOwner = userHandle && comment.handle === userHandle;
-            let deleteBtn = '';
-            if (isCommentOwner) {
-                deleteBtn = ` · <button class="delete-btn" onclick="deleteComment('${comment.id}')">delete</button>`;
-            }
-
-            // Comment meta
-            let commentMeta = formatTime(comment.timestamp);
-            if (isPending) commentMeta += ' · <span class="pending-badge">pending</span>';
-            commentMeta += deleteBtn;
-
-            return `
-                <div class="summary comment-story" data-id="${comment.id}">
-                    <div class="entry-header">${header}</div>
-                    <p class="summary-content">${contentHtml}</p>
-                    <div class="summary-meta">${entryMeta}</div>
-                    <div class="summary-comments">
-                        <div class="comment">
-                            <div class="comment-content">${renderMentions(escapeHtml(comment.content))}</div>
-                            <div class="comment-meta">
-                                <a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
-                                · ${commentMeta}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
         }
 
         function renderEntry(entry) {
             const isPending = entry.publishAt && entry.publishAt > Date.now();
             const isReflection = entry.isReflection;
+            const isAiOnly = entry.humanVisible === false;
 
-            // Render content: markdown for reflections, escaped text for regular entries
-            const contentHtml = isReflection
-                ? marked.parse(entry.content)
-                : escapeHtml(entry.content);
-            const contentClass = isReflection ? 'entry-content reflection' : 'entry-content';
+            // For AI-only entries, show stub instead of full content
+            let contentHtml;
+            let contentClass;
+            if (isAiOnly) {
+                const topics = entry.topicHints && entry.topicHints.length > 0
+                    ? entry.topicHints.join(', ')
+                    : 'various topics';
+                contentHtml = `<span class="ai-only-stub">posted about: ${escapeHtml(topics)}</span>`;
+                contentClass = 'entry-content ai-only';
+            } else if (isReflection) {
+                // Render content: markdown for reflections, escaped text for regular entries
+                contentHtml = marked.parse(entry.content);
+                contentClass = 'entry-content reflection';
+            } else {
+                contentHtml = escapeHtml(entry.content);
+                contentClass = 'entry-content';
+            }
 
             // Header: [author] posted a [type] from [source] [client]
             const type = isReflection ? 'reflection' : 'note';
@@ -1771,53 +1696,53 @@
             } else {
                 authorHtml = '';
             }
-            const header = authorHtml
-                ? `${authorHtml} posted a ${type} from ${escapeHtml(source)}`
-                : `posted a ${type} from ${escapeHtml(source)}`;
 
-            // Footer: [time] · [status] · [actions]
+            // Build recipients display (to field)
+            let recipientsHtml = '';
+            if (entry.to && entry.to.length > 0) {
+                const recipientLinks = entry.to.map(dest => {
+                    if (dest.startsWith('@')) {
+                        const handle = dest.slice(1);
+                        return `<a href="/u/${escapeHtml(handle)}" class="recipient-handle">@${escapeHtml(handle)}</a>`;
+                    } else if (dest.includes('@') && !dest.startsWith('http')) {
+                        return `<span class="recipient-email">${escapeHtml(dest)}</span>`;
+                    } else if (dest.startsWith('http')) {
+                        return `<span class="recipient-webhook" title="${escapeHtml(dest)}">🔗 webhook</span>`;
+                    }
+                    return escapeHtml(dest);
+                }).join(', ');
+                recipientsHtml = ` → ${recipientLinks}`;
+            }
+
+            // Build reply indicator (inReplyTo field)
+            let replyHtml = '';
+            if (entry.inReplyTo) {
+                replyHtml = `<span class="reply-indicator">↩ <a href="/e/${escapeHtml(entry.inReplyTo)}" class="reply-link">in reply</a></span> `;
+            }
+
+            const header = authorHtml
+                ? `${replyHtml}${authorHtml}${recipientsHtml} posted a ${type} from ${escapeHtml(source)}`
+                : `${replyHtml}posted a ${type} from ${escapeHtml(source)}`;
+
+            // Footer: [time] · [tokens] · [status] · [actions]
             let meta = [];
             meta.push(`<a href="/e/${entry.id}" class="permalink">${formatTime(entry.timestamp)}</a>`);
+            // Skip token count for AI-only entries (content not shown)
+            if (!isAiOnly) {
+                meta.push(`<span class="token-count">~${estimateTokens(entry.content)} tokens</span>`);
+            }
             if (isPending) meta.push(`<span class="pending-badge">publishes ${formatTimeUntil(entry.publishAt)}</span>`);
             // Check ownership by pseudonym OR handle
             const isOwner = (userPseudonym && entry.pseudonym === userPseudonym) || (userHandle && entry.handle === userHandle);
             if (isOwner && isPending) meta.push(`<button class="publish-btn" onclick="publishEntry('${entry.id}')">publish now</button>`);
             if (isOwner) meta.push(`<button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>`);
-            meta.push(`<a href="${generateDiscussUrl(entry)}" target="_blank" class="discuss-link">discuss with claude</a>`);
-
-            // Show comments for this entry
-            const entryComments = commentsByEntry[entry.id] || [];
-            let commentsHtml = '';
-            if (entryComments.length > 0) {
-                commentsHtml = `
-                    <div class="summary-comments">
-                        ${entryComments.map(comment => `
-                            <div class="comment">
-                                <div class="comment-content">${renderMentions(escapeHtml(comment.content))}</div>
-                                <div class="comment-meta">
-                                    ${renderAvatar(comment.handle, true)}<a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
-                                    · ${formatTime(comment.timestamp)}
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                `;
-            }
-
-            // Comment form (only show if user has a key and entry is published)
-            const commentFormHtml = (userHandle && !isPending) ? `
-                <div class="comment-form" data-entry-id="${entry.id}">
-                    <textarea placeholder="Add a comment..." rows="1" onkeydown="handleCommentKeydown(event, '${entry.id}')"></textarea>
-                </div>
-            ` : '';
+            meta.push(`<a href="${generateDiscussUrl(entry)}" target="_blank" class="discuss-link">${isAiOnly ? 'discuss with claude →' : 'discuss with claude'}</a>`);
 
             return `
                 <div class="entry" data-id="${entry.id}">
                     <div class="entry-header">${header}</div>
                     <div class="${contentClass}">${contentHtml}</div>
                     <div class="entry-meta">${meta.join(' · ')}</div>
-                    ${commentsHtml}
-                    ${commentFormHtml}
                 </div>
             `;
         }
@@ -1844,16 +1769,6 @@
                 meta.push(`<a href="${generateSessionDiscussUrl(summary.entryIds)}" target="_blank" class="discuss-link">discuss with claude</a>`);
             }
 
-            // Collect comments from all entries in this summary PLUS summary-level comments
-            const commentsHtml = renderCommentsForSummary(summary.id, summary.entryIds || []);
-
-            // Comment form targets the summary itself
-            const commentFormHtml = userHandle ? `
-                <div class="comment-form" data-summary-id="${summary.id}">
-                    <textarea placeholder="Add a comment..." rows="1" onkeydown="handleSummaryCommentKeydown(event, '${summary.id}')"></textarea>
-                </div>
-            ` : '';
-
             return `
                 <div class="summary" data-id="${summary.id}">
                     <div class="entry-header">${header}</div>
@@ -1862,41 +1777,13 @@
                     <div class="summary-entries" id="summary-entries-${summary.id}">
                         <div class="loading">Loading...</div>
                     </div>
-                    ${commentsHtml}
-                    ${commentFormHtml}
-                </div>
-            `;
-        }
-
-        function renderCommentsForSummary(summaryId, entryIds) {
-            // Only show summary-level comments (from humans via web UI)
-            // Entry-level comments show on the individual entry when it pops out
-            const comments = commentsBySummary[summaryId] || [];
-
-            if (comments.length === 0) return '';
-
-            // Sort by timestamp (oldest first)
-            const sortedComments = [...comments].sort((a, b) => a.timestamp - b.timestamp);
-
-            const commentsHtml = sortedComments.map(comment => `
-                <div class="comment">
-                    <div class="comment-content">${renderMentions(escapeHtml(comment.content))}</div>
-                    <div class="comment-meta">
-                        ${renderAvatar(comment.handle, true)}<a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
-                        · ${formatTime(comment.timestamp)}
-                    </div>
-                </div>
-            `).join('');
-
-            return `
-                <div class="summary-comments">
-                    ${commentsHtml}
                 </div>
             `;
         }
 
         function renderConversation(conversation) {
             const isPending = conversation.publishAt && conversation.publishAt > Date.now();
+            const isAiOnly = conversation.humanVisible === false;
 
             // Header: [author] posted a conversation with [platform]
             const platformName = formatPlatform(conversation.platform);
@@ -1914,19 +1801,33 @@
             let meta = [];
             meta.push(formatTime(conversation.timestamp));
             if (isPending) meta.push(`<span class="pending-badge">publishes ${formatTimeUntil(conversation.publishAt)}</span>`);
-            meta.push(`<span class="view-full" onclick="toggleConversation('${conversation.id}')">expand</span>`);
+            // AI-only conversations don't have expand option - show discuss link instead
+            if (!isAiOnly) {
+                meta.push(`<span class="view-full" onclick="toggleConversation('${conversation.id}')">expand</span>`);
+            }
             const isOwner = (userPseudonym && conversation.pseudonym === userPseudonym) || (userHandle && conversation.handle === userHandle);
             if (isOwner) meta.push(`<button class="delete-btn" onclick="deleteConversation('${conversation.id}')">delete</button>`);
+            // For AI-only, emphasize the discuss link
+            const discussUrl = `https://claude.ai/new?q=${encodeURIComponent(`Search the Hermes notebook for more about: ${conversation.title || 'this conversation'}`)}`;
+            meta.push(`<a href="${discussUrl}" target="_blank" class="discuss-link">${isAiOnly ? 'discuss with claude →' : 'discuss with claude'}</a>`);
+
+            // For AI-only, add a note about visibility
+            const aiOnlyNote = isAiOnly
+                ? '<div class="ai-only-note"><em>Full conversation is AI-searchable only</em></div>'
+                : '';
 
             return `
-                <div class="conversation" data-id="${conversation.id}">
+                <div class="conversation${isAiOnly ? ' ai-only' : ''}" data-id="${conversation.id}">
                     <div class="entry-header">${header}</div>
                     <div class="conversation-summary">${marked.parse(conversation.summary || '')}</div>
+                    ${aiOnlyNote}
                     <div class="conversation-meta">${meta.join(' · ')}</div>
+                    ${!isAiOnly ? `
                     <div class="conversation-full" id="conversation-full-${conversation.id}">
                         <h3>${escapeHtml(conversation.title || 'Untitled')}</h3>
                         <div class="conversation-full-content">${marked.parse(conversation.content || '')}</div>
                     </div>
+                    ` : ''}
                 </div>
             `;
         }
@@ -2207,131 +2108,6 @@
             mentionState.active = false;
         }
 
-        // Initialize mentions on all comment forms
-        function initAllMentions() {
-            document.querySelectorAll('.comment-form textarea').forEach(initMentions);
-        }
-
-        // Re-init after feed loads
-        const originalLoadFeed = typeof loadFeed !== 'undefined' ? loadFeed : null;
-
-        // ═══════════════════════════════════════════════════════════════
-        // COMMENT SUBMISSION
-        // ═══════════════════════════════════════════════════════════════
-
-        // Comment submission
-        function handleCommentKeydown(event, entryId) {
-            // If mention dropdown is active and handling the key, don't submit
-            if (mentionState.active && mentionState.users.length > 0 &&
-                ['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(event.key)) {
-                return; // Let mention handler deal with it
-            }
-            if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                submitComment(entryId);
-            }
-            // Shift+Enter allows newline (default behavior)
-        }
-
-        function handleSummaryCommentKeydown(event, summaryId) {
-            // If mention dropdown is active and handling the key, don't submit
-            if (mentionState.active && mentionState.users.length > 0 &&
-                ['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(event.key)) {
-                return; // Let mention handler deal with it
-            }
-            if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                submitSummaryComment(summaryId);
-            }
-            // Shift+Enter allows newline (default behavior)
-        }
-
-        async function submitSummaryComment(summaryId) {
-            const effectiveKey = getEffectiveKey();
-            if (!effectiveKey) {
-                alert('You need to be logged in to comment');
-                return;
-            }
-
-            const form = document.querySelector(`.comment-form[data-summary-id="${summaryId}"]`);
-            const textarea = form.querySelector('textarea');
-            const content = textarea.value.trim();
-
-            if (!content) return;
-
-            textarea.disabled = true;
-
-            try {
-                const res = await fetch('/api/comments', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        summaryId,
-                        content,
-                        key: effectiveKey
-                    })
-                });
-
-                if (res.ok) {
-                    const newComment = await res.json();
-                    if (!commentsBySummary[summaryId]) commentsBySummary[summaryId] = [];
-                    commentsBySummary[summaryId].push(newComment);
-                    textarea.value = '';
-                    loadFeed(true);
-                } else {
-                    const data = await res.json();
-                    alert(data.error || 'Failed to post comment');
-                }
-            } catch (err) {
-                alert('Failed to post comment');
-            } finally {
-                textarea.disabled = false;
-            }
-        }
-
-        async function submitComment(entryId) {
-            const effectiveKey = getEffectiveKey();
-            if (!effectiveKey) {
-                alert('You need to be logged in to comment');
-                return;
-            }
-
-            const form = document.querySelector(`.comment-form[data-entry-id="${entryId}"]`);
-            const textarea = form.querySelector('textarea');
-            const content = textarea.value.trim();
-
-            if (!content) return;
-
-            textarea.disabled = true;
-
-            try {
-                const res = await fetch('/api/comments', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        entryId,
-                        content,
-                        key: effectiveKey
-                    })
-                });
-
-                if (res.ok) {
-                    const newComment = await res.json();
-                    if (!commentsByEntry[entryId]) commentsByEntry[entryId] = [];
-                    commentsByEntry[entryId].push(newComment);
-                    textarea.value = '';
-                    loadFeed(true);
-                } else {
-                    const data = await res.json();
-                    alert(data.error || 'Failed to post comment');
-                }
-            } catch (err) {
-                alert('Failed to post comment');
-            } finally {
-                textarea.disabled = false;
-            }
-        }
-
         async function deleteEntry(id) {
             const effectiveKey = getEffectiveKey();
             if (!effectiveKey) {
@@ -2378,32 +2154,12 @@
             }
         }
 
-        async function deleteComment(id) {
-            const effectiveKey = getEffectiveKey();
-            if (!effectiveKey) return;
-            if (!confirm('Delete this comment?')) return;
-
-            try {
-                const res = await fetch(`/api/comments/${id}?key=${encodeURIComponent(effectiveKey)}`, {
-                    method: 'DELETE'
-                });
-                if (res.ok) {
-                    loadFeed();
-                } else {
-                    const data = await res.json();
-                    alert(data.error || 'Failed to delete');
-                }
-            } catch (err) {
-                alert('Failed to delete comment');
-            }
-        }
-
         function generateDiscussUrl(entry) {
             const prompt = `I want to discuss a Hermes notebook entry.
 
 Entry ID: ${entry.id}
 
-Use get_notebook_entry to fetch it, then let's talk about it. If I want to respond, help me shape a comment.`;
+Use get_notebook_entry to fetch it, then let's talk about it. If I want to respond, help me write a reply.`;
 
             return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
         }
@@ -2413,7 +2169,7 @@ Use get_notebook_entry to fetch it, then let's talk about it. If I want to respo
 
 Entry IDs: ${entryIds.join(', ')}
 
-Use get_notebook_entry to fetch each one, then let's talk about what's interesting. If I want to respond to any of them, help me shape a comment.`;
+Use get_notebook_entry to fetch each one, then let's talk about what's interesting. If I want to respond to any of them, help me write a reply.`;
 
             return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
         }
@@ -2532,6 +2288,13 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             if (seconds < 60) return 'in < 1 min';
             if (seconds < 3600) return `in ${Math.floor(seconds / 60)} min`;
             return `in ${Math.floor(seconds / 3600)} hr`;
+        }
+
+        function estimateTokens(text) {
+            // Rough estimate: ~4 chars per token for English text
+            // This matches common tokenizer behavior
+            if (!text) return 0;
+            return Math.ceil(text.length / 4);
         }
 
         // ─────────────────────────────────────────────────────────────

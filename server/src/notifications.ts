@@ -47,6 +47,7 @@ export interface NotificationService {
   notifyMentions(comment: Comment, entry: JournalEntry | null): Promise<void>;
   sendDailyDigests(): Promise<{ sent: number; failed: number }>;
   sendVerificationEmail(handle: string, email: string): Promise<boolean>;
+  notifyAddressedEntry?(entry: JournalEntry, recipient: User): Promise<void>;
 }
 
 interface NotificationConfig {
@@ -652,7 +653,109 @@ Focus primarily on surfacing what others are exploring—their ideas, questions,
         return false;
       }
     },
+
+    /**
+     * Notify a user when they're addressed in an entry
+     */
+    async notifyAddressedEntry(entry: JournalEntry, recipient: User): Promise<void> {
+      console.log(`[Notify] Entry addressed to @${recipient.handle} by @${entry.handle || entry.pseudonym}`);
+
+      // Don't notify if user doesn't have email or hasn't verified
+      if (!recipient.email || !recipient.emailVerified) {
+        console.log(`[Notify] Skipping: @${recipient.handle} has no verified email`);
+        return;
+      }
+
+      // Check email preferences (use comments pref for now, could add separate pref later)
+      if (recipient.emailPrefs && !recipient.emailPrefs.comments) {
+        console.log(`[Notify] Skipping: @${recipient.handle} disabled notifications`);
+        return;
+      }
+
+      // Rate limiting
+      if (!canSendEmailTo(recipient.handle)) {
+        console.log(`[Notify] Rate limited for @${recipient.handle}`);
+        return;
+      }
+
+      if (!emailClient) {
+        console.warn('[Notify] No email client configured');
+        return;
+      }
+
+      try {
+        const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
+        const unsubscribeToken = generateUnsubscribeToken(recipient.handle, 'comments');
+        const contentPreview = entry.content.length > 200
+          ? entry.content.slice(0, 200) + '...'
+          : entry.content;
+
+        await emailClient.send({
+          from: `Hermes <${fromEmail}>`,
+          to: recipient.email,
+          subject: `${author} sent you a message on Hermes`,
+          html: renderAddressedEntryEmail(entry, author, recipient, unsubscribeToken),
+        });
+
+        console.log(`[Notify] Addressed entry notification sent to @${recipient.handle}`);
+      } catch (err) {
+        console.error(`[Notify] Failed to send to @${recipient.handle}:`, err);
+      }
+    },
   };
+
+  /**
+   * Render addressed entry notification email HTML
+   */
+  function renderAddressedEntryEmail(
+    entry: JournalEntry,
+    author: string,
+    recipient: User,
+    unsubscribeToken: string
+  ): string {
+    const contentPreview = entry.content.length > 500
+      ? entry.content.slice(0, 500) + '...'
+      : entry.content;
+
+    const visibilityNote = entry.visibility === 'private'
+      ? 'This is a private message.'
+      : '';
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Georgia, serif; line-height: 1.6; color: #1a1a1a; max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { color: #6b6b6b; font-size: 14px; margin-bottom: 20px; }
+    .content { background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+    .author { font-weight: bold; color: #7c5cbf; margin-bottom: 10px; }
+    .visibility { font-size: 12px; color: #999; margin-bottom: 10px; }
+    .footer { font-size: 12px; color: #999; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; }
+    .footer a { color: #999; }
+    .btn { display: inline-block; background: #7c5cbf; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="header">${author} sent you a message on Hermes</div>
+
+  <div class="content">
+    ${visibilityNote ? `<div class="visibility">${visibilityNote}</div>` : ''}
+    <div class="author">${author} wrote:</div>
+    <p>${contentPreview}</p>
+  </div>
+
+  <a href="${baseUrl}/e/${entry.id}" class="btn">View on Hermes</a>
+
+  <div class="footer">
+    <p>You're receiving this because ${author} addressed you in a Hermes entry.</p>
+    <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=comments">Unsubscribe from notifications</a>
+  </div>
+</body>
+</html>
+    `.trim();
+  }
 }
 
 /**

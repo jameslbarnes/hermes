@@ -24,6 +24,7 @@ import { derivePseudonym, generateSecretKey, isValidSecretKey, hashSecretKey, is
 import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type BroadcastConfig, type Summary, type DailySummary, type Conversation, type User, tokenize } from './storage.js';
 import { scrapeConversation, detectPlatform, isValidShareUrl, ScrapeError } from './scraper.js';
 import { createNotificationService, createSendGridClient, verifyUnsubscribeToken, verifyEmailToken, type NotificationService } from './notifications.js';
+import { deliverEntry, getDefaultVisibility, canViewEntry, type DeliveryConfig } from './delivery.js';
 
 // Security: Check if a URL points to internal/private IP ranges
 function isInternalUrl(urlString: string): boolean {
@@ -266,6 +267,20 @@ export const SYSTEM_SKILLS: Skill[] = [
           type: 'array',
           items: { type: 'string' },
           description: 'For AI-only entries: brief topic keywords (e.g., ["authentication", "TEE"]). Shown to humans as "posted about: x, y, z". Optional.',
+        },
+        to: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Destinations to notify: @handles (e.g., "@alice"), emails (e.g., "bob@example.com"), or webhook URLs. Recipients will be notified when the entry publishes.',
+        },
+        in_reply_to: {
+          type: 'string',
+          description: 'Entry ID this is replying to (for threading). Creates a threaded reply to an existing entry.',
+        },
+        visibility: {
+          type: 'string',
+          enum: ['public', 'private', 'ai-only'],
+          description: 'Access control: "public" (visible in feed), "private" (recipients only), "ai-only" (stub shown to humans). Defaults: private if "to" is set without in_reply_to, otherwise public.',
         },
       },
       required: ['sensitivity_check', 'client', 'entry'],
@@ -857,6 +872,27 @@ if (storage instanceof StagedStorage) {
     if (entry.broadcastConfig) {
       await firePendingBroadcasts(entry);
     }
+
+    // Deliver addressed entries (unified addressing)
+    if (entry.to && entry.to.length > 0) {
+      const deliveryConfig: DeliveryConfig = {
+        storage,
+        notificationService,
+        emailClient: emailClient || undefined,
+        fromEmail: process.env.SENDGRID_FROM_EMAIL || 'notify@hermes.ing',
+        baseUrl: process.env.BASE_URL || 'https://hermes.ing',
+      };
+      try {
+        const results = await deliverEntry(entry, deliveryConfig);
+        const failures = results.filter(r => !r.success);
+        if (failures.length > 0) {
+          console.log(`[Delivery] ${results.length - failures.length}/${results.length} destinations delivered for entry ${entry.id}`);
+        }
+      } catch (err) {
+        console.error(`[Delivery] Failed to deliver entry ${entry.id}:`, err);
+      }
+    }
+
     // Check for session summary (30 min gap)
     await checkAndGenerateSummary(entry);
     // Check for daily summary (new day)
@@ -1286,6 +1322,10 @@ function createMCPServer(secretKey: string) {
       const model = (args as { model?: string })?.model;
       const humanVisibleOverride = (args as { human_visible?: boolean })?.human_visible;
       const topicHints = (args as { topic_hints?: string[] })?.topic_hints;
+      // New addressing parameters
+      const toAddresses = (args as { to?: string[] })?.to;
+      const inReplyTo = (args as { in_reply_to?: string })?.in_reply_to;
+      const visibilityOverride = (args as { visibility?: 'public' | 'private' | 'ai-only' })?.visibility;
 
       if (!entry || entry.trim().length === 0) {
         return {
@@ -1301,14 +1341,37 @@ function createMCPServer(secretKey: string) {
         };
       }
 
+      // Validate inReplyTo if provided
+      if (inReplyTo) {
+        const parentEntry = await storage.getEntry(inReplyTo);
+        if (!parentEntry) {
+          return {
+            content: [{ type: 'text' as const, text: `Cannot reply to entry ${inReplyTo}: entry not found.` }],
+            isError: true,
+          };
+        }
+      }
+
       // Look up handle fresh (user may have claimed one since connecting)
       const currentUser = await storage.getUserByKeyHash(keyHash);
       const currentHandle = currentUser?.handle || undefined;
       const userStagingDelay = currentUser?.stagingDelayMs ?? STAGING_DELAY_MS;
-      // Use override if provided, otherwise user's default
-      const humanVisible = humanVisibleOverride !== undefined
-        ? humanVisibleOverride
-        : (currentUser?.defaultHumanVisible ?? true);
+
+      // Determine visibility using the unified addressing logic
+      // Priority: explicit override > default based on to/inReplyTo
+      const visibility = visibilityOverride || getDefaultVisibility(toAddresses, inReplyTo);
+
+      // humanVisible is now derived from visibility for backward compat
+      // ai-only -> humanVisible: false
+      // public/private -> humanVisible: true (unless explicitly overridden)
+      let humanVisible: boolean;
+      if (humanVisibleOverride !== undefined) {
+        humanVisible = humanVisibleOverride;
+      } else if (visibility === 'ai-only') {
+        humanVisible = false;
+      } else {
+        humanVisible = currentUser?.defaultHumanVisible ?? true;
+      }
 
       const saved = await storage.addEntry({
         pseudonym,
@@ -1319,14 +1382,34 @@ function createMCPServer(secretKey: string) {
         model: model || undefined,
         humanVisible,
         topicHints: topicHints && topicHints.length > 0 ? topicHints : undefined,
+        // New addressing fields
+        to: toAddresses && toAddresses.length > 0 ? toAddresses : undefined,
+        inReplyTo: inReplyTo || undefined,
+        visibility: visibility !== 'public' ? visibility : undefined, // Only store non-default
       }, userStagingDelay);
 
       const delayMinutes = Math.round(userStagingDelay / 1000 / 60);
 
+      // Build response message
+      let responseText = `Posted to journal (publishes in ${delayMinutes} minutes):\n\n"${entry.trim()}"\n\nEntry ID: ${saved.id}`;
+
+      if (toAddresses && toAddresses.length > 0) {
+        responseText += `\n\nAddressed to: ${toAddresses.join(', ')}`;
+        responseText += `\nRecipients will be notified when the entry publishes.`;
+      }
+
+      if (inReplyTo) {
+        responseText += `\n\nIn reply to: ${inReplyTo}`;
+      }
+
+      if (visibility !== 'public') {
+        responseText += `\n\nVisibility: ${visibility}`;
+      }
+
       return {
         content: [{
           type: 'text' as const,
-          text: `Posted to journal (publishes in ${delayMinutes} minutes):\n\n"${entry.trim()}"\n\nEntry ID: ${saved.id}`,
+          text: responseText,
         }],
       };
     }
@@ -2610,17 +2693,75 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      // Check if requester is the author (to allow viewing hidden content)
+      // Check if requester is the author or a recipient
       let isAuthor = false;
+      let userHandle: string | undefined;
+      let userEmail: string | undefined;
       if (secretKey && isValidSecretKey(secretKey)) {
         const userPseudonym = derivePseudonym(secretKey);
         const keyHash = hashSecretKey(secretKey);
         const user = await storage.getUserByKeyHash(keyHash);
+        userHandle = user?.handle;
+        userEmail = user?.email;
         isAuthor = entry.pseudonym === userPseudonym || entry.handle === user?.handle;
+      }
+
+      // Check visibility permissions
+      if (!canViewEntry(entry, userHandle, userEmail, isAuthor)) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Entry not found' }));
+        return;
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(stripHiddenContent(entry, isAuthor)));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/entry/:id/replies - Get replies to an entry
+    // ─────────────────────────────────────────────────────────────
+    const repliesMatch = url.pathname.match(/^\/api\/entry\/([^/]+)\/replies$/);
+    if (req.method === 'GET' && repliesMatch) {
+      const entryId = decodeURIComponent(repliesMatch[1]);
+      const limit = parseInt(url.searchParams.get('limit') || '50');
+      const secretKey = url.searchParams.get('key');
+
+      // Verify parent entry exists
+      const parentEntry = await storage.getEntry(entryId);
+      if (!parentEntry) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Entry not found' }));
+        return;
+      }
+
+      // Get user info for visibility filtering
+      let userHandle: string | undefined;
+      let userEmail: string | undefined;
+      let userPseudonym: string | undefined;
+      if (secretKey && isValidSecretKey(secretKey)) {
+        userPseudonym = derivePseudonym(secretKey);
+        const keyHash = hashSecretKey(secretKey);
+        const user = await storage.getUserByKeyHash(keyHash);
+        userHandle = user?.handle;
+        userEmail = user?.email;
+      }
+
+      // Get replies and filter by visibility
+      const allReplies = await storage.getRepliesTo(entryId, limit);
+      const visibleReplies = allReplies.filter(e => {
+        const isAuthor = e.pseudonym === userPseudonym || e.handle === userHandle;
+        return canViewEntry(e, userHandle, userEmail, isAuthor);
+      });
+
+      // Strip hidden content
+      const replies = visibleReplies.map(e => {
+        const isAuthor = e.pseudonym === userPseudonym || e.handle === userHandle;
+        return stripHiddenContent(e, isAuthor);
+      });
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ entryId, replies, count: replies.length }));
       return;
     }
 
@@ -2635,14 +2776,16 @@ const server = createServer(async (req, res) => {
       let entries = await storage.getEntries(limit, offset);
       const total = await storage.getEntryCount();
 
-      // If user has a key, include their pending entries
+      // If user has a key, include their pending entries and identify user for visibility
       let authorPseudonym: string | null = null;
       let authorHandle: string | null = null;
+      let authorEmail: string | undefined;
       if (secretKey && isValidSecretKey(secretKey)) {
         authorPseudonym = derivePseudonym(secretKey);
         const keyHash = hashSecretKey(secretKey);
         const user = await storage.getUserByKeyHash(keyHash);
         authorHandle = user?.handle || null;
+        authorEmail = user?.email;
         if (storage instanceof StagedStorage) {
           const pendingEntries = await storage.getPendingEntriesByPseudonym(authorPseudonym);
           // Merge pending entries and sort by timestamp
@@ -2650,14 +2793,53 @@ const server = createServer(async (req, res) => {
         }
       }
 
+      // Filter and process entries based on visibility
+      const visibleEntries = entries.filter(e => {
+        const isAuthor = e.pseudonym === authorPseudonym || e.handle === authorHandle;
+        return canViewEntry(e, authorHandle || undefined, authorEmail, isAuthor);
+      });
+
       // Strip content from hidden entries (except for author's own entries)
-      const strippedEntries = entries.map(e => {
+      const strippedEntries = visibleEntries.map(e => {
         const isAuthor = e.pseudonym === authorPseudonym || e.handle === authorHandle;
         return stripHiddenContent(e, isAuthor);
       });
 
       res.writeHead(200);
       res.end(JSON.stringify({ entries: strippedEntries, total, limit, offset }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/inbox - Get entries addressed to the current user
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/inbox') {
+      const limit = parseInt(url.searchParams.get('limit') || '50');
+      const secretKey = url.searchParams.get('key');
+
+      if (!secretKey || !isValidSecretKey(secretKey)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required to view inbox' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(secretKey);
+      const user = await storage.getUserByKeyHash(keyHash);
+
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first to receive addressed entries' }));
+        return;
+      }
+
+      // Get entries addressed to this user
+      const entries = await storage.getEntriesAddressedTo(user.handle, user.email, limit);
+
+      // Strip hidden content (user is never the author of entries addressed TO them)
+      const strippedEntries = entries.map(e => stripHiddenContent(e, false));
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ entries: strippedEntries, total: entries.length, limit }));
       return;
     }
 

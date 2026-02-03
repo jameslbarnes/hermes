@@ -17,6 +17,9 @@ export interface BroadcastConfig {
   summary?: string;          // Optional summary for email/webhook
 }
 
+// Visibility levels for entries
+export type EntryVisibility = 'public' | 'private' | 'ai-only';
+
 export interface JournalEntry {
   id: string;
   pseudonym: string;         // Legacy: "Quiet Feather#79c30b" (always present for display fallback)
@@ -31,6 +34,11 @@ export interface JournalEntry {
   humanVisible?: boolean; // Show full content in human feed? Default true. False = AI-only (stub shown)
   topicHints?: string[]; // For AI-only entries: topics covered (e.g., ["auth", "TEE"])
   broadcastConfig?: BroadcastConfig; // Pending webhooks/emails to fire on publish
+
+  // Unified addressing system
+  to?: string[];             // Destinations: @handles, emails, webhook URLs
+  inReplyTo?: string;        // Parent entry ID (for threading)
+  visibility?: EntryVisibility; // Access control: public (default), private (recipients only), ai-only (stub in feed)
 }
 
 export interface Summary {
@@ -238,11 +246,20 @@ export interface Storage {
   /** Search users by handle prefix (for @mention typeahead) */
   searchUsers(prefix: string, limit?: number): Promise<User[]>;
 
+  /** Get user by email address (case-insensitive) */
+  getUserByEmail(email: string): Promise<User | null>;
+
   /** Get total user count */
   getUserCount(): Promise<number>;
 
   /** Get all users (for public skills gallery, etc.) */
   getAllUsers(): Promise<User[]>;
+
+  /** Get entries addressed to a user (by handle or email) */
+  getEntriesAddressedTo(handle: string, email?: string, limit?: number): Promise<JournalEntry[]>;
+
+  /** Get replies to an entry */
+  getRepliesTo(entryId: string, limit?: number): Promise<JournalEntry[]>;
 
   /** Get total comment count */
   getCommentCount(): Promise<number>;
@@ -420,12 +437,44 @@ export class MemoryStorage implements Storage {
       .slice(0, limit);
   }
 
+  async getUserByEmail(email: string): Promise<User | null> {
+    const lowerEmail = email.toLowerCase();
+    for (const user of this.users.values()) {
+      if (user.email?.toLowerCase() === lowerEmail) {
+        return user;
+      }
+    }
+    return null;
+  }
+
   async getUserCount(): Promise<number> {
     return this.users.size;
   }
 
   async getAllUsers(): Promise<User[]> {
     return Array.from(this.users.values());
+  }
+
+  async getEntriesAddressedTo(handle: string, email?: string, limit = 50): Promise<JournalEntry[]> {
+    const handlePattern = `@${handle}`;
+    return this.entries
+      .filter(e => {
+        if (!e.to || e.to.length === 0) return false;
+        return e.to.some(dest =>
+          dest === handlePattern ||
+          dest === handle ||
+          (email && dest.toLowerCase() === email.toLowerCase())
+        );
+      })
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
+  }
+
+  async getRepliesTo(entryId: string, limit = 50): Promise<JournalEntry[]> {
+    return this.entries
+      .filter(e => e.inReplyTo === entryId)
+      .sort((a, b) => a.timestamp - b.timestamp) // Oldest first for replies
+      .slice(0, limit);
   }
 
   async getCommentCount(): Promise<number> {
@@ -597,6 +646,19 @@ export class FirestoreStorage implements Storage {
 
     if (newEntry.topicHints && newEntry.topicHints.length > 0) {
       docData.topicHints = newEntry.topicHints;
+    }
+
+    // Unified addressing fields
+    if (newEntry.to && newEntry.to.length > 0) {
+      docData.to = newEntry.to;
+    }
+
+    if (newEntry.inReplyTo) {
+      docData.inReplyTo = newEntry.inReplyTo;
+    }
+
+    if (newEntry.visibility) {
+      docData.visibility = newEntry.visibility;
     }
 
     await this.db.collection(this.collection).doc(id).set(docData);
@@ -875,6 +937,83 @@ export class FirestoreStorage implements Storage {
         ...data,
       } as User;
     });
+  }
+
+  async getUserByEmail(email: string): Promise<User | null> {
+    const lowerEmail = email.toLowerCase();
+    const snapshot = await this.db
+      .collection(this.usersCollection)
+      .get();
+
+    // Filter in memory since Firestore doesn't support case-insensitive queries
+    for (const doc of snapshot.docs) {
+      const data = doc.data();
+      if (data.email?.toLowerCase() === lowerEmail) {
+        return {
+          handle: doc.id,
+          ...data,
+        } as User;
+      }
+    }
+    return null;
+  }
+
+  async getEntriesAddressedTo(handle: string, email?: string, limit = 50): Promise<JournalEntry[]> {
+    // Firestore doesn't support array-contains-any with multiple patterns well,
+    // so we query for handle pattern and filter for email in memory
+    const handlePattern = `@${handle}`;
+
+    // Try querying by handle first
+    const byHandle = await this.db
+      .collection(this.collection)
+      .where('to', 'array-contains', handlePattern)
+      .orderBy('timestamp', 'desc')
+      .limit(limit)
+      .get();
+
+    const results: JournalEntry[] = byHandle.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as JournalEntry));
+
+    // If email provided, also query by email and merge (dedup by id)
+    if (email) {
+      const byEmail = await this.db
+        .collection(this.collection)
+        .where('to', 'array-contains', email.toLowerCase())
+        .orderBy('timestamp', 'desc')
+        .limit(limit)
+        .get();
+
+      const existingIds = new Set(results.map(e => e.id));
+      for (const doc of byEmail.docs) {
+        if (!existingIds.has(doc.id)) {
+          results.push({
+            id: doc.id,
+            ...doc.data(),
+          } as JournalEntry);
+        }
+      }
+    }
+
+    // Sort merged results and limit
+    return results
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
+  }
+
+  async getRepliesTo(entryId: string, limit = 50): Promise<JournalEntry[]> {
+    const snapshot = await this.db
+      .collection(this.collection)
+      .where('inReplyTo', '==', entryId)
+      .orderBy('timestamp', 'asc') // Oldest first for replies
+      .limit(limit)
+      .get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as JournalEntry));
   }
 
   async getCommentCount(): Promise<number> {
@@ -1443,12 +1582,57 @@ export class StagedStorage implements Storage {
     return this.published.searchUsers(prefix, limit);
   }
 
+  async getUserByEmail(email: string): Promise<User | null> {
+    return this.published.getUserByEmail(email);
+  }
+
   async getUserCount(): Promise<number> {
     return this.published.getUserCount();
   }
 
   async getAllUsers(): Promise<User[]> {
     return this.published.getAllUsers();
+  }
+
+  async getEntriesAddressedTo(handle: string, email?: string, limit = 50): Promise<JournalEntry[]> {
+    // Get from published storage
+    const published = await this.published.getEntriesAddressedTo(handle, email, limit);
+
+    // Also include pending entries addressed to this user
+    const handlePattern = `@${handle}`;
+    const pendingMatches: JournalEntry[] = [];
+    for (const entry of this.pending.values()) {
+      if (entry.to && entry.to.some(dest =>
+        dest === handlePattern ||
+        dest === handle ||
+        (email && dest.toLowerCase() === email.toLowerCase())
+      )) {
+        pendingMatches.push(entry);
+      }
+    }
+
+    // Merge, sort, and limit
+    return [...pendingMatches, ...published]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
+  }
+
+  async getRepliesTo(entryId: string, limit = 50): Promise<JournalEntry[]> {
+    // Get from published storage
+    const published = await this.published.getRepliesTo(entryId, limit);
+
+    // Also include pending replies
+    const pendingReplies: JournalEntry[] = [];
+    for (const entry of this.pending.values()) {
+      if (entry.inReplyTo === entryId) {
+        pendingReplies.push(entry);
+      }
+    }
+
+    // Merge and sort (oldest first for replies)
+    return [...pendingReplies, ...published]
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .slice(0, limit);
   }
 
   async getCommentCount(): Promise<number> {

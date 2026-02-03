@@ -91,44 +91,6 @@
             margin-bottom: 0;
         }
 
-        .comments-section {
-            margin-top: 2rem;
-        }
-
-        .comments-header {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.75rem;
-            color: var(--fg-muted);
-            margin-bottom: 1rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .comment {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1rem 1.5rem;
-            margin-bottom: 0.75rem;
-        }
-
-        .comment-meta {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.7rem;
-            color: var(--fg-muted);
-            margin-bottom: 0.5rem;
-        }
-
-        .comment-author {
-            color: var(--accent);
-            text-decoration: none;
-        }
-
-        .comment-content {
-            font-size: 1rem;
-            line-height: 1.6;
-        }
-
         .loading, .error {
             text-align: center;
             padding: 3rem;
@@ -183,24 +145,6 @@
                     <div class="entry-content">${marked.parse(entry.content)}</div>
                 </div>
             `;
-
-            if (entry.comments && entry.comments.length > 0) {
-                html += `
-                    <div class="comments-section">
-                        <div class="comments-header">${entry.comments.length} comment${entry.comments.length === 1 ? '' : 's'}</div>
-                        ${entry.comments.map(comment => `
-                            <div class="comment">
-                                <div class="comment-meta">
-                                    <a href="/u/${comment.handle}" class="comment-author">@${comment.handle}</a>
-                                    <span>&middot;</span>
-                                    <span>${formatDate(comment.timestamp)}</span>
-                                </div>
-                                <div class="comment-content">${marked.parse(comment.content)}</div>
-                            </div>
-                        `).join('')}
-                    </div>
-                `;
-            }
 
             return html;
         }

@@ -133,7 +133,7 @@
                 const data = await res.json();
 
                 if (res.ok) {
-                    const typeLabel = type === 'digest' ? 'daily digests' : 'comment notifications';
+                    const typeLabel = type === 'digest' ? 'daily digests' : 'notifications';
                     statusEl.className = 'status success';
                     statusEl.innerHTML = `
                         <div class="type-label">${typeLabel}</div>

@@ -8,15 +8,6 @@
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 
-// Config for deferred broadcasts (fired when entry leaves staging buffer)
-export interface BroadcastConfig {
-  skillName: string;
-  emailTo?: string[];
-  webhookUrl?: string;
-  webhookHeaders?: Record<string, string>;
-  summary?: string;          // Optional summary for email/webhook
-}
-
 // Visibility levels for entries
 export type EntryVisibility = 'public' | 'private' | 'ai-only';
 
@@ -33,7 +24,6 @@ export interface JournalEntry {
   model?: string; // Model that wrote the entry (e.g., "claude-sonnet-4", "opus-4")
   humanVisible?: boolean; // Show full content in human feed? Default true. False = AI-only (stub shown)
   topicHints?: string[]; // For AI-only entries: topics covered (e.g., ["auth", "TEE"])
-  broadcastConfig?: BroadcastConfig; // Pending webhooks/emails to fire on publish
 
   // Unified addressing system
   to?: string[];             // Destinations: @handles, emails, webhook URLs
@@ -85,42 +75,16 @@ export interface EmailVerification {
   expiresAt: number;         // Token expiration timestamp
 }
 
-// User-defined skill/broadcast channel
-export interface SkillParameter {
-  name: string;
-  type: 'string' | 'boolean' | 'number' | 'array';
-  description: string;
-  required?: boolean;
-  enum?: string[];           // For constrained choices like ['desktop', 'mobile', 'code']
-  default?: any;             // Default value if not provided
-}
-
+// System skill definition (used for MCP tool definitions)
 export interface Skill {
   id: string;                // Unique ID for the skill
-  name: string;              // Tool name (e.g., "hermes_write_entry", "hermes_newsletter")
+  name: string;              // Tool name (e.g., "hermes_write_entry")
   description: string;       // What this skill does
   instructions: string;      // Detailed instructions for Claude to follow
-  parameters?: SkillParameter[];  // Input parameters Claude fills in
-  inputSchema?: Record<string, any>;  // Full MCP inputSchema (for builtin skills needing complex schemas)
+  inputSchema?: Record<string, any>;  // Full MCP inputSchema
 
   // Handler type
   handlerType?: 'builtin' | 'instructions';  // 'builtin' = server handles, 'instructions' = Claude follows instructions
-
-  // Trigger conditions (optional - if set, skill auto-fires when condition is met)
-  triggerCondition?: string; // e.g., "when user mentions Project X"
-
-  // Broadcast targets
-  postToNotebook?: boolean;  // Post output to notebook (default true)
-  humanVisible?: boolean;    // Show in human feed (default to user's setting)
-  emailTo?: string[];        // Email addresses to notify
-  webhookUrl?: string;       // URL to POST to when skill fires
-  webhookHeaders?: Record<string, string>;  // Custom headers for webhook
-
-  // Sharing
-  public?: boolean;          // If true, skill appears in public gallery
-  author?: string;           // Handle of the creator (for public skills)
-  clonedFrom?: string;       // ID of skill this was cloned from
-  cloneCount?: number;       // How many times this skill has been cloned
 
   // Metadata
   createdAt: number;
@@ -141,23 +105,8 @@ export interface User {
   createdAt: number;
   legacyPseudonym?: string;  // "Quiet Feather#79c30b" if migrated from old system
   defaultHumanVisible?: boolean; // Default visibility for new entries (default true)
-  skills?: Skill[];          // User-defined skills/broadcast channels
-  customPrompt?: string;     // Additional ambient prompt instructions
-  skillOverrides?: Record<string, Partial<Skill>>;  // Overrides for system skills (key = skill name)
-  disabledSkills?: string[]; // Names of system skills to hide from tool list
+  skillOverrides?: Record<string, Partial<Skill>>;  // Overrides for system tools (key = tool name)
   following?: { handle: string; note: string }[];  // Users this person follows, with living notes
-}
-
-export interface Comment {
-  id: string;
-  entryId?: string;          // The note being commented on (if entry-level comment)
-  summaryId?: string;        // The session summary being commented on (if summary-level comment)
-  parentCommentId?: string;  // If replying to another comment (for threading)
-  handle: string;            // Author of the comment (without @)
-  content: string;           // Comment text (max 500 chars)
-  mentions?: string[];       // Handles mentioned in the comment (without @)
-  timestamp: number;
-  publishAt?: number;        // When comment becomes public (for staged publishing)
 }
 
 // Common stop words to exclude from search
@@ -262,9 +211,6 @@ export interface Storage {
   /** Get replies to an entry */
   getRepliesTo(entryId: string, limit?: number): Promise<JournalEntry[]>;
 
-  /** Get total comment count */
-  getCommentCount(): Promise<number>;
-
   // ─────────────────────────────────────────────────────────────
   // Conversation methods
   // ─────────────────────────────────────────────────────────────
@@ -287,27 +233,6 @@ export interface Storage {
   /** Delete a conversation by ID */
   deleteConversation(id: string): Promise<void>;
 
-  // ─────────────────────────────────────────────────────────────
-  // Comment methods
-  // ─────────────────────────────────────────────────────────────
-
-  /** Add a comment to an entry or summary */
-  addComment(comment: Omit<Comment, 'id'>): Promise<Comment>;
-
-  /** Get comments for an entry */
-  getCommentsForEntry(entryId: string): Promise<Comment[]>;
-
-  /** Get comments for a summary */
-  getCommentsForSummary(summaryId: string): Promise<Comment[]>;
-
-  /** Get comments by handle */
-  getCommentsByHandle(handle: string, limit?: number): Promise<Comment[]>;
-
-  /** Get a single comment by ID */
-  getCommentById(id: string): Promise<Comment | null>;
-
-  /** Delete a comment */
-  deleteComment(id: string): Promise<void>;
 }
 
 /**
@@ -478,10 +403,6 @@ export class MemoryStorage implements Storage {
       .slice(0, limit);
   }
 
-  async getCommentCount(): Promise<number> {
-    return this.comments.length;
-  }
-
   // ─────────────────────────────────────────────────────────────
   // Conversation methods
   // ─────────────────────────────────────────────────────────────
@@ -526,47 +447,6 @@ export class MemoryStorage implements Storage {
     this.conversations = this.conversations.filter(c => c.id !== id);
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Comment methods
-  // ─────────────────────────────────────────────────────────────
-
-  private comments: Comment[] = [];
-
-  async addComment(comment: Omit<Comment, 'id'>): Promise<Comment> {
-    const newComment: Comment = {
-      ...comment,
-      id: `c${this.nextId++}`,
-    };
-    this.comments.unshift(newComment);
-    return newComment;
-  }
-
-  async getCommentsForEntry(entryId: string): Promise<Comment[]> {
-    return this.comments
-      .filter(c => c.entryId === entryId)
-      .sort((a, b) => a.timestamp - b.timestamp); // oldest first for comments
-  }
-
-  async getCommentsForSummary(summaryId: string): Promise<Comment[]> {
-    return this.comments
-      .filter(c => c.summaryId === summaryId)
-      .sort((a, b) => a.timestamp - b.timestamp);
-  }
-
-  async getCommentsByHandle(handle: string, limit = 50): Promise<Comment[]> {
-    return this.comments
-      .filter(c => c.handle === handle)
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, limit);
-  }
-
-  async getCommentById(id: string): Promise<Comment | null> {
-    return this.comments.find(c => c.id === id) || null;
-  }
-
-  async deleteComment(id: string): Promise<void> {
-    this.comments = this.comments.filter(c => c.id !== id);
-  }
 }
 
 /**
@@ -1017,11 +897,6 @@ export class FirestoreStorage implements Storage {
     } as JournalEntry));
   }
 
-  async getCommentCount(): Promise<number> {
-    const snapshot = await this.db.collection(this.commentsCollection).count().get();
-    return snapshot.data().count;
-  }
-
   // ─────────────────────────────────────────────────────────────
   // Summary methods
   // ─────────────────────────────────────────────────────────────
@@ -1249,82 +1124,6 @@ export class FirestoreStorage implements Storage {
     await this.db.collection(this.conversationsCollection).doc(id).delete();
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Comment methods
-  // ─────────────────────────────────────────────────────────────
-
-  private commentsCollection = 'comments';
-
-  async addComment(comment: Omit<Comment, 'id'>): Promise<Comment> {
-    const id = generateEntryId();
-    const newComment: Comment = { ...comment, id };
-
-    await this.db.collection(this.commentsCollection).doc(id).set({
-      entryId: newComment.entryId || null,
-      summaryId: newComment.summaryId || null,
-      parentCommentId: newComment.parentCommentId || null,
-      handle: newComment.handle,
-      content: newComment.content,
-      timestamp: newComment.timestamp,
-    });
-
-    return newComment;
-  }
-
-  async getCommentsForSummary(summaryId: string): Promise<Comment[]> {
-    const snapshot = await this.db
-      .collection(this.commentsCollection)
-      .where('summaryId', '==', summaryId)
-      .orderBy('timestamp', 'asc')
-      .get();
-
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    } as Comment));
-  }
-
-  async getCommentsForEntry(entryId: string): Promise<Comment[]> {
-    const snapshot = await this.db
-      .collection(this.commentsCollection)
-      .where('entryId', '==', entryId)
-      .orderBy('timestamp', 'asc')
-      .get();
-
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    } as Comment));
-  }
-
-  async getCommentsByHandle(handle: string, limit = 50): Promise<Comment[]> {
-    const snapshot = await this.db
-      .collection(this.commentsCollection)
-      .where('handle', '==', handle)
-      .orderBy('timestamp', 'desc')
-      .limit(limit)
-      .get();
-
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    } as Comment));
-  }
-
-  async getCommentById(id: string): Promise<Comment | null> {
-    const doc = await this.db.collection(this.commentsCollection).doc(id).get();
-    if (!doc.exists) {
-      return null;
-    }
-    return {
-      id: doc.id,
-      ...doc.data(),
-    } as Comment;
-  }
-
-  async deleteComment(id: string): Promise<void> {
-    await this.db.collection(this.commentsCollection).doc(id).delete();
-  }
 }
 
 /**
@@ -1636,10 +1435,6 @@ export class StagedStorage implements Storage {
       .slice(0, limit);
   }
 
-  async getCommentCount(): Promise<number> {
-    return this.published.getCommentCount();
-  }
-
   // ─────────────────────────────────────────────────────────────
   // Summary methods (delegated to FirestoreStorage)
   // ─────────────────────────────────────────────────────────────
@@ -1765,37 +1560,4 @@ export class StagedStorage implements Storage {
     return this.pendingConversations.has(id);
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Comment methods (with staging support)
-  // ─────────────────────────────────────────────────────────────
-
-  async addComment(comment: Omit<Comment, 'id'>): Promise<Comment> {
-    const id = generateEntryId();
-    const newComment: Comment = { ...comment, id };
-
-    // Comments publish immediately (user-initiated, no staging needed)
-    await this.published.addComment(newComment);
-
-    return newComment;
-  }
-
-  async getCommentsForEntry(entryId: string): Promise<Comment[]> {
-    return this.published.getCommentsForEntry(entryId);
-  }
-
-  async getCommentsForSummary(summaryId: string): Promise<Comment[]> {
-    return this.published.getCommentsForSummary(summaryId);
-  }
-
-  async getCommentsByHandle(handle: string, limit = 50): Promise<Comment[]> {
-    return this.published.getCommentsByHandle(handle, limit);
-  }
-
-  async getCommentById(id: string): Promise<Comment | null> {
-    return this.published.getCommentById(id);
-  }
-
-  async deleteComment(id: string): Promise<void> {
-    await this.published.deleteComment(id);
-  }
 }

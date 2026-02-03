@@ -235,80 +235,6 @@
             opacity: 1;
         }
 
-        /* Comments */
-        .comments-section {
-            margin-top: 1rem;
-            padding-top: 0.75rem;
-            border-top: 1px solid var(--border);
-        }
-
-        .comment {
-            margin-bottom: 0.75rem;
-        }
-
-        .comment:last-child {
-            margin-bottom: 0;
-        }
-
-        .comment-content {
-            font-size: 0.95rem;
-            line-height: 1.6;
-            white-space: pre-wrap;
-        }
-
-        .comment-meta {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.65rem;
-            color: var(--fg-muted);
-            margin-top: 0.25rem;
-            display: flex;
-            align-items: center;
-            gap: 0.35rem;
-        }
-
-        .comment-handle {
-            color: var(--accent);
-            text-decoration: none;
-        }
-
-        .comment-handle:hover {
-            text-decoration: underline;
-        }
-
-        .comment-form {
-            margin-top: 0.75rem;
-            position: relative;
-        }
-
-        .comment-form textarea {
-            width: 100%;
-            padding: 0.5rem 0.75rem;
-            font-family: 'Newsreader', Georgia, serif;
-            font-size: 0.9rem;
-            background: var(--bg);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            color: var(--fg);
-            resize: none;
-            line-height: 1.5;
-        }
-
-        .comment-form textarea:focus {
-            outline: none;
-            border-color: var(--accent);
-        }
-
-        .comment-form::after {
-            content: '↵';
-            position: absolute;
-            right: 0.5rem;
-            bottom: 0.35rem;
-            color: var(--fg-muted);
-            font-size: 1.1rem;
-            pointer-events: none;
-            opacity: 0.4;
-        }
-
         .avatar {
             display: inline-flex;
             align-items: center;
@@ -762,8 +688,6 @@
         let isOwnProfile = false;
         let savedKey = null;
         let userHandle = null;
-        let commentsByEntry = {};
-        let commentsBySummary = {};
 
         // Get saved key from localStorage
         function getSavedKey() {
@@ -911,7 +835,7 @@ Look up their profile and recent entries using hermes_search with handle "${hand
 
 Entry ID: ${entry.id}
 
-Use get_notebook_entry to fetch it, then let's talk about it. If I want to respond, help me shape a comment.`;
+Use get_notebook_entry to fetch it, then let's talk about it.`;
 
             return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
         }
@@ -922,152 +846,9 @@ Use get_notebook_entry to fetch it, then let's talk about it. If I want to respo
 
 Entry IDs: ${entryIds.join(', ')}
 
-Use get_notebook_entry to fetch each one, then let's talk about what's interesting. If I want to respond to any of them, help me shape a comment.`;
+Use get_notebook_entry to fetch each one, then let's talk about what's interesting.`;
 
             return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
-        }
-
-        // Render comments for an entry
-        function renderCommentsSection(entryId, isSummary = false) {
-            const comments = isSummary ? (commentsBySummary[entryId] || []) : (commentsByEntry[entryId] || []);
-            if (comments.length === 0 && !userHandle) return '';
-
-            let html = '<div class="comments-section">';
-
-            for (const comment of comments) {
-                const canDelete = userHandle && comment.handle === userHandle;
-                const deleteBtn = canDelete ? ` · <button class="delete-btn" onclick="deleteComment('${comment.id}')">delete</button>` : '';
-
-                html += `
-                    <div class="comment" id="comment-${comment.id}">
-                        <div class="comment-content">${escapeHtml(comment.content)}</div>
-                        <div class="comment-meta">
-                            ${renderAvatar(comment.handle, false, true)}<a href="/u/${escapeHtml(comment.handle)}" class="comment-handle">@${escapeHtml(comment.handle)}</a>
-                            · ${formatTime(comment.timestamp)}${deleteBtn}
-                        </div>
-                    </div>
-                `;
-            }
-
-            if (userHandle) {
-                const dataAttr = isSummary ? `data-summary-id="${entryId}"` : `data-entry-id="${entryId}"`;
-                const handler = isSummary ? `handleSummaryCommentKeydown(event, '${entryId}')` : `handleCommentKeydown(event, '${entryId}')`;
-                html += `
-                    <div class="comment-form" ${dataAttr}>
-                        <textarea placeholder="Add a comment..." rows="1" onkeydown="${handler}"></textarea>
-                    </div>
-                `;
-            }
-
-            html += '</div>';
-            return html;
-        }
-
-        // Handle comment submission for entries
-        async function handleCommentKeydown(event, entryId) {
-            if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                const textarea = event.target;
-                const content = textarea.value.trim();
-                if (!content || !savedKey) return;
-
-                textarea.disabled = true;
-                try {
-                    const res = await fetch('/api/comments', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            secret_key: savedKey,
-                            entry_id: entryId,
-                            content
-                        })
-                    });
-
-                    if (!res.ok) throw new Error('Failed to post comment');
-
-                    const comment = await res.json();
-                    if (!commentsByEntry[entryId]) commentsByEntry[entryId] = [];
-                    commentsByEntry[entryId].push(comment);
-                    textarea.value = '';
-
-                    // Re-render comments section
-                    const entryEl = document.getElementById(`entry-${entryId}`);
-                    if (entryEl) {
-                        const oldSection = entryEl.querySelector('.comments-section');
-                        if (oldSection) oldSection.remove();
-                        entryEl.insertAdjacentHTML('beforeend', renderCommentsSection(entryId));
-                    }
-                } catch (err) {
-                    alert('Failed to post comment');
-                } finally {
-                    textarea.disabled = false;
-                }
-            }
-        }
-
-        // Handle comment submission for summaries
-        async function handleSummaryCommentKeydown(event, summaryId) {
-            if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                const textarea = event.target;
-                const content = textarea.value.trim();
-                if (!content || !savedKey) return;
-
-                textarea.disabled = true;
-                try {
-                    const res = await fetch('/api/comments', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            secret_key: savedKey,
-                            summary_id: summaryId,
-                            content
-                        })
-                    });
-
-                    if (!res.ok) throw new Error('Failed to post comment');
-
-                    const comment = await res.json();
-                    if (!commentsBySummary[summaryId]) commentsBySummary[summaryId] = [];
-                    commentsBySummary[summaryId].push(comment);
-                    textarea.value = '';
-
-                    // Re-render comments section
-                    const summaryEl = document.getElementById(`summary-${summaryId}`);
-                    if (summaryEl) {
-                        const oldSection = summaryEl.querySelector('.comments-section');
-                        if (oldSection) oldSection.remove();
-                        summaryEl.insertAdjacentHTML('beforeend', renderCommentsSection(summaryId, true));
-                    }
-                } catch (err) {
-                    alert('Failed to post comment');
-                } finally {
-                    textarea.disabled = false;
-                }
-            }
-        }
-
-        // Delete comment
-        async function deleteComment(id) {
-            if (!savedKey) return;
-            if (!confirm('Delete this comment?')) return;
-
-            try {
-                const res = await fetch(`/api/comments/${id}?key=${encodeURIComponent(savedKey)}`, {
-                    method: 'DELETE'
-                });
-
-                if (!res.ok) throw new Error('Failed to delete comment');
-
-                const commentEl = document.getElementById(`comment-${id}`);
-                if (commentEl) {
-                    commentEl.style.opacity = '0';
-                    commentEl.style.transition = 'opacity 0.3s';
-                    setTimeout(() => commentEl.remove(), 300);
-                }
-            } catch (err) {
-                alert('Failed to delete comment');
-            }
         }
 
         // Toggle summary expansion
@@ -1110,44 +891,25 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
 
         // Render the profile feed with entries and summaries
         function renderProfileFeed(handle, entries, summaries, summarizedEntryIds) {
-            // Helper to get latest activity time (post time or latest comment time)
-            function getActivityTime(entryIds, summaryId, baseTime) {
-                let latest = baseTime;
-                for (const id of entryIds) {
-                    const comments = commentsByEntry[id] || [];
-                    for (const c of comments) {
-                        if (c.timestamp > latest) latest = c.timestamp;
-                    }
-                }
-                if (summaryId) {
-                    const summaryComments = commentsBySummary[summaryId] || [];
-                    for (const c of summaryComments) {
-                        if (c.timestamp > latest) latest = c.timestamp;
-                    }
-                }
-                return latest;
-            }
-
-            // Build items with their activity times
+            // Build items with their timestamps
             const allItems = [];
 
             entries.forEach(e => {
-                const activityTime = getActivityTime([e.id], null, e.timestamp);
                 allItems.push({
                     type: 'entry',
                     data: e,
-                    activityTime,
-                    activityDate: getDateFromTimestamp(activityTime)
+                    activityTime: e.timestamp,
+                    activityDate: getDateFromTimestamp(e.timestamp)
                 });
             });
 
             summaries.forEach(s => {
-                const activityTime = getActivityTime(s.entryIds || [], s.id, s.endTime || s.timestamp);
+                const time = s.endTime || s.timestamp;
                 allItems.push({
                     type: 'summary',
                     data: s,
-                    activityTime,
-                    activityDate: getDateFromTimestamp(activityTime)
+                    activityTime: time,
+                    activityDate: getDateFromTimestamp(time)
                 });
             });
 
@@ -1174,13 +936,11 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                     (i.data.entryIds || []).forEach(id => daySummarizedIds.add(id));
                 });
 
-                // Filter out summarized entries (unless they have comments - then show both)
+                // Filter out summarized entries
                 const filteredItems = dayItems.filter(item => {
                     if (item.type !== 'entry') return true;
                     if (item.data.isReflection) return true;
-                    if (!daySummarizedIds.has(item.data.id) && !summarizedEntryIds.has(item.data.id)) return true;
-                    // Show if it has comments
-                    return (commentsByEntry[item.data.id] || []).length > 0;
+                    return !daySummarizedIds.has(item.data.id) && !summarizedEntryIds.has(item.data.id);
                 });
 
                 // Sort by activity time (most recent first)
@@ -1240,7 +1000,6 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                     <div class="entry-meta">
                         <span>${meta.join(' · ')}</span>
                     </div>
-                    ${renderCommentsSection(entry.id)}
                 </div>
             `;
         }
@@ -1266,7 +1025,6 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                     <div class="summary-entries" id="summary-entries-${summary.id}">
                         <div class="loading">Loading...</div>
                     </div>
-                    ${renderCommentsSection(summary.id, true)}
                 </div>
             `;
         }
@@ -1365,7 +1123,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
 
                 profileHeader.innerHTML = profileHtml;
 
-                // Fetch entries, summaries, and prepare for comments
+                // Fetch entries and summaries
                 const [entriesRes, summariesRes] = await Promise.all([
                     fetch(`/api/users/${encodeURIComponent(handle)}/entries`),
                     fetch('/api/summaries')
@@ -1397,33 +1155,12 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                     return;
                 }
 
-                // Collect entry IDs and summary IDs for comments fetch
-                const entryIds = entries.map(e => e.id);
-                const summaryIds = summaries.map(s => s.id);
-
                 // Build entries that are covered by summaries
                 const summarizedEntryIds = new Set();
                 summaries.forEach(s => (s.entryIds || []).forEach(id => summarizedEntryIds.add(id)));
 
-                // Render feed first, then load comments in background
+                // Render feed
                 feed.innerHTML = renderProfileFeed(handle, entries, summaries, summarizedEntryIds);
-
-                // Load comments in background
-                if (entryIds.length > 0 || summaryIds.length > 0) {
-                    const entryIdsParam = entryIds.length > 0 ? `entryIds=${entryIds.join(',')}` : '';
-                    const summaryIdsParam = summaryIds.length > 0 ? `summaryIds=${summaryIds.join(',')}` : '';
-                    const params = [entryIdsParam, summaryIdsParam].filter(Boolean).join('&');
-
-                    fetch(`/api/comments?${params}`)
-                        .then(res => res.json())
-                        .then(commentsData => {
-                            commentsByEntry = commentsData.comments || {};
-                            commentsBySummary = commentsData.summaryComments || {};
-                            // Re-render with comments
-                            feed.innerHTML = renderProfileFeed(handle, entries, summaries, summarizedEntryIds);
-                        })
-                        .catch(err => console.error('Failed to load comments:', err));
-                }
 
             } catch (err) {
                 console.error('Error loading profile:', err);

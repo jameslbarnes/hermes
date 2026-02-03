@@ -21,7 +21,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { derivePseudonym, generateSecretKey, isValidSecretKey, hashSecretKey, isValidHandle, normalizeHandle } from './identity.js';
-import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type BroadcastConfig, type Summary, type DailySummary, type Conversation, type User, tokenize } from './storage.js';
+import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary, type Conversation, type User, tokenize } from './storage.js';
 import { scrapeConversation, detectPlatform, isValidShareUrl, ScrapeError } from './scraper.js';
 import { createNotificationService, createSendGridClient, verifyUnsubscribeToken, verifyEmailToken, type NotificationService } from './notifications.js';
 import { deliverEntry, getDefaultVisibility, canViewEntry, type DeliveryConfig } from './delivery.js';
@@ -198,22 +198,7 @@ Your job is to capture the texture of conversations WITHOUT exposing anything se
 
 AFTER WRITING
 
-Pay attention to conversations that feel significant—a breakthrough, a shift in perspective, something that clicked. If this feels like more than a quick note, ask the user if they'd like to memorialize it with a longer essay using hermes_write_essay.`;
-
-// Essay tool description
-export const ESSAY_TOOL_DESCRIPTION = `Write an essay to the shared notebook.
-
-IMPORTANT: Only use this tool when the user explicitly agrees.
-
-Use the full context of the conversation—the specific examples, the connections that emerged, the details that made it alive. If the thread touched on multiple thinkers or ideas, weave them in. The essay should feel like it grew from a real exchange, not like a Wikipedia summary.
-
-NEVER lead with "someone" or frame it as an activity report. Lead with the idea itself.
-
-Write with voice. Be intimate, not academic. The best essays feel like thoughts that are still warm.
-
-Write in markdown. Aim for 300-600 words.
-
-The same privacy rules apply: no names, no sensitive topics, no information from other tools.`;
+Pay attention to conversations that feel significant—a breakthrough, a shift in perspective, something that clicked. If this feels like more than a quick note, ask the user if they'd like a longer reflection. You can write longer entries (200-600 words, markdown) when the conversation warrants it. Longer entries are automatically formatted as reflections.`;
 
 // Search tool description
 export const SEARCH_TOOL_DESCRIPTION = `Search the shared notebook for entries matching a query.
@@ -285,11 +270,6 @@ export const SYSTEM_SKILLS: Skill[] = [
       },
       required: ['sensitivity_check', 'client', 'entry'],
     },
-    postToNotebook: true,
-    humanVisible: true,
-    public: true,
-    author: 'hermes',
-    cloneCount: 0,
     createdAt: 0,
   },
   {
@@ -316,45 +296,6 @@ export const SYSTEM_SKILLS: Skill[] = [
       },
       required: [],
     },
-    public: true,
-    author: 'hermes',
-    cloneCount: 0,
-    createdAt: 0,
-  },
-  {
-    id: 'system_hermes_write_essay',
-    name: 'hermes_write_essay',
-    description: 'Write a longer reflection/essay to the shared notebook. For significant conversations - breakthroughs, shifts in perspective, ideas that clicked. 300-600 words in markdown.',
-    instructions: '',
-    handlerType: 'builtin',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sensitivity_check: {
-          type: 'string',
-          description: '⬛ 1/3 FILL THIS FIRST ⬛ List sensitive topics FROM THIS CONVERSATION. Same rules as notebook entries. End with: "I, Claude, certify I am completing this check before writing my reflection."',
-        },
-        client: {
-          type: 'string',
-          enum: ['desktop', 'mobile', 'code'],
-          description: '⬛ 2/3 ⬛ Which client are you in?',
-        },
-        model: {
-          type: 'string',
-          description: 'Your model identifier (e.g., "sonnet", "opus", "haiku"). Optional but helps readers know which Claude wrote this.',
-        },
-        reflection: {
-          type: 'string',
-          description: '⬛ 3/3 FILL THIS LAST ⬛ Your reflection in markdown (200-500 words).',
-        },
-      },
-      required: ['sensitivity_check', 'client', 'reflection'],
-    },
-    postToNotebook: true,
-    humanVisible: true,
-    public: true,
-    author: 'hermes',
-    cloneCount: 0,
     createdAt: 0,
   },
   {
@@ -373,9 +314,6 @@ export const SYSTEM_SKILLS: Skill[] = [
       },
       required: ['entry_id'],
     },
-    public: true,
-    author: 'hermes',
-    cloneCount: 0,
     createdAt: 0,
   },
   {
@@ -394,59 +332,6 @@ export const SYSTEM_SKILLS: Skill[] = [
       },
       required: ['entry_id'],
     },
-    public: true,
-    author: 'hermes',
-    cloneCount: 0,
-    createdAt: 0,
-  },
-  {
-    id: 'system_hermes_comment',
-    name: 'hermes_comment',
-    description: 'Post a comment on a notebook entry or reply to another comment. Use this when the user wants to respond to something in the notebook. Comments are threaded: use parent_comment_id to reply to a specific comment.',
-    instructions: '',
-    handlerType: 'builtin',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        entry_id: {
-          type: 'string',
-          description: 'The ID of the entry being discussed',
-        },
-        comment: {
-          type: 'string',
-          description: 'The comment text. Should reflect what the user wants to say.',
-        },
-        parent_comment_id: {
-          type: 'string',
-          description: 'If replying to a specific comment, the ID of that comment. Omit for top-level comments on the entry.',
-        },
-      },
-      required: ['entry_id', 'comment'],
-    },
-    public: true,
-    author: 'hermes',
-    cloneCount: 0,
-    createdAt: 0,
-  },
-  {
-    id: 'system_hermes_delete_comment',
-    name: 'hermes_delete_comment',
-    description: 'Delete a comment you posted. Works for both pending comments (before they publish) and already-published comments.',
-    instructions: '',
-    handlerType: 'builtin',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        comment_id: {
-          type: 'string',
-          description: 'The comment ID returned when you posted',
-        },
-      },
-      required: ['comment_id'],
-    },
-    public: true,
-    author: 'hermes',
-    cloneCount: 0,
     createdAt: 0,
   },
   {
@@ -494,15 +379,12 @@ export const SYSTEM_SKILLS: Skill[] = [
       },
       required: ['action'],
     },
-    public: true,
-    author: 'hermes',
-    cloneCount: 0,
     createdAt: 0,
   },
   {
     id: 'system_hermes_skills',
     name: 'hermes_skills',
-    description: 'Manage skills: create/update/delete custom skills, or override/disable/enable/reset system skills. Skills become tools you can invoke.',
+    description: 'Shape how your Claude behaves. If entries are too long, search isn\'t finding the right things, or the tone is wrong — describe what you want different and Claude will update the instructions. Changes take effect on next connection.',
     instructions: '',
     handlerType: 'builtin',
     inputSchema: {
@@ -510,102 +392,24 @@ export const SYSTEM_SKILLS: Skill[] = [
       properties: {
         action: {
           type: 'string',
-          enum: ['list', 'get', 'create', 'update', 'delete', 'edit', 'disable', 'enable', 'reset'],
-          description: 'What action to take. list/get/create/update/delete for custom skills. edit/disable/enable/reset for system skills.',
+          enum: ['list', 'edit', 'reset'],
+          description: 'list: show all tools with current state. edit: update a tool\'s description or instructions. reset: restore a tool to defaults.',
         },
-        skill_id: {
+        tool_name: {
           type: 'string',
-          description: 'For get/update/delete: the skill ID.',
-        },
-        system_skill_name: {
-          type: 'string',
-          description: 'For edit/disable/enable/reset: the system skill name (e.g., "hermes_write_entry", "hermes_search").',
-        },
-        name: {
-          type: 'string',
-          description: 'For create/update: the skill name (becomes the tool name). Lowercase, no spaces.',
+          description: 'For edit/reset: the tool name (e.g., "hermes_write_entry", "hermes_search").',
         },
         description: {
           type: 'string',
-          description: 'For create/update/override: brief description of what the skill does.',
+          description: 'For edit: new description for the tool. This replaces the default description.',
         },
         instructions: {
           type: 'string',
-          description: 'For create/update/override: detailed instructions for Claude to follow when this skill is invoked.',
-        },
-        parameters: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              name: { type: 'string' },
-              type: { type: 'string', enum: ['string', 'boolean', 'number', 'array'] },
-              description: { type: 'string' },
-              required: { type: 'boolean' },
-            },
-          },
-          description: 'For create/update: input parameters the skill accepts.',
-        },
-        triggerCondition: {
-          type: 'string',
-          description: 'For create/update: optional condition that auto-fires the skill (e.g., "when user mentions Project X").',
-        },
-        postToNotebook: {
-          type: 'boolean',
-          description: 'For create/update: whether to post output to notebook (default true).',
-        },
-        humanVisible: {
-          type: 'boolean',
-          description: 'For create/update: whether output is visible in human feed.',
-        },
-        emailTo: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'For create/update: email addresses to notify when skill fires.',
-        },
-        webhookUrl: {
-          type: 'string',
-          description: 'For create/update: URL to POST to when skill fires.',
-        },
-        public: {
-          type: 'boolean',
-          description: 'For create/update: if true, skill appears in the public gallery for others to clone.',
+          description: 'For edit: additional instructions appended to the tool\'s description. Use this for behavioral guidance.',
         },
       },
       required: ['action'],
     },
-    public: true,
-    author: 'hermes',
-    cloneCount: 0,
-    createdAt: 0,
-  },
-  {
-    id: 'system_hermes_broadcast',
-    name: 'hermes_broadcast',
-    description: 'After completing a skill\'s instructions, call this to broadcast the result via the skill\'s configured channels (email, webhook). This handles the actual sending.',
-    instructions: '',
-    handlerType: 'builtin',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        skill_name: {
-          type: 'string',
-          description: 'The skill name (without skill_ prefix).',
-        },
-        result: {
-          type: 'string',
-          description: 'The output/result from executing the skill instructions.',
-        },
-        entry_id: {
-          type: 'string',
-          description: 'If the skill posted to the notebook, the entry ID.',
-        },
-      },
-      required: ['skill_name', 'result'],
-    },
-    public: true,
-    author: 'hermes',
-    cloneCount: 0,
     createdAt: 0,
   },
   {
@@ -633,59 +437,6 @@ export const SYSTEM_SKILLS: Skill[] = [
       },
       required: ['action'],
     },
-    public: true,
-    author: 'hermes',
-    cloneCount: 0,
-    createdAt: 0,
-  },
-  {
-    id: 'system_hermes_skills_browse',
-    name: 'hermes_skills_browse',
-    description: 'Browse the public skills gallery. Find skills created by others that you can clone and customize.',
-    instructions: '',
-    handlerType: 'builtin',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: 'Optional search query to filter skills.',
-        },
-        limit: {
-          type: 'number',
-          description: 'Max number of results (default 20).',
-        },
-      },
-      required: [],
-    },
-    public: true,
-    author: 'hermes',
-    cloneCount: 0,
-    createdAt: 0,
-  },
-  {
-    id: 'system_hermes_skills_clone',
-    name: 'hermes_skills_clone',
-    description: 'Clone a public skill to your own collection. You can then customize it.',
-    instructions: '',
-    handlerType: 'builtin',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        skill_name: {
-          type: 'string',
-          description: 'The name of the skill to clone.',
-        },
-        author: {
-          type: 'string',
-          description: 'The handle of the skill author (e.g., "hermes" for built-in skills, or "@username").',
-        },
-      },
-      required: ['skill_name', 'author'],
-    },
-    public: true,
-    author: 'hermes',
-    cloneCount: 0,
     createdAt: 0,
   },
 ];
@@ -898,11 +649,6 @@ async function checkAndGenerateSummary(publishedEntry: JournalEntry) {
 // Register the publish callback if using staged storage
 if (storage instanceof StagedStorage) {
   storage.onPublish(async (entry) => {
-    // Fire any pending broadcasts (webhooks/emails)
-    if (entry.broadcastConfig) {
-      await firePendingBroadcasts(entry);
-    }
-
     // Deliver addressed entries (unified addressing)
     if (entry.to && entry.to.length > 0) {
       const deliveryConfig: DeliveryConfig = {
@@ -928,88 +674,6 @@ if (storage instanceof StagedStorage) {
     // Check for daily summary (new day)
     await checkAndGenerateDailySummary(entry);
   });
-}
-
-// Fire pending broadcasts when entry is published
-async function firePendingBroadcasts(entry: JournalEntry) {
-  const config = entry.broadcastConfig;
-  if (!config) return;
-
-  const fromEmail = process.env.SENDGRID_FROM_EMAIL || 'notify@hermes.ing';
-  const author = entry.handle || 'anonymous';
-
-  console.log(`[Broadcast] Firing deferred broadcasts for entry ${entry.id} (skill: ${config.skillName})`);
-
-  // Fire webhook
-  if (config.webhookUrl) {
-    if (isInternalUrl(config.webhookUrl)) {
-      console.log(`[Broadcast] Blocked internal webhook URL: ${config.webhookUrl}`);
-    } else {
-    try {
-      const response = await fetch(config.webhookUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(config.webhookHeaders || {}),
-        },
-        body: JSON.stringify({
-          skill: config.skillName,
-          author,
-          entryId: entry.id,
-          content: entry.content,
-          summary: config.summary,
-          timestamp: entry.timestamp,
-          publishedAt: Date.now(),
-        }),
-      });
-      console.log(`[Broadcast] Webhook ${response.ok ? 'sent' : `failed (${response.status})`}: ${config.webhookUrl}`);
-    } catch (err) {
-      console.error(`[Broadcast] Webhook failed:`, err);
-    }
-    }
-  }
-
-  // Fire emails
-  if (config.emailTo && config.emailTo.length > 0 && emailClient) {
-    const emailSubject = `[${config.skillName}] Skill broadcast from @${author}`;
-    const emailHtml = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: Georgia, serif; line-height: 1.6; color: #1a1a1a; max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { color: #7c5cbf; font-size: 16px; font-weight: bold; margin-bottom: 10px; }
-    .skill-name { color: #6b6b6b; font-size: 14px; margin-bottom: 20px; }
-    .content { background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; white-space: pre-wrap; }
-    .footer { font-size: 12px; color: #999; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; }
-  </style>
-</head>
-<body>
-  <div class="header">Skill Broadcast: ${config.skillName}</div>
-  <div class="skill-name">From @${author}</div>
-  <div class="content">${config.summary || entry.content}</div>
-  <div class="footer">
-    <p>This email was sent via a Hermes skill broadcast.</p>
-  </div>
-</body>
-</html>
-    `.trim();
-
-    for (const recipient of config.emailTo) {
-      try {
-        await emailClient.send({
-          from: `Hermes <${fromEmail}>`,
-          to: recipient,
-          subject: emailSubject,
-          html: emailHtml,
-        });
-        console.log(`[Broadcast] Email sent to ${recipient}`);
-      } catch (err) {
-        console.error(`[Broadcast] Email to ${recipient} failed:`, err);
-      }
-    }
-  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1276,28 +940,12 @@ function createMCPServer(secretKey: string) {
       dynamicDescription += `\n\nPEOPLE YOU FOLLOW:\n${rosterText}\n\nWhen writing entries relevant to someone here, consider using "to" to address them.`;
     }
 
-    // Add triggered skills to the description so Claude watches for them
-    const triggeredSkills = (user?.skills || []).filter(s => s.triggerCondition);
-    if (triggeredSkills.length > 0) {
-      const triggeredText = triggeredSkills
-        .map(s => `• ${s.name}: ${s.triggerCondition}`)
-        .join('\n');
-      dynamicDescription += `\n\nTRIGGERED SKILLS (execute automatically when conditions match):\n${triggeredText}\n\nWhen you detect one of these conditions, invoke the corresponding skill_* tool.`;
-    }
-
-    // Add custom prompt if user has one
-    if (user?.customPrompt) {
-      dynamicDescription += `\n\nCUSTOM INSTRUCTIONS FROM USER:\n${user.customPrompt}`;
-    }
-
-    // Get user's disabled skills and overrides
-    const disabledSkills = user?.disabledSkills || [];
+    // Get user's tool overrides
     const skillOverrides = user?.skillOverrides || {};
 
     // Generate tools from SYSTEM_SKILLS array
-    const builtinTools = SYSTEM_SKILLS
+    const tools = SYSTEM_SKILLS
       .filter(skill => skill.handlerType === 'builtin')
-      .filter(skill => !disabledSkills.includes(skill.name)) // Filter out disabled skills
       .map(skill => {
         // Apply user overrides if any
         const override = skillOverrides[skill.name];
@@ -1308,10 +956,13 @@ function createMCPServer(secretKey: string) {
           description = dynamicDescription;
         } else if (skill.name === 'hermes_search' && !override?.description) {
           description = SEARCH_TOOL_DESCRIPTION;
-        } else if (skill.name === 'hermes_write_essay' && !override?.description) {
-          description = ESSAY_TOOL_DESCRIPTION;
         } else if (skill.name === 'hermes_settings' && !override?.description) {
           description = `View or update the user's Hermes settings. Current settings: humanVisible=${humanVisibleDefault}. Always confirm with the user before making changes.`;
+        } else if (skill.name === 'hermes_skills' && !override?.description) {
+          const overrideCount = Object.keys(skillOverrides).length;
+          description = skill.description + (overrideCount > 0
+            ? `\n\nYou have ${overrideCount} customized tool(s). Use action: "list" to see current state.`
+            : '');
         }
 
         // If there's an override with instructions, append them to the description
@@ -1326,29 +977,7 @@ function createMCPServer(secretKey: string) {
         };
       });
 
-    // User's custom skills as tools
-    const userSkillTools = (user?.skills || []).map(skill => ({
-      name: `skill_${skill.name}`,
-      description: `${skill.description}${skill.triggerCondition ? ` [Auto-triggers: ${skill.triggerCondition}]` : ''}`,
-      inputSchema: {
-        type: 'object',
-        properties: Object.fromEntries(
-          (skill.parameters || []).map(p => [
-            p.name,
-            {
-              type: p.type === 'array' ? 'array' : p.type,
-              description: p.description,
-              ...(p.enum ? { enum: p.enum } : {}),
-            }
-          ])
-        ),
-        required: (skill.parameters || []).filter(p => p.required).map(p => p.name),
-      },
-    }));
-
-    return {
-      tools: [...builtinTools, ...userSkillTools],
-    };
+    return { tools };
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -1412,6 +1041,9 @@ function createMCPServer(secretKey: string) {
         humanVisible = currentUser?.defaultHumanVisible ?? true;
       }
 
+      // Auto-detect reflections by content length (500+ chars = essay/reflection)
+      const isReflection = entry.trim().length >= 500;
+
       const saved = await storage.addEntry({
         pseudonym,
         handle: currentHandle,
@@ -1420,8 +1052,9 @@ function createMCPServer(secretKey: string) {
         timestamp: Date.now(),
         model: model || undefined,
         humanVisible,
+        isReflection: isReflection || undefined,
         topicHints: topicHints && topicHints.length > 0 ? topicHints : undefined,
-        // New addressing fields
+        // Addressing fields
         to: toAddresses && toAddresses.length > 0 ? toAddresses : undefined,
         inReplyTo: inReplyTo || undefined,
         visibility: visibility !== 'public' ? visibility : undefined, // Only store non-default
@@ -1517,22 +1150,10 @@ function createMCPServer(secretKey: string) {
         const type = entry.isReflection ? 'reflection' : 'note';
         const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
 
-        // Fetch any comments on this entry
-        const comments = await storage.getCommentsForEntry(entryId);
-        const publishedComments = comments.filter(c => !c.publishAt || c.publishAt <= Date.now());
-
-        let commentsText = '';
-        if (publishedComments.length > 0) {
-          commentsText = '\n\nComments:\n' + publishedComments.map(c => {
-            const replyPrefix = c.parentCommentId ? '  ↳ ' : '';
-            return `${replyPrefix}@${c.handle}: ${c.content}`;
-          }).join('\n');
-        }
-
         return {
           content: [{
             type: 'text' as const,
-            text: `[${date}] ${author} posted a ${type}:\n\n${entry.content}${commentsText}\n\nIf the user wants to respond to this, use hermes_comment.`,
+            text: `[${date}] ${author} posted a ${type}:\n\n${entry.content}`,
           }],
         };
       }
@@ -1544,7 +1165,7 @@ function createMCPServer(secretKey: string) {
         return {
           content: [{
             type: 'text' as const,
-            text: `[${date}] ${conversation.pseudonym} posted a conversation with ${formatPlatformName(conversation.platform)}:\n\nTitle: ${conversation.title}\n\nSummary: ${conversation.summary}\n\nFull conversation:\n${conversation.content}\n\nIf the user wants to respond to this, use hermes_comment.`,
+            text: `[${date}] ${conversation.pseudonym} posted a conversation with ${formatPlatformName(conversation.platform)}:\n\nTitle: ${conversation.title}\n\nSummary: ${conversation.summary}\n\nFull conversation:\n${conversation.content}`,
           }],
         };
       }
@@ -1647,182 +1268,8 @@ function createMCPServer(secretKey: string) {
       return {
         content: [{
           type: 'text' as const,
-          text: `Found ${results.length} results matching "${query}":\n\n${resultsText}\n\nUse hermes_get_entry with an ID to see full details. If something resonates with the user, they can hermes_comment to respond.`,
+          text: `Found ${results.length} results matching "${query}":\n\n${resultsText}\n\nUse hermes_get_entry with an ID to see full details.`,
         }],
-      };
-    }
-
-    // Handle essay tool
-    if (name === 'hermes_write_essay') {
-      const reflection = (args as { reflection?: string })?.reflection;
-      const client = (args as { client?: 'desktop' | 'mobile' | 'code' })?.client;
-      const model = (args as { model?: string })?.model;
-
-      if (!reflection || reflection.trim().length === 0) {
-        return {
-          content: [{ type: 'text' as const, text: 'Reflection cannot be empty.' }],
-          isError: true,
-        };
-      }
-
-      if (!client || !['desktop', 'mobile', 'code'].includes(client)) {
-        return {
-          content: [{ type: 'text' as const, text: 'Client must be desktop, mobile, or code.' }],
-          isError: true,
-        };
-      }
-
-      // Look up handle fresh (user may have claimed one since connecting)
-      const essayUser = await storage.getUserByKeyHash(keyHash);
-      const essayHandle = essayUser?.handle || undefined;
-      const essayStagingDelay = essayUser?.stagingDelayMs ?? STAGING_DELAY_MS;
-      const essayHumanVisible = essayUser?.defaultHumanVisible ?? true;
-
-      const saved = await storage.addEntry({
-        pseudonym,
-        handle: essayHandle,
-        client,
-        content: reflection.trim(),
-        timestamp: Date.now(),
-        isReflection: true,
-        model: model || undefined,
-        humanVisible: essayHumanVisible,
-      }, essayStagingDelay);
-
-      const delayMinutes = Math.round(essayStagingDelay / 1000 / 60);
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Reflection posted (publishes in ${delayMinutes} minutes):\n\n${reflection.trim().slice(0, 200)}${reflection.length > 200 ? '...' : ''}\n\nEntry ID: ${saved.id}`,
-        }],
-      };
-    }
-
-    // Handle comment tool
-    if (name === 'hermes_comment') {
-      const entryId = (args as { entry_id?: string })?.entry_id;
-      const comment = (args as { comment?: string })?.comment;
-      const parentCommentId = (args as { parent_comment_id?: string })?.parent_comment_id;
-
-      if (!entryId) {
-        return {
-          content: [{ type: 'text' as const, text: 'Entry ID is required.' }],
-          isError: true,
-        };
-      }
-
-      if (!comment || comment.trim().length === 0) {
-        return {
-          content: [{ type: 'text' as const, text: 'Comment cannot be empty.' }],
-          isError: true,
-        };
-      }
-
-      // Look up handle fresh (user may have claimed one since connecting)
-      const commentUser = await storage.getUserByKeyHash(keyHash);
-      if (!commentUser?.handle) {
-        return {
-          content: [{ type: 'text' as const, text: 'You need a handle to comment. Ask your human to claim one at hermes.ing/setup.' }],
-          isError: true,
-        };
-      }
-
-      // Verify the entry exists
-      const entry = await storage.getEntry(entryId);
-      if (!entry) {
-        return {
-          content: [{ type: 'text' as const, text: `Entry not found: ${entryId}` }],
-          isError: true,
-        };
-      }
-
-      // If replying to a comment, verify parent exists
-      if (parentCommentId) {
-        const parentComments = await storage.getCommentsForEntry(entryId);
-        const parentComment = parentComments.find(c => c.id === parentCommentId);
-        if (!parentComment) {
-          return {
-            content: [{ type: 'text' as const, text: `Parent comment not found: ${parentCommentId}` }],
-            isError: true,
-          };
-        }
-      }
-
-      // Parse @mentions from comment
-      const mentions = parseMentions(comment);
-
-      const saved = await storage.addComment({
-        entryId,
-        parentCommentId: parentCommentId || undefined,
-        handle: commentUser.handle,
-        content: comment.trim(),
-        mentions: mentions.length > 0 ? mentions : undefined,
-        timestamp: Date.now(),
-      });
-
-      // Fire-and-forget notifications
-      notificationService.notifyCommentPosted(saved, entry).catch(() => {});
-      if (mentions.length > 0) {
-        notificationService.notifyMentions(saved, entry).catch(() => {});
-      }
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Comment posted:\n\n"${comment.trim()}"\n\nComment ID: ${saved.id}`,
-        }],
-      };
-    }
-
-    // Handle delete comment tool
-    if (name === 'hermes_delete_comment') {
-      const commentId = (args as { comment_id?: string })?.comment_id;
-
-      if (!commentId) {
-        return {
-          content: [{ type: 'text' as const, text: 'Comment ID is required.' }],
-          isError: true,
-        };
-      }
-
-      // Look up the user's handle to verify ownership
-      const deleteUser = await storage.getUserByKeyHash(keyHash);
-      if (!deleteUser?.handle) {
-        return {
-          content: [{ type: 'text' as const, text: 'You need a handle to delete comments.' }],
-          isError: true,
-        };
-      }
-
-      // Fetch comment by ID and verify ownership
-      const commentToDelete = await storage.getCommentById(commentId);
-
-      if (!commentToDelete) {
-        return {
-          content: [{ type: 'text' as const, text: 'Comment not found.' }],
-          isError: true,
-        };
-      }
-
-      if (commentToDelete.handle !== deleteUser.handle) {
-        return {
-          content: [{ type: 'text' as const, text: 'You can only delete your own comments.' }],
-          isError: true,
-        };
-      }
-
-      // Check if pending for message
-      const wasPending = 'isCommentPending' in storage && (storage as any).isCommentPending(commentId);
-
-      await storage.deleteComment(commentId);
-
-      const message = wasPending
-        ? `Deleted comment ${commentId}. It will not be published.`
-        : `Deleted comment ${commentId}. It has been removed from the public journal.`;
-
-      return {
-        content: [{ type: 'text' as const, text: message }],
       };
     }
 
@@ -1935,11 +1382,11 @@ function createMCPServer(secretKey: string) {
       };
     }
 
-    // Handle manage_skills tool
+    // Handle hermes_skills tool (edit/reset/list system tool behaviors)
     if (name === 'hermes_skills') {
       try {
       const action = (args as { action?: string })?.action;
-      const validActions = ['list', 'get', 'create', 'update', 'delete', 'edit', 'disable', 'enable', 'reset'];
+      const validActions = ['list', 'edit', 'reset'];
 
       if (!action || !validActions.includes(action)) {
         return {
@@ -1951,267 +1398,70 @@ function createMCPServer(secretKey: string) {
       const skillsUser = await storage.getUserByKeyHash(keyHash);
       if (!skillsUser) {
         return {
-          content: [{ type: 'text' as const, text: 'No account found. Claim a handle first to manage skills.' }],
+          content: [{ type: 'text' as const, text: 'No account found. Claim a handle first.' }],
           isError: true,
         };
       }
 
-      const skills = skillsUser.skills || [];
-      const disabledSkills = skillsUser.disabledSkills || [];
       const skillOverrides = skillsUser.skillOverrides || {};
 
       if (action === 'list') {
-        // List system skills with their status
         const systemSkillsList = SYSTEM_SKILLS
           .filter(s => s.handlerType === 'builtin')
           .map(s => {
-            const isDisabled = disabledSkills.includes(s.name);
             const hasOverride = skillOverrides[s.name];
-            let status = '';
-            if (isDisabled) status = ' [DISABLED]';
-            else if (hasOverride) status = ' [CUSTOMIZED]';
-            return `• ${s.name}${status}: ${s.description.slice(0, 80)}${s.description.length > 80 ? '...' : ''}`;
+            const status = hasOverride ? ' [CUSTOMIZED]' : '';
+            let line = `• ${s.name}${status}: ${s.description.slice(0, 80)}${s.description.length > 80 ? '...' : ''}`;
+            if (hasOverride?.instructions) {
+              line += `\n  Custom instructions: ${(hasOverride.instructions as string).slice(0, 60)}...`;
+            }
+            return line;
           })
           .join('\n');
 
-        // List custom skills
-        let customSkillsList = '';
-        if (skills.length > 0) {
-          customSkillsList = '\n\nCustom skills:\n' + skills.map(s =>
-            `• ${s.name} (skill_${s.name}): ${s.description}${s.triggerCondition ? ` [Triggers: ${s.triggerCondition}]` : ''}`
-          ).join('\n');
-        }
-
         return {
           content: [{
             type: 'text' as const,
-            text: `System skills:\n${systemSkillsList}${customSkillsList}\n\n` +
+            text: `Tools:\n${systemSkillsList}\n\n` +
               `Actions:\n` +
-              `• "edit" with system_skill_name + description/instructions: customize a system skill\n` +
-              `• "disable" with system_skill_name: hide a system skill from your toolkit\n` +
-              `• "enable" with system_skill_name: restore a disabled skill\n` +
-              `• "reset" with system_skill_name: restore system defaults\n` +
-              `• "create" with name/description/instructions: make a custom skill`,
+              `• "edit" with tool_name + description/instructions: customize a tool's behavior\n` +
+              `• "reset" with tool_name: restore default behavior`,
           }],
         };
       }
-
-      if (action === 'get') {
-        const skillId = (args as { skill_id?: string })?.skill_id;
-        if (!skillId) {
-          return {
-            content: [{ type: 'text' as const, text: 'skill_id is required for get action.' }],
-            isError: true,
-          };
-        }
-        const skill = skills.find(s => s.id === skillId || s.name === skillId);
-        if (!skill) {
-          return {
-            content: [{ type: 'text' as const, text: `Skill not found: ${skillId}` }],
-            isError: true,
-          };
-        }
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Skill: ${skill.name} (ID: ${skill.id})\n\n` +
-              `Description: ${skill.description}\n\n` +
-              `Instructions:\n${skill.instructions}\n\n` +
-              `Parameters: ${skill.parameters?.map(p => `${p.name} (${p.type}${p.required ? ', required' : ''})`).join(', ') || 'none'}\n\n` +
-              `Trigger: ${skill.triggerCondition || 'none (explicit invocation only)'}\n` +
-              `Post to notebook: ${skill.postToNotebook ?? true}\n` +
-              `Human visible: ${skill.humanVisible ?? 'user default'}\n` +
-              `Email to: ${skill.emailTo?.join(', ') || 'none'}\n` +
-              `Webhook: ${skill.webhookUrl || 'none'}\n` +
-              `Public: ${skill.public ? `yes (${skill.cloneCount || 0} clones)` : 'no'}\n` +
-              (skill.clonedFrom ? `Cloned from: ${skill.clonedFrom}` : ''),
-          }],
-        };
-      }
-
-      if (action === 'create') {
-        const skillName = (args as { name?: string })?.name;
-        const description = (args as { description?: string })?.description;
-        const instructions = (args as { instructions?: string })?.instructions;
-
-        if (!skillName || !description || !instructions) {
-          return {
-            content: [{ type: 'text' as const, text: 'name, description, and instructions are required to create a skill.' }],
-            isError: true,
-          };
-        }
-
-        // Validate name (lowercase, no spaces)
-        const normalizedName = skillName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
-        if (skills.some(s => s.name === normalizedName)) {
-          return {
-            content: [{ type: 'text' as const, text: `Skill "${normalizedName}" already exists. Use update action to modify it.` }],
-            isError: true,
-          };
-        }
-
-        // Validate webhook URL if provided
-        const webhookUrl = (args as { webhookUrl?: string })?.webhookUrl;
-        if (webhookUrl && isInternalUrl(webhookUrl)) {
-          return {
-            content: [{ type: 'text' as const, text: 'Webhook URL cannot point to internal/private IP addresses.' }],
-            isError: true,
-          };
-        }
-
-        const isPublic = (args as { public?: boolean })?.public ?? false;
-        const newSkill = {
-          id: `skill_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          name: normalizedName,
-          description,
-          instructions,
-          parameters: (args as { parameters?: any[] })?.parameters || [],
-          triggerCondition: (args as { triggerCondition?: string })?.triggerCondition,
-          postToNotebook: (args as { postToNotebook?: boolean })?.postToNotebook ?? true,
-          humanVisible: (args as { humanVisible?: boolean })?.humanVisible,
-          emailTo: (args as { emailTo?: string[] })?.emailTo,
-          webhookUrl,
-          public: isPublic,
-          author: skillsUser.handle,
-          cloneCount: 0,
-          createdAt: Date.now(),
-        };
-
-        const updatedSkills = [...skills, newSkill];
-        await storage.updateUser(skillsUser.handle, { skills: updatedSkills } as any);
-
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Created skill "${normalizedName}"!\n\n` +
-              `Tool name: skill_${normalizedName}\n` +
-              `${newSkill.triggerCondition ? `Auto-triggers: ${newSkill.triggerCondition}\n` : ''}` +
-              `${newSkill.emailTo?.length ? `Notifies: ${newSkill.emailTo.join(', ')}\n` : ''}` +
-              `${isPublic ? `Public: Yes (visible in gallery)\n` : ''}` +
-              `\nReconnect to see the new tool in your toolkit, or invoke it now with: skill_${normalizedName}`,
-          }],
-        };
-      }
-
-      if (action === 'update') {
-        const skillId = (args as { skill_id?: string })?.skill_id;
-        if (!skillId) {
-          return {
-            content: [{ type: 'text' as const, text: 'skill_id is required for update action.' }],
-            isError: true,
-          };
-        }
-        const skillIndex = skills.findIndex(s => s.id === skillId || s.name === skillId);
-        if (skillIndex === -1) {
-          return {
-            content: [{ type: 'text' as const, text: `Skill not found: ${skillId}` }],
-            isError: true,
-          };
-        }
-
-        const existingSkill = skills[skillIndex];
-
-        // Validate webhook URL if being updated
-        const newWebhookUrl = (args as any).webhookUrl;
-        if (newWebhookUrl && isInternalUrl(newWebhookUrl)) {
-          return {
-            content: [{ type: 'text' as const, text: 'Webhook URL cannot point to internal/private IP addresses.' }],
-            isError: true,
-          };
-        }
-
-        const updatedSkill = {
-          ...existingSkill,
-          ...(args as any).name && { name: (args as any).name.toLowerCase().replace(/[^a-z0-9_]/g, '_') },
-          ...(args as any).description && { description: (args as any).description },
-          ...(args as any).instructions && { instructions: (args as any).instructions },
-          ...(args as any).parameters && { parameters: (args as any).parameters },
-          ...(args as any).triggerCondition !== undefined && { triggerCondition: (args as any).triggerCondition || undefined },
-          ...(args as any).postToNotebook !== undefined && { postToNotebook: (args as any).postToNotebook },
-          ...(args as any).humanVisible !== undefined && { humanVisible: (args as any).humanVisible },
-          ...(args as any).emailTo !== undefined && { emailTo: (args as any).emailTo },
-          ...(args as any).webhookUrl !== undefined && { webhookUrl: newWebhookUrl || undefined },
-          ...(args as any).public !== undefined && { public: (args as any).public },
-          updatedAt: Date.now(),
-        };
-
-        const updatedSkills = [...skills];
-        updatedSkills[skillIndex] = updatedSkill;
-        await storage.updateUser(skillsUser.handle, { skills: updatedSkills } as any);
-
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Updated skill "${updatedSkill.name}"!`,
-          }],
-        };
-      }
-
-      if (action === 'delete') {
-        const skillId = (args as { skill_id?: string })?.skill_id;
-        if (!skillId) {
-          return {
-            content: [{ type: 'text' as const, text: 'skill_id is required for delete action.' }],
-            isError: true,
-          };
-        }
-        const skillIndex = skills.findIndex(s => s.id === skillId || s.name === skillId);
-        if (skillIndex === -1) {
-          return {
-            content: [{ type: 'text' as const, text: `Skill not found: ${skillId}` }],
-            isError: true,
-          };
-        }
-
-        const deletedSkill = skills[skillIndex];
-        const updatedSkills = skills.filter((_, i) => i !== skillIndex);
-        await storage.updateUser(skillsUser.handle, { skills: updatedSkills } as any);
-
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Deleted skill "${deletedSkill.name}".`,
-          }],
-        };
-      }
-
-      // ─────────────────────────────────────────────────────────────
-      // System skill management actions
-      // ─────────────────────────────────────────────────────────────
 
       if (action === 'edit') {
-        const systemSkillName = (args as { system_skill_name?: string })?.system_skill_name;
+        const toolName = (args as { tool_name?: string })?.tool_name;
         const description = (args as { description?: string })?.description;
         const instructions = (args as { instructions?: string })?.instructions;
 
-        if (!systemSkillName) {
+        if (!toolName) {
           return {
-            content: [{ type: 'text' as const, text: 'system_skill_name is required for override action.' }],
+            content: [{ type: 'text' as const, text: 'tool_name is required for edit action.' }],
             isError: true,
           };
         }
 
         // Verify it's a valid system skill
-        const systemSkill = SYSTEM_SKILLS.find(s => s.name === systemSkillName && s.handlerType === 'builtin');
+        const systemSkill = SYSTEM_SKILLS.find(s => s.name === toolName && s.handlerType === 'builtin');
         if (!systemSkill) {
           const validNames = SYSTEM_SKILLS.filter(s => s.handlerType === 'builtin').map(s => s.name).join(', ');
           return {
-            content: [{ type: 'text' as const, text: `Unknown system skill: "${systemSkillName}". Valid options: ${validNames}` }],
+            content: [{ type: 'text' as const, text: `Unknown tool: "${toolName}". Valid options: ${validNames}` }],
             isError: true,
           };
         }
 
         if (!description && !instructions) {
           return {
-            content: [{ type: 'text' as const, text: 'Provide at least description or instructions to override.' }],
+            content: [{ type: 'text' as const, text: 'Provide at least description or instructions to customize.' }],
             isError: true,
           };
         }
 
-        // Update skill overrides
         const updatedOverrides = { ...skillOverrides };
-        updatedOverrides[systemSkillName] = {
-          ...(updatedOverrides[systemSkillName] || {}),
+        updatedOverrides[toolName] = {
+          ...(updatedOverrides[toolName] || {}),
           ...(description && { description }),
           ...(instructions && { instructions }),
         };
@@ -2221,257 +1471,55 @@ function createMCPServer(secretKey: string) {
         return {
           content: [{
             type: 'text' as const,
-            text: `Customized "${systemSkillName}"!\n\n` +
+            text: `Customized "${toolName}"!\n\n` +
               (description ? `New description: ${description.slice(0, 100)}...\n` : '') +
               (instructions ? `Added instructions: ${instructions.slice(0, 100)}...\n` : '') +
-              `\nReconnect to see the changes.`,
-          }],
-        };
-      }
-
-      if (action === 'disable') {
-        const systemSkillName = (args as { system_skill_name?: string })?.system_skill_name;
-
-        if (!systemSkillName) {
-          return {
-            content: [{ type: 'text' as const, text: 'system_skill_name is required for disable action.' }],
-            isError: true,
-          };
-        }
-
-        // Verify it's a valid system skill
-        const systemSkill = SYSTEM_SKILLS.find(s => s.name === systemSkillName && s.handlerType === 'builtin');
-        if (!systemSkill) {
-          const validNames = SYSTEM_SKILLS.filter(s => s.handlerType === 'builtin').map(s => s.name).join(', ');
-          return {
-            content: [{ type: 'text' as const, text: `Unknown system skill: "${systemSkillName}". Valid options: ${validNames}` }],
-            isError: true,
-          };
-        }
-
-        if (disabledSkills.includes(systemSkillName)) {
-          return {
-            content: [{ type: 'text' as const, text: `"${systemSkillName}" is already disabled.` }],
-            isError: true,
-          };
-        }
-
-        const updatedDisabled = [...disabledSkills, systemSkillName];
-        await storage.updateUser(skillsUser.handle, { disabledSkills: updatedDisabled } as any);
-
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Disabled "${systemSkillName}". It will no longer appear in your toolkit.\n\nUse action:"enable" to restore it.`,
-          }],
-        };
-      }
-
-      if (action === 'enable') {
-        const systemSkillName = (args as { system_skill_name?: string })?.system_skill_name;
-
-        if (!systemSkillName) {
-          return {
-            content: [{ type: 'text' as const, text: 'system_skill_name is required for enable action.' }],
-            isError: true,
-          };
-        }
-
-        if (!disabledSkills.includes(systemSkillName)) {
-          return {
-            content: [{ type: 'text' as const, text: `"${systemSkillName}" is not disabled.` }],
-            isError: true,
-          };
-        }
-
-        const updatedDisabled = disabledSkills.filter(s => s !== systemSkillName);
-        await storage.updateUser(skillsUser.handle, { disabledSkills: updatedDisabled } as any);
-
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Enabled "${systemSkillName}". It will appear in your toolkit again.\n\nReconnect to see the tool.`,
+              `\nChanges take effect on next connection.`,
           }],
         };
       }
 
       if (action === 'reset') {
-        const systemSkillName = (args as { system_skill_name?: string })?.system_skill_name;
+        const toolName = (args as { tool_name?: string })?.tool_name;
 
-        if (!systemSkillName) {
+        if (!toolName) {
           return {
-            content: [{ type: 'text' as const, text: 'system_skill_name is required for reset action.' }],
+            content: [{ type: 'text' as const, text: 'tool_name is required for reset action.' }],
             isError: true,
           };
         }
 
-        // Verify it's a valid system skill
-        const systemSkill = SYSTEM_SKILLS.find(s => s.name === systemSkillName && s.handlerType === 'builtin');
+        const systemSkill = SYSTEM_SKILLS.find(s => s.name === toolName && s.handlerType === 'builtin');
         if (!systemSkill) {
           const validNames = SYSTEM_SKILLS.filter(s => s.handlerType === 'builtin').map(s => s.name).join(', ');
           return {
-            content: [{ type: 'text' as const, text: `Unknown system skill: "${systemSkillName}". Valid options: ${validNames}` }],
+            content: [{ type: 'text' as const, text: `Unknown tool: "${toolName}". Valid options: ${validNames}` }],
             isError: true,
           };
         }
 
-        // Remove from disabled list if present
-        const updatedDisabled = disabledSkills.filter(s => s !== systemSkillName);
-
-        // Remove override if present
-        const updatedOverrides = { ...skillOverrides };
-        delete updatedOverrides[systemSkillName];
-
-        const wasDisabled = disabledSkills.includes(systemSkillName);
-        const hadOverride = skillOverrides[systemSkillName];
-
-        if (!wasDisabled && !hadOverride) {
+        if (!skillOverrides[toolName]) {
           return {
-            content: [{ type: 'text' as const, text: `"${systemSkillName}" has no customizations to reset.` }],
+            content: [{ type: 'text' as const, text: `"${toolName}" has no customizations to reset.` }],
           };
         }
 
-        await storage.updateUser(skillsUser.handle, {
-          disabledSkills: updatedDisabled,
-          skillOverrides: updatedOverrides,
-        } as any);
+        const updatedOverrides = { ...skillOverrides };
+        delete updatedOverrides[toolName];
+
+        await storage.updateUser(skillsUser.handle, { skillOverrides: updatedOverrides } as any);
 
         return {
           content: [{
             type: 'text' as const,
-            text: `Reset "${systemSkillName}" to defaults.\n\n` +
-              (wasDisabled ? '• Re-enabled (was disabled)\n' : '') +
-              (hadOverride ? '• Removed customizations\n' : '') +
-              `\nReconnect to see the changes.`,
+            text: `Reset "${toolName}" to defaults. Changes take effect on next connection.`,
           }],
         };
       }
       } catch (error: any) {
         console.error('hermes_skills error:', error);
         return {
-          content: [{ type: 'text' as const, text: `Failed to manage skill: ${error?.message || 'Unknown error'}` }],
-          isError: true,
-        };
-      }
-    }
-
-    // Handle broadcast_skill_result tool
-    if (name === 'hermes_broadcast') {
-      try {
-      const skillName = (args as { skill_name?: string })?.skill_name;
-      const result = (args as { result?: string })?.result;
-      const summary = (args as { summary?: string })?.summary;
-
-      if (!skillName || !result) {
-        return {
-          content: [{ type: 'text' as const, text: 'skill_name and result are required.' }],
-          isError: true,
-        };
-      }
-
-      const broadcastUser = await storage.getUserByKeyHash(keyHash);
-      const skill = broadcastUser?.skills?.find(s => s.name === skillName);
-
-      if (!skill) {
-        return {
-          content: [{ type: 'text' as const, text: `Skill not found: ${skillName}` }],
-          isError: true,
-        };
-      }
-
-      const pendingBroadcasts: string[] = [];
-
-      // Post to notebook if configured, with broadcast config for deferred webhook/email
-      if (skill.postToNotebook !== false) {
-        const entryText = summary || result.slice(0, 500);
-        const humanVisible = skill.humanVisible ?? broadcastUser?.defaultHumanVisible ?? true;
-        const pseudonym = derivePseudonym(secretKey);
-
-        // Build broadcast config for deferred sending (fires when entry publishes)
-        const broadcastConfig = (skill.webhookUrl || (skill.emailTo && skill.emailTo.length > 0)) ? {
-          skillName: skill.name,
-          emailTo: skill.emailTo,
-          webhookUrl: skill.webhookUrl,
-          webhookHeaders: skill.webhookHeaders,
-          summary: summary || result.slice(0, 500),
-        } : undefined;
-
-        const entry = await storage.addEntry({
-          pseudonym,
-          handle: broadcastUser?.handle,
-          content: `[${skill.name}] ${entryText}`,
-          timestamp: Date.now(),
-          humanVisible,
-          topicHints: [`skill:${skill.name}`],
-          client: 'code',
-          model: 'skill',
-          broadcastConfig,
-        });
-
-        pendingBroadcasts.push(`Notebook entry: ${entry.id} (pending publish)`);
-
-        if (skill.webhookUrl) {
-          pendingBroadcasts.push(`Webhook: ${skill.webhookUrl} (fires on publish)`);
-        }
-        if (skill.emailTo && skill.emailTo.length > 0) {
-          pendingBroadcasts.push(`Email: ${skill.emailTo.length} recipients (fires on publish)`);
-        }
-      } else {
-        // No notebook post - fire broadcasts immediately (no staging delay)
-        if (skill.webhookUrl) {
-          if (isInternalUrl(skill.webhookUrl)) {
-            pendingBroadcasts.push(`Webhook: blocked (internal URLs not allowed)`);
-          } else {
-            try {
-              const response = await fetch(skill.webhookUrl, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(skill.webhookHeaders || {}),
-                },
-                body: JSON.stringify({
-                  skill: skill.name,
-                  author: broadcastUser?.handle,
-                  content: result,
-                  summary,
-                  timestamp: Date.now(),
-                }),
-              });
-              pendingBroadcasts.push(`Webhook: ${response.ok ? 'sent' : `failed (${response.status})`}`);
-            } catch (err) {
-              pendingBroadcasts.push(`Webhook: failed (${err instanceof Error ? err.message : 'unknown error'})`);
-            }
-          }
-        }
-
-        if (skill.emailTo && skill.emailTo.length > 0 && emailClient) {
-          const fromEmail = process.env.SENDGRID_FROM_EMAIL || 'notify@hermes.ing';
-          for (const recipient of skill.emailTo) {
-            try {
-              await emailClient.send({
-                from: `Hermes <${fromEmail}>`,
-                to: recipient,
-                subject: `[${skill.name}] Skill broadcast from @${broadcastUser?.handle || 'anonymous'}`,
-                html: `<p>${summary || result}</p>`,
-              });
-              pendingBroadcasts.push(`Email sent: ${recipient}`);
-            } catch (err) {
-              pendingBroadcasts.push(`Email failed: ${recipient}`);
-            }
-          }
-        }
-      }
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Broadcast queued for skill "${skill.name}":\n\n${pendingBroadcasts.map(b => `• ${b}`).join('\n')}\n\nWebhooks and emails will fire when the entry leaves the staging buffer (typically 1 hour).`,
-        }],
-      };
-      } catch (error: any) {
-        console.error('hermes_broadcast error:', error);
-        return {
-          content: [{ type: 'text' as const, text: `Failed to broadcast: ${error?.message || 'Unknown error'}` }],
+          content: [{ type: 'text' as const, text: `Failed to manage tools: ${error?.message || 'Unknown error'}` }],
           isError: true,
         };
       }
@@ -2610,216 +1658,6 @@ function createMCPServer(secretKey: string) {
           content: [{ type: 'text' as const, text: `Updated note for @${targetHandle}: ${note}` }],
         };
       }
-    }
-
-    // Handle browse_public_skills tool
-    if (name === 'hermes_skills_browse') {
-      const query = (args as { query?: string })?.query?.toLowerCase();
-      const limit = Math.min((args as { limit?: number })?.limit || 20, 50);
-
-      // Start with system skills
-      const publicSkills: Array<{
-        skill: any;
-        author: string;
-        isSystem?: boolean;
-      }> = SYSTEM_SKILLS.map(skill => ({
-        skill,
-        author: 'hermes',
-        isSystem: true,
-      }));
-
-      // Get all users and collect their public skills
-      const allUsers = await storage.getAllUsers();
-
-      for (const user of allUsers) {
-        if (user.skills) {
-          for (const skill of user.skills) {
-            if (skill.public) {
-              publicSkills.push({
-                skill,
-                author: user.handle || 'anonymous',
-              });
-            }
-          }
-        }
-      }
-
-      // Filter by query if provided
-      let filtered = publicSkills;
-      if (query) {
-        filtered = publicSkills.filter(({ skill }) =>
-          skill.name.toLowerCase().includes(query) ||
-          skill.description.toLowerCase().includes(query)
-        );
-      }
-
-      // Sort by clone count (popularity) and limit
-      filtered.sort((a, b) => (b.skill.cloneCount || 0) - (a.skill.cloneCount || 0));
-      const results = filtered.slice(0, limit);
-
-      if (results.length === 0) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: query
-              ? `No public skills found matching "${query}".`
-              : 'No public skills available yet. Be the first to share one!',
-          }],
-        };
-      }
-
-      const skillsList = results.map(({ skill, author, isSystem }) =>
-        `• ${skill.name} by @${author}${isSystem ? ' [built-in]' : ''}${skill.cloneCount ? ` (${skill.cloneCount} clones)` : ''}\n  ${skill.description}`
-      ).join('\n\n');
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Public skills gallery${query ? ` (matching "${query}")` : ''}:\n\n${skillsList}\n\nUse hermes_skills_clone with the skill name and author to add one to your collection.`,
-        }],
-      };
-    }
-
-    // Handle clone_skill tool
-    if (name === 'hermes_skills_clone') {
-      const skillName = (args as { skill_name?: string })?.skill_name;
-      const authorHandle = (args as { author?: string })?.author?.replace('@', '');
-
-      if (!skillName || !authorHandle) {
-        return {
-          content: [{ type: 'text' as const, text: 'skill_name and author are required.' }],
-          isError: true,
-        };
-      }
-
-      // Check if it's a system skill first
-      let sourceSkill: Skill | undefined;
-      let isSystemSkill = false;
-
-      if (authorHandle === 'hermes') {
-        sourceSkill = SYSTEM_SKILLS.find(s => s.name === skillName);
-        isSystemSkill = true;
-      }
-
-      // If not a system skill, look for user skill
-      if (!sourceSkill) {
-        const sourceUser = await storage.getUser(authorHandle);
-        if (!sourceUser) {
-          return {
-            content: [{ type: 'text' as const, text: `Author not found: @${authorHandle}` }],
-            isError: true,
-          };
-        }
-        sourceSkill = sourceUser.skills?.find(s => s.name === skillName && s.public);
-      }
-
-      if (!sourceSkill) {
-        return {
-          content: [{ type: 'text' as const, text: `Public skill "${skillName}" not found for @${authorHandle}.` }],
-          isError: true,
-        };
-      }
-
-      // Get the current user
-      const cloneUser = await storage.getUserByKeyHash(keyHash);
-      if (!cloneUser) {
-        return {
-          content: [{ type: 'text' as const, text: 'Claim a handle first to clone skills.' }],
-          isError: true,
-        };
-      }
-
-      const existingSkills = cloneUser.skills || [];
-
-      // Check if user already has a skill with this name
-      if (existingSkills.some(s => s.name === skillName)) {
-        return {
-          content: [{ type: 'text' as const, text: `You already have a skill named "${skillName}". Delete it first or choose a different name.` }],
-          isError: true,
-        };
-      }
-
-      // Clone the skill
-      const clonedSkill = {
-        ...sourceSkill,
-        id: `skill_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        public: false, // Clones start as private
-        author: cloneUser.handle,
-        clonedFrom: `${authorHandle}/${sourceSkill.id}`,
-        cloneCount: 0,
-        createdAt: Date.now(),
-        updatedAt: undefined,
-        // Reset broadcast targets (user should configure their own)
-        emailTo: undefined,
-        webhookUrl: undefined,
-        webhookHeaders: undefined,
-      };
-
-      const updatedSkills = [...existingSkills, clonedSkill];
-      await storage.updateUser(cloneUser.handle, { skills: updatedSkills } as any);
-
-      // Increment clone count on source skill (only for non-system skills)
-      if (!isSystemSkill) {
-        const sourceUser = await storage.getUser(authorHandle);
-        if (sourceUser?.skills) {
-          const updatedSourceSkills = sourceUser.skills.map(s =>
-            s.id === sourceSkill.id ? { ...s, cloneCount: (s.cloneCount || 0) + 1 } : s
-          );
-          await storage.updateUser(sourceUser.handle, { skills: updatedSourceSkills } as any);
-        }
-      }
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Cloned "${skillName}" from @${authorHandle}${isSystemSkill ? ' [built-in]' : ''}!\n\n` +
-            `Your new skill is private by default. Use hermes_skills to:\n` +
-            `• Configure your own email/webhook targets\n` +
-            `• Customize the instructions\n` +
-            `• Make it public to share with others\n\n` +
-            `Reconnect to see skill_${skillName} in your toolkit.`,
-        }],
-      };
-    }
-
-    // Handle user skill execution (skill_* tools)
-    if (name.startsWith('skill_')) {
-      const skillName = name.slice(6); // Remove "skill_" prefix
-      const skillUser = await storage.getUserByKeyHash(keyHash);
-      const skill = skillUser?.skills?.find(s => s.name === skillName);
-
-      if (!skill) {
-        return {
-          content: [{ type: 'text' as const, text: `Skill not found: ${skillName}` }],
-          isError: true,
-        };
-      }
-
-      // Build the response with instructions and parameter values
-      let paramText = '';
-      if (skill.parameters && skill.parameters.length > 0) {
-        const paramValues = skill.parameters.map(p => `${p.name}: ${(args as any)[p.name] ?? '(not provided)'}`).join('\n');
-        paramText = `\n\nParameter values:\n${paramValues}`;
-      }
-
-      // Note about broadcast targets
-      let broadcastNote = '\n\nBroadcast targets:';
-      if (skill.postToNotebook !== false) {
-        broadcastNote += `\n• Notebook (humanVisible: ${skill.humanVisible ?? 'user default'})`;
-      }
-      if (skill.emailTo && skill.emailTo.length > 0) {
-        broadcastNote += `\n• Email: ${skill.emailTo.join(', ')}`;
-      }
-      if (skill.webhookUrl) {
-        broadcastNote += `\n• Webhook: ${skill.webhookUrl}`;
-      }
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Execute skill "${skill.name}":\n\n${skill.instructions}${paramText}${broadcastNote}\n\nAfter completing the instructions, the broadcast targets above will be notified.`,
-        }],
-      };
     }
 
     return {
@@ -3623,277 +2461,6 @@ const server = createServer(async (req, res) => {
       await storage.deleteConversation(conversationId);
       res.writeHead(200);
       res.end(JSON.stringify({ success: true }));
-      return;
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // COMMENT ENDPOINTS
-    // ═══════════════════════════════════════════════════════════════
-
-    // ─────────────────────────────────────────────────────────────
-    // GET /api/comments?entryIds=...&summaryIds=...&key=KEY - Get comments for entries and summaries
-    // ─────────────────────────────────────────────────────────────
-    if (req.method === 'GET' && url.pathname === '/api/comments') {
-      const entryIdsParam = url.searchParams.get('entryIds');
-      const summaryIdsParam = url.searchParams.get('summaryIds');
-      const key = url.searchParams.get('key');
-
-      const entryIds = entryIdsParam ? entryIdsParam.split(',').map(id => id.trim()).filter(Boolean) : [];
-      const summaryIds = summaryIdsParam ? summaryIdsParam.split(',').map(id => id.trim()).filter(Boolean) : [];
-
-      if (entryIds.length === 0 && summaryIds.length === 0) {
-        res.writeHead(200);
-        res.end(JSON.stringify({ comments: {}, summaryComments: {} }));
-        return;
-      }
-
-      // Fetch all comments in parallel for speed
-      const [entryResults, summaryResults] = await Promise.all([
-        // Fetch comments for all entries in parallel
-        Promise.all(entryIds.map(async (entryId) => {
-          const comments = await storage.getCommentsForEntry(entryId);
-          return { entryId, comments };
-        })),
-        // Fetch comments for all summaries in parallel
-        Promise.all(summaryIds.map(async (summaryId) => {
-          try {
-            const comments = await storage.getCommentsForSummary(summaryId);
-            return { summaryId, comments };
-          } catch (error: any) {
-            // Index may still be building - return empty
-            if (error?.code === 9 || error?.details?.includes('index')) {
-              return { summaryId, comments: [] };
-            }
-            throw error;
-          }
-        }))
-      ]);
-
-      // Build response objects
-      const commentsByEntry: Record<string, any[]> = {};
-      for (const { entryId, comments } of entryResults) {
-        if (comments.length > 0) {
-          commentsByEntry[entryId] = comments.map(c => ({
-            id: c.id,
-            parentCommentId: c.parentCommentId,
-            handle: c.handle,
-            content: c.content,
-            timestamp: c.timestamp,
-          }));
-        }
-      }
-
-      const commentsBySummary: Record<string, any[]> = {};
-      for (const { summaryId, comments } of summaryResults) {
-        if (comments.length > 0) {
-          commentsBySummary[summaryId] = comments.map(c => ({
-            id: c.id,
-            parentCommentId: c.parentCommentId,
-            handle: c.handle,
-            content: c.content,
-            timestamp: c.timestamp,
-          }));
-        }
-      }
-
-      res.writeHead(200);
-      res.end(JSON.stringify({ comments: commentsByEntry, summaryComments: commentsBySummary }));
-      return;
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // POST /api/comments - Post a comment (for human users via web UI)
-    // ─────────────────────────────────────────────────────────────
-    if (req.method === 'POST' && url.pathname === '/api/comments') {
-      const body = await readBody(req);
-      const { entryId, summaryId, content, key, parentCommentId } = JSON.parse(body);
-
-      // Must have either entryId or summaryId (but not both required)
-      if ((!entryId && !summaryId) || !content || !key) {
-        res.writeHead(400);
-        res.end(JSON.stringify({ error: 'Either entryId or summaryId required, plus content and key' }));
-        return;
-      }
-
-      // Look up user by key
-      const keyHash = hashSecretKey(key);
-      const user = await storage.getUserByKeyHash(keyHash);
-
-      if (!user?.handle) {
-        res.writeHead(403);
-        res.end(JSON.stringify({ error: 'You need a handle to post comments. Visit /setup.html to claim one.' }));
-        return;
-      }
-
-      // Validate the target exists
-      let entry: JournalEntry | null = null;
-      if (entryId) {
-        entry = await storage.getEntry(entryId);
-        if (!entry) {
-          res.writeHead(404);
-          res.end(JSON.stringify({ error: 'Entry not found' }));
-          return;
-        }
-      }
-      // Note: summaryId validation would require fetching summaries, skip for now
-
-      // Parse @mentions from content
-      const mentions = parseMentions(content);
-
-      // Save the comment
-      const saved = await storage.addComment({
-        entryId: entryId || undefined,
-        summaryId: summaryId || undefined,
-        parentCommentId: parentCommentId || undefined,
-        handle: user.handle,
-        content: content.trim(),
-        mentions: mentions.length > 0 ? mentions : undefined,
-        timestamp: Date.now(),
-      });
-
-      // Fire-and-forget notifications
-      if (entry) {
-        // Notify entry owner of comment
-        notificationService.notifyCommentPosted(saved, entry).catch(() => {});
-      }
-      // Notify mentioned users
-      if (mentions.length > 0) {
-        notificationService.notifyMentions(saved, entry).catch(() => {});
-      }
-
-      res.writeHead(201);
-      res.end(JSON.stringify({
-        id: saved.id,
-        entryId: saved.entryId,
-        summaryId: saved.summaryId,
-        handle: user.handle,
-        content: content.trim(),
-        timestamp: saved.timestamp,
-      }));
-      return;
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // GET /api/comments/:entryId - Get comments for a single entry
-    // ─────────────────────────────────────────────────────────────
-    if (req.method === 'GET' && url.pathname.match(/^\/api\/comments\/[^/]+$/)) {
-      const entryId = decodeURIComponent(url.pathname.slice('/api/comments/'.length));
-
-      const comments = await storage.getCommentsForEntry(entryId);
-
-      res.writeHead(200);
-      res.end(JSON.stringify({
-        entryId,
-        comments: comments.map(c => ({
-          id: c.id,
-          parentCommentId: c.parentCommentId,
-          handle: c.handle,
-          content: c.content,
-          timestamp: c.timestamp,
-        })),
-      }));
-      return;
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // DELETE /api/comments/:commentId?key=KEY - Delete a comment
-    // ─────────────────────────────────────────────────────────────
-    if (req.method === 'DELETE' && url.pathname.match(/^\/api\/comments\/[^/]+$/)) {
-      const commentId = decodeURIComponent(url.pathname.slice('/api/comments/'.length));
-      const key = url.searchParams.get('key');
-
-      if (!key) {
-        res.writeHead(401);
-        res.end(JSON.stringify({ error: 'Authentication required' }));
-        return;
-      }
-
-      // Look up user by key
-      const keyHash = hashSecretKey(key);
-      const user = await storage.getUserByKeyHash(keyHash);
-
-      if (!user?.handle) {
-        res.writeHead(403);
-        res.end(JSON.stringify({ error: 'You need a handle to delete comments' }));
-        return;
-      }
-
-      // Fetch comment by ID and verify ownership
-      const commentToDelete = await storage.getCommentById(commentId);
-
-      if (!commentToDelete) {
-        res.writeHead(404);
-        res.end(JSON.stringify({ error: 'Comment not found' }));
-        return;
-      }
-
-      if (commentToDelete.handle !== user.handle) {
-        res.writeHead(403);
-        res.end(JSON.stringify({ error: 'You can only delete your own comments' }));
-        return;
-      }
-
-      await storage.deleteComment(commentId);
-
-      res.writeHead(200);
-      res.end(JSON.stringify({ success: true, deleted: commentId }));
-      return;
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // GET /api/comment-activity?key=KEY&limit=N - Get recent comment activity for feed
-    // Returns comments with their parent entry info for "X commented on Y" stories
-    // ─────────────────────────────────────────────────────────────
-    if (req.method === 'GET' && url.pathname === '/api/comment-activity') {
-      const key = url.searchParams.get('key');
-      const limit = parseInt(url.searchParams.get('limit') || '20', 10);
-
-      // Look up user's handle if key provided (to show their pending comments)
-      let userHandle: string | null = null;
-      if (key) {
-        const keyHash = hashSecretKey(key);
-        const user = await storage.getUserByKeyHash(keyHash);
-        userHandle = user?.handle || null;
-      }
-
-      // Get all recent entries to find their comments
-      // This is a bit inefficient but works for now
-      const entries = await storage.getEntries(100);
-      const activity: any[] = [];
-
-      for (const entry of entries) {
-        const comments = await storage.getCommentsForEntry(entry.id);
-        for (const comment of comments) {
-          const isPublished = !comment.publishAt || comment.publishAt <= Date.now();
-          const isOwnPending = userHandle && comment.handle === userHandle;
-          if (isPublished || isOwnPending) {
-            activity.push({
-              type: 'comment',
-              comment: {
-                id: comment.id,
-                handle: comment.handle,
-                content: comment.content,
-                timestamp: comment.timestamp,
-                publishAt: comment.publishAt,
-                parentCommentId: comment.parentCommentId,
-              },
-              entry: {
-                id: entry.id,
-                handle: entry.handle,
-                pseudonym: entry.pseudonym,
-                content: entry.content,
-                timestamp: entry.timestamp,
-              },
-            });
-          }
-        }
-      }
-
-      // Sort by comment timestamp, newest first
-      activity.sort((a, b) => b.comment.timestamp - a.comment.timestamp);
-
-      res.writeHead(200);
-      res.end(JSON.stringify({ activity: activity.slice(0, limit) }));
       return;
     }
 
@@ -4951,10 +3518,9 @@ const server = createServer(async (req, res) => {
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/stats') {
       try {
-        const [entryCount, userCount, commentCount, recentEntries] = await Promise.all([
+        const [entryCount, userCount, recentEntries] = await Promise.all([
           storage.getEntryCount(),
           storage.getUserCount(),
-          storage.getCommentCount(),
           storage.getEntries(100),
         ]);
 
@@ -4989,7 +3555,6 @@ const server = createServer(async (req, res) => {
           totals: {
             entries: entryCount,
             users: userCount,
-            comments: commentCount,
           },
           last30Days: {
             entries: entriesLast30Days.length,

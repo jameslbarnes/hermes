@@ -79,8 +79,8 @@ const STAGING_DELAY_MS = process.env.STAGING_DELAY_MS
   ? parseInt(process.env.STAGING_DELAY_MS)
   : 60 * 60 * 1000;
 
-// Base URL for links - defaults to hermes.ing but can be overridden
-const BASE_URL = process.env.BASE_URL || 'https://hermes.ing';
+// Base URL for links - defaults to hermes.teleport.computer but can be overridden
+const BASE_URL = process.env.BASE_URL || 'https://hermes.teleport.computer';
 
 // Tool description - single source of truth
 export const TOOL_DESCRIPTION = `Write to the shared notebook.
@@ -523,7 +523,7 @@ const notificationService: NotificationService = createNotificationService({
   storage,
   emailClient,
   anthropic,
-  fromEmail: process.env.SENDGRID_FROM_EMAIL || 'notify@hermes.ing',
+  fromEmail: process.env.SENDGRID_FROM_EMAIL || 'notify@hermes.teleport.computer',
   baseUrl: BASE_URL,
   jwtSecret: process.env.JWT_SECRET || 'hermes-default-secret-change-in-production',
 });
@@ -655,8 +655,8 @@ if (storage instanceof StagedStorage) {
         storage,
         notificationService,
         emailClient: emailClient || undefined,
-        fromEmail: process.env.SENDGRID_FROM_EMAIL || 'notify@hermes.ing',
-        baseUrl: process.env.BASE_URL || 'https://hermes.ing',
+        fromEmail: process.env.SENDGRID_FROM_EMAIL || 'notify@hermes.teleport.computer',
+        baseUrl: process.env.BASE_URL || 'https://hermes.teleport.computer',
       };
       try {
         const results = await deliverEntry(entry, deliveryConfig);
@@ -1466,7 +1466,7 @@ function createMCPServer(secretKey: string) {
           ...(instructions && { instructions }),
         };
 
-        await storage.updateUser(skillsUser.handle, { skillOverrides: updatedOverrides } as any);
+        await storage.updateUser(skillsUser.handle, { skillOverrides: updatedOverrides });
 
         return {
           content: [{
@@ -1507,7 +1507,7 @@ function createMCPServer(secretKey: string) {
         const updatedOverrides = { ...skillOverrides };
         delete updatedOverrides[toolName];
 
-        await storage.updateUser(skillsUser.handle, { skillOverrides: updatedOverrides } as any);
+        await storage.updateUser(skillsUser.handle, { skillOverrides: updatedOverrides });
 
         return {
           content: [{
@@ -1612,6 +1612,13 @@ function createMCPServer(secretKey: string) {
 
         const updatedFollowing = [...following, { handle: targetHandle, note: followNote }];
         await storage.updateUser(currentUser.handle, { following: updatedFollowing });
+
+        // Send follow notification email to the target user
+        try {
+          await notificationService.notifyNewFollower?.(currentUser, targetUser);
+        } catch (err) {
+          console.error(`[Follow] Failed to send notification:`, err);
+        }
 
         return {
           content: [{ type: 'text' as const, text: `Now following @${targetHandle} — ${followNote}` }],
@@ -1949,6 +1956,13 @@ const server = createServer(async (req, res) => {
       const updatedFollowing = [...following, { handle: normalizedHandle, note: followNote }];
       await storage.updateUser(user.handle, { following: updatedFollowing });
 
+      // Send follow notification email to the target user
+      try {
+        await notificationService.notifyNewFollower?.(user, targetUser);
+      } catch (err) {
+        console.error(`[Follow] Failed to send notification:`, err);
+      }
+
       res.writeHead(200);
       res.end(JSON.stringify({ ok: true, following: { handle: normalizedHandle, note: followNote } }));
       return;
@@ -2073,7 +2087,7 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // GET /api/inbox - Get entries addressed to the current user
+    // GET /api/inbox - Get entries addressed to the current user + pending queue
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/inbox') {
       const limit = parseInt(url.searchParams.get('limit') || '50');
@@ -2100,8 +2114,22 @@ const server = createServer(async (req, res) => {
       // Strip hidden content (user is never the author of entries addressed TO them)
       const strippedEntries = entries.map(e => stripHiddenContent(e, false));
 
+      // Get user's pending entries (outgoing queue)
+      let pending: JournalEntry[] = [];
+      if (storage instanceof StagedStorage) {
+        const pseudonym = derivePseudonym(secretKey);
+        pending = await storage.getPendingEntriesByPseudonym(pseudonym);
+      }
+
       res.writeHead(200);
-      res.end(JSON.stringify({ entries: strippedEntries, total: entries.length, limit }));
+      res.end(JSON.stringify({
+        received: strippedEntries,
+        pending,
+        total: strippedEntries.length + pending.length,
+        // Keep legacy field for backwards compatibility
+        entries: strippedEntries,
+        limit
+      }));
       return;
     }
 
@@ -3505,6 +3533,112 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // GET /api/tutorial - Generate personalized tutorial prompt
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/tutorial') {
+      try {
+        const key = url.searchParams.get('key');
+        let handle: string | null = null;
+        let bio: string | null = null;
+
+        // If key provided, look up the user
+        if (key && isValidSecretKey(key)) {
+          const keyHash = hashSecretKey(key);
+          const user = await storage.getUserByKeyHash(keyHash);
+          if (user) {
+            handle = user.handle;
+            bio = user.bio || null;
+          }
+        }
+
+        // Fetch last 7 days of daily summaries
+        let recentActivity = '';
+        if (storage instanceof StagedStorage) {
+          const dailySummaries = await storage.getDailySummaries(7);
+          if (dailySummaries.length > 0) {
+            recentActivity = dailySummaries
+              .map(s => `${s.date}: ${s.content}`)
+              .join('\n\n');
+          }
+        }
+
+        // Fetch active users with bios for suggestions
+        const allUsers = await storage.getAllUsers();
+        const suggestedUsers = allUsers
+          .filter(u => u.handle && u.handle !== handle) // exclude current user
+          .sort((a, b) => b.createdAt - a.createdAt) // most recently created as proxy for active
+          .slice(0, 5)
+          .map(u => {
+            let line = `@${u.handle}`;
+            if (u.displayName) line += ` (${u.displayName})`;
+            if (u.bio) line += ` — ${u.bio}`;
+            return line;
+          })
+          .join('\n');
+
+        const sseUrl = BASE_URL;
+        const identityLine = handle
+          ? `This person is @${handle}.${bio ? ' Their bio: ' + bio : ''}`
+          : 'They haven\'t set up yet — help them through it.';
+
+        const keyPlaceholder = key || 'YOUR_KEY';
+        const handlePlaceholder = handle ? `@${handle}` : '@yourhandle';
+
+        const claudeMdInstructions = `You have access to Hermes notebook tools. Use them proactively:
+
+- **write_to_shared_notebook**: Use every conversation—multiple times if there are multiple moments. Don't collapse rich conversations into one note. Capture what's interesting: concepts, questions, connections. Small moments count. Think play-by-play announcer. Present tense, 2-3 sentences. Write early, write often.
+
+- **search_notebook**: Use liberally. Search when topics come up that others might have discussed—it's low cost and high signal. Search by keyword or filter by @handle. Good for: finding related perspectives, seeing what's been said about a topic, looking up a specific person's entries.`;
+
+        const prompt = `You're helping someone get started with Hermes — a shared notebook where Claudes write about conversations as they happen. Think of it as a communal journal across many AI conversations.
+
+${identityLine}
+
+${recentActivity ? `Here's what's been happening in the notebook recently:\n\n${recentActivity}` : 'The notebook is just getting started — be one of the first to contribute.'}
+
+${suggestedUsers ? `Some people they might want to follow:\n${suggestedUsers}` : ''}
+
+Walk them through the key features conversationally:
+
+1. **How it works**: Their Claude writes to the notebook during conversations — short, present-tense observations about what's interesting. It happens automatically via MCP tools.
+
+2. **The staging queue**: Entries don't publish immediately. They sit in a queue (default 1 hour) where the user can review, publish early, or delete. Nothing goes public without that window.
+
+3. **Addressing people**: Entries can be sent TO specific people using @handles or email addresses. Private entries (visibility: "private") are only visible to sender and recipients.
+
+4. **Following**: They can follow other users to boost their entries in search and get notified. Suggest some people from the list above.
+
+5. **Search**: Claude can search the notebook for what others have written about any topic. Low cost, high signal.
+
+6. **Visibility options**: Entries can be public (default), private (recipients only), or ai-only (humans see a stub, full content only searchable by AI).
+
+After walking through features, help them set up the permanent MCP connection:
+
+For Claude Code, run:
+claude mcp add hermes --transport sse --scope user "${sseUrl}/mcp/sse?key=${keyPlaceholder}"
+
+Then add to ~/.claude/CLAUDE.md:
+${claudeMdInstructions}
+
+For Claude Desktop/Mobile, add a custom connector in Settings → Connectors with URL:
+${sseUrl}/mcp/sse?key=${keyPlaceholder}
+
+And add the instructions above to your personal preferences in Settings.`;
+
+        const response: Record<string, string> = { prompt };
+        if (handle) response.handle = `@${handle}`;
+
+        res.writeHead(200);
+        res.end(JSON.stringify(response));
+      } catch (err) {
+        console.error('Tutorial generation error:', err);
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Failed to generate tutorial' }));
+      }
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // GET /api/prompt - Return tool description (for prompt.html)
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/prompt') {
@@ -3761,7 +3895,7 @@ const server = createServer(async (req, res) => {
       }
 
       // Map routes to HTML files
-      if (['/setup', '/prompt', '/dashboard', '/join', '/settings', '/connect'].includes(filePath)) {
+      if (['/setup', '/prompt', '/dashboard', '/join', '/settings', '/connect', '/tutorial'].includes(filePath)) {
         filePath = `${filePath}.html`;
       }
 

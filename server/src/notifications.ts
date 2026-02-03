@@ -11,16 +11,30 @@ import sgMail from '@sendgrid/mail';
 import Anthropic from '@anthropic-ai/sdk';
 
 // Simple email client interface
-interface EmailClient {
-  send(params: { from: string; to: string; subject: string; html: string }): Promise<void>;
+export interface EmailClient {
+  send(params: {
+    from: string;
+    to: string;
+    subject: string;
+    html: string;
+    cc?: string;
+    replyTo?: string;
+  }): Promise<void>;
 }
 
 // Create SendGrid email client
 export function createSendGridClient(apiKey: string): EmailClient {
   sgMail.setApiKey(apiKey);
   return {
-    async send({ from, to, subject, html }) {
-      await sgMail.send({ from, to, subject, html });
+    async send({ from, to, subject, html, cc, replyTo }) {
+      await sgMail.send({
+        from,
+        to,
+        subject,
+        html,
+        ...(cc ? { cc } : {}),
+        ...(replyTo ? { replyTo } : {}),
+      });
     }
   };
 }
@@ -46,7 +60,8 @@ function canSendEmailTo(handle: string): boolean {
 export interface NotificationService {
   sendDailyDigests(): Promise<{ sent: number; failed: number }>;
   sendVerificationEmail(handle: string, email: string): Promise<boolean>;
-  notifyAddressedEntry?(entry: JournalEntry, recipient: User): Promise<void>;
+  notifyAddressedEntry?(entry: JournalEntry, recipient: User, author?: User): Promise<void>;
+  notifyNewFollower?(follower: User, followed: User): Promise<void>;
 }
 
 interface NotificationConfig {
@@ -116,20 +131,17 @@ What stands out to you? Any connections or threads worth exploring?`;
 <head>
   <meta charset="utf-8">
   <style>
-    body { font-family: Georgia, serif; line-height: 1.6; color: #1a1a1a; max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { color: #7c5cbf; font-size: 18px; font-weight: bold; margin-bottom: 20px; }
+    body { font-family: Georgia, serif; line-height: 1.7; color: #1a1a1a; max-width: 560px; margin: 0 auto; padding: 40px 20px; }
     .digest { font-size: 16px; margin-bottom: 30px; }
-    .section-label { font-size: 12px; color: #6b6b6b; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
-    .related { margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; }
-    .related-entry { background: #f9f9f9; padding: 12px; border-radius: 6px; margin-bottom: 10px; font-size: 14px; }
-    .author { color: #7c5cbf; font-weight: 500; }
-    .footer { font-size: 12px; color: #999; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; }
+    .related-entry { background: #f9f7ff; padding: 14px 16px; border-radius: 6px; margin-bottom: 10px; font-size: 15px; }
+    .author { color: #7c5cbf; font-weight: 600; }
+    a.btn { display: inline-block; background: #7c5cbf; color: white; padding: 10px 22px; text-decoration: none; border-radius: 6px; font-family: Georgia, serif; }
+    .footer { font-size: 13px; color: #999; margin-top: 40px; }
     .footer a { color: #999; }
-    .btn { display: inline-block; background: #7c5cbf; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; }
   </style>
 </head>
 <body>
-  <div class="header">Your Hermes Daily Digest</div>
+  <p>Hey @${user.handle},</p>
 
   <div class="digest">
     ${digestContent}
@@ -137,11 +149,11 @@ What stands out to you? Any connections or threads worth exploring?`;
 
   ${relatedHtml}
 
-  <a href="${claudeUrl}" class="btn">Discuss with Claude</a>
+  <p><a href="${claudeUrl}" class="btn">Discuss with Claude</a></p>
 
   <div class="footer">
-    <p>Your daily digest from Hermes.</p>
-    <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=digest">Unsubscribe from daily digest</a>
+    &mdash;<br>
+    hermes.teleport.computer &middot; <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=digest">unsubscribe</a>
   </div>
 </body>
 </html>
@@ -165,26 +177,23 @@ What stands out to you? Any connections or threads worth exploring?`;
 <head>
   <meta charset="utf-8">
   <style>
-    body { font-family: Georgia, serif; line-height: 1.6; color: #1a1a1a; max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { color: #7c5cbf; font-size: 18px; font-weight: bold; margin-bottom: 20px; }
-    .message { margin-bottom: 30px; }
-    .btn { display: inline-block; background: #7c5cbf; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500; }
-    .footer { font-size: 12px; color: #999; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; }
+    body { font-family: Georgia, serif; line-height: 1.7; color: #1a1a1a; max-width: 560px; margin: 0 auto; padding: 40px 20px; }
+    a.btn { display: inline-block; background: #7c5cbf; color: white; padding: 10px 22px; text-decoration: none; border-radius: 6px; font-family: Georgia, serif; }
+    .footer { font-size: 13px; color: #999; margin-top: 40px; }
   </style>
 </head>
 <body>
-  <div class="header">Verify your email for Hermes</div>
+  <p>Hey @${handle},</p>
 
-  <div class="message">
-    <p>Hi @${handle},</p>
-    <p>Click the button below to verify your email address and start receiving notifications from Hermes.</p>
-    <p>This link will expire in 24 hours.</p>
-  </div>
+  <p>Click below to verify your email. This lets you receive messages from other people on Hermes.</p>
 
-  <a href="${baseUrl}/api/verify-email?token=${verificationToken}" class="btn">Verify Email</a>
+  <p><a href="${baseUrl}/api/verify-email?token=${verificationToken}" class="btn">Verify email</a></p>
+
+  <p style="font-size: 14px; color: #666;">This link expires in 24 hours.</p>
 
   <div class="footer">
-    <p>If you didn't request this, you can safely ignore this email.</p>
+    &mdash;<br>
+    hermes.teleport.computer
   </div>
 </body>
 </html>
@@ -370,7 +379,7 @@ Focus primarily on surfacing what others are exploring—their ideas, questions,
           await emailClient.send({
             from: `Hermes <${fromEmail}>`,
             to: user.email!,
-            subject: 'Your Hermes Daily Digest',
+            subject: `What's happening on Hermes`,
             html: renderDigestEmail(user, digestContent, relatedEntries, unsubscribeToken),
           });
 
@@ -427,7 +436,7 @@ Focus primarily on surfacing what others are exploring—their ideas, questions,
     /**
      * Notify a user when they're addressed in an entry
      */
-    async notifyAddressedEntry(entry: JournalEntry, recipient: User): Promise<void> {
+    async notifyAddressedEntry(entry: JournalEntry, recipient: User, author?: User): Promise<void> {
       console.log(`[Notify] Entry addressed to @${recipient.handle} by @${entry.handle || entry.pseudonym}`);
 
       // Don't notify if user doesn't have email or hasn't verified
@@ -454,22 +463,68 @@ Focus primarily on surfacing what others are exploring—their ideas, questions,
       }
 
       try {
-        const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
+        const authorName = entry.handle ? `@${entry.handle}` : entry.pseudonym;
         const unsubscribeToken = generateUnsubscribeToken(recipient.handle, 'comments');
-        const contentPreview = entry.content.length > 200
-          ? entry.content.slice(0, 200) + '...'
-          : entry.content;
+
+        // CC the author if they have a verified email
+        const authorCc = author?.email && author?.emailVerified ? author.email : undefined;
+        const authorReplyTo = authorCc; // Let recipient reply directly to the author
 
         await emailClient.send({
           from: `Hermes <${fromEmail}>`,
           to: recipient.email,
-          subject: `${author} sent you a message on Hermes`,
-          html: renderAddressedEntryEmail(entry, author, recipient, unsubscribeToken),
+          subject: `${authorName} wrote you something`,
+          html: renderAddressedEntryEmail(entry, authorName, recipient, unsubscribeToken),
+          cc: authorCc,
+          replyTo: authorReplyTo,
         });
 
-        console.log(`[Notify] Addressed entry notification sent to @${recipient.handle}`);
+        console.log(`[Notify] Addressed entry notification sent to @${recipient.handle}${authorCc ? ` (cc: ${authorCc})` : ''}`);
       } catch (err) {
         console.error(`[Notify] Failed to send to @${recipient.handle}:`, err);
+      }
+    },
+
+    /**
+     * Notify a user when someone follows them
+     */
+    async notifyNewFollower(follower: User, followed: User): Promise<void> {
+      console.log(`[Notify] @${follower.handle} followed @${followed.handle}`);
+
+      if (!followed.email || !followed.emailVerified) {
+        console.log(`[Notify] Skipping follow notification: @${followed.handle} has no verified email`);
+        return;
+      }
+
+      // Use comments pref for follow notifications too
+      if (followed.emailPrefs && !followed.emailPrefs.comments) {
+        console.log(`[Notify] Skipping: @${followed.handle} disabled notifications`);
+        return;
+      }
+
+      if (!canSendEmailTo(followed.handle)) {
+        console.log(`[Notify] Rate limited for @${followed.handle}`);
+        return;
+      }
+
+      if (!emailClient) {
+        console.warn('[Notify] No email client configured');
+        return;
+      }
+
+      try {
+        const unsubscribeToken = generateUnsubscribeToken(followed.handle, 'comments');
+
+        await emailClient.send({
+          from: `Hermes <${fromEmail}>`,
+          to: followed.email,
+          subject: `@${follower.handle} started following you`,
+          html: renderFollowEmail(follower, followed, unsubscribeToken),
+        });
+
+        console.log(`[Notify] Follow notification sent to @${followed.handle}`);
+      } catch (err) {
+        console.error(`[Notify] Failed to send follow notification to @${followed.handle}:`, err);
       }
     },
   };
@@ -487,8 +542,47 @@ Focus primarily on surfacing what others are exploring—their ideas, questions,
       ? entry.content.slice(0, 500) + '...'
       : entry.content;
 
-    const visibilityNote = entry.visibility === 'private'
-      ? 'This is a private message.'
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Georgia, serif; line-height: 1.7; color: #1a1a1a; max-width: 560px; margin: 0 auto; padding: 40px 20px; }
+    .quote { border-left: 3px solid #7c5cbf; padding: 12px 16px; margin: 20px 0; background: #f9f7ff; font-size: 16px; }
+    a.btn { display: inline-block; background: #7c5cbf; color: white; padding: 10px 22px; text-decoration: none; border-radius: 6px; font-family: Georgia, serif; }
+    .footer { font-size: 13px; color: #999; margin-top: 40px; }
+    .footer a { color: #999; }
+  </style>
+</head>
+<body>
+  <p>Hey,</p>
+
+  <p>${author} wrote this for you on Hermes:</p>
+
+  <div class="quote">${contentPreview}</div>
+
+  <p><a href="${baseUrl}/e/${entry.id}" class="btn">View on Hermes</a></p>
+
+  <div class="footer">
+    &mdash;<br>
+    hermes.teleport.computer &middot; <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=comments">unsubscribe</a>
+  </div>
+</body>
+</html>
+    `.trim();
+  }
+
+  /**
+   * Render follow notification email HTML
+   */
+  function renderFollowEmail(
+    follower: User,
+    followed: User,
+    unsubscribeToken: string
+  ): string {
+    const bioHtml = follower.bio
+      ? `<p style="color: #555; font-style: italic;">Their bio: "${follower.bio}"</p>`
       : '';
 
     return `
@@ -497,30 +591,26 @@ Focus primarily on surfacing what others are exploring—their ideas, questions,
 <head>
   <meta charset="utf-8">
   <style>
-    body { font-family: Georgia, serif; line-height: 1.6; color: #1a1a1a; max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { color: #6b6b6b; font-size: 14px; margin-bottom: 20px; }
-    .content { background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-    .author { font-weight: bold; color: #7c5cbf; margin-bottom: 10px; }
-    .visibility { font-size: 12px; color: #999; margin-bottom: 10px; }
-    .footer { font-size: 12px; color: #999; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; }
+    body { font-family: Georgia, serif; line-height: 1.7; color: #1a1a1a; max-width: 560px; margin: 0 auto; padding: 40px 20px; }
+    a.btn { display: inline-block; background: #7c5cbf; color: white; padding: 10px 22px; text-decoration: none; border-radius: 6px; font-family: Georgia, serif; }
+    .footer { font-size: 13px; color: #999; margin-top: 40px; }
     .footer a { color: #999; }
-    .btn { display: inline-block; background: #7c5cbf; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-top: 10px; }
   </style>
 </head>
 <body>
-  <div class="header">${author} sent you a message on Hermes</div>
+  <p>Hey @${followed.handle},</p>
 
-  <div class="content">
-    ${visibilityNote ? `<div class="visibility">${visibilityNote}</div>` : ''}
-    <div class="author">${author} wrote:</div>
-    <p>${contentPreview}</p>
-  </div>
+  <p>@${follower.handle} just started following you on Hermes.</p>
 
-  <a href="${baseUrl}/e/${entry.id}" class="btn">View on Hermes</a>
+  ${bioHtml}
+
+  <p>You can check out their profile or write them something.</p>
+
+  <p><a href="${baseUrl}/@${follower.handle}" class="btn">View @${follower.handle}'s profile</a></p>
 
   <div class="footer">
-    <p>You're receiving this because ${author} addressed you in a Hermes entry.</p>
-    <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=comments">Unsubscribe from notifications</a>
+    &mdash;<br>
+    hermes.teleport.computer &middot; <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=comments">unsubscribe</a>
   </div>
 </body>
 </html>

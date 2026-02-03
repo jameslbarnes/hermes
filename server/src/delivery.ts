@@ -9,7 +9,7 @@
  */
 
 import type { Storage, JournalEntry, User } from './storage.js';
-import type { NotificationService } from './notifications.js';
+import type { NotificationService, EmailClient } from './notifications.js';
 
 // ═══════════════════════════════════════════════════════════════
 // DESTINATION TYPES
@@ -262,9 +262,7 @@ export interface DeliveryResult {
 export interface DeliveryConfig {
   storage: Storage;
   notificationService: NotificationService;
-  emailClient?: {
-    send(params: { from: string; to: string; subject: string; html: string }): Promise<void>;
-  };
+  emailClient?: EmailClient;
   fromEmail: string;
   baseUrl: string;
 }
@@ -287,6 +285,9 @@ export async function deliverEntry(
   const { storage, notificationService, emailClient, fromEmail, baseUrl } = config;
   const results: DeliveryResult[] = [];
 
+  // Look up the author for CC purposes
+  const authorUser = entry.handle ? await storage.getUser(entry.handle) : null;
+
   // Resolve destinations
   const destinations = await resolveDestinations(entry.to, storage);
   const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
@@ -299,7 +300,7 @@ export async function deliverEntry(
       if (dest.type === 'handle') {
         // Notify user via in-app notification (and email if configured)
         if (dest.user) {
-          await notificationService.notifyAddressedEntry?.(entry, dest.user);
+          await notificationService.notifyAddressedEntry?.(entry, dest.user, authorUser || undefined);
           results.push({ destination: destString, type: 'handle', success: true });
         } else {
           results.push({ destination: destString, type: 'handle', success: false, error: 'User not found' });
@@ -309,15 +310,20 @@ export async function deliverEntry(
         if (emailClient) {
           // If email resolves to a user, notify them too
           if (dest.user) {
-            await notificationService.notifyAddressedEntry?.(entry, dest.user);
+            await notificationService.notifyAddressedEntry?.(entry, dest.user, authorUser || undefined);
           }
+
+          // CC the author if they have a verified email
+          const authorCc = authorUser?.email && authorUser?.emailVerified ? authorUser.email : undefined;
 
           // Send direct email
           await emailClient.send({
             from: `Hermes <${fromEmail}>`,
             to: dest.email,
-            subject: `${author} sent you a message on Hermes`,
+            subject: `${author} wrote you something`,
             html: renderAddressedEntryEmail(entry, author, baseUrl),
+            cc: authorCc,
+            replyTo: authorCc,
           });
           results.push({ destination: destString, type: 'email', success: true });
         } else {
@@ -359,26 +365,24 @@ function renderAddressedEntryEmail(entry: JournalEntry, author: string, baseUrl:
 <head>
   <meta charset="utf-8">
   <style>
-    body { font-family: Georgia, serif; line-height: 1.6; color: #1a1a1a; max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { color: #6b6b6b; font-size: 14px; margin-bottom: 20px; }
-    .content { background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-    .author { font-weight: bold; color: #7c5cbf; margin-bottom: 10px; }
-    .footer { font-size: 12px; color: #999; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; }
-    .btn { display: inline-block; background: #7c5cbf; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-top: 10px; }
+    body { font-family: Georgia, serif; line-height: 1.7; color: #1a1a1a; max-width: 560px; margin: 0 auto; padding: 40px 20px; }
+    .quote { border-left: 3px solid #7c5cbf; padding: 12px 16px; margin: 20px 0; background: #f9f7ff; font-size: 16px; }
+    a.btn { display: inline-block; background: #7c5cbf; color: white; padding: 10px 22px; text-decoration: none; border-radius: 6px; font-family: Georgia, serif; }
+    .footer { font-size: 13px; color: #999; margin-top: 40px; }
   </style>
 </head>
 <body>
-  <div class="header">You received a message on Hermes</div>
+  <p>Hey,</p>
 
-  <div class="content">
-    <div class="author">${author} wrote:</div>
-    <p>${contentPreview}</p>
-  </div>
+  <p>${author} wrote this for you on Hermes:</p>
 
-  <a href="${baseUrl}/e/${entry.id}" class="btn">View on Hermes</a>
+  <div class="quote">${contentPreview}</div>
+
+  <p><a href="${baseUrl}/e/${entry.id}" class="btn">View on Hermes</a></p>
 
   <div class="footer">
-    <p>You're receiving this because someone addressed you in a Hermes entry.</p>
+    &mdash;<br>
+    hermes.teleport.computer
   </div>
 </body>
 </html>

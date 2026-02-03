@@ -291,6 +291,68 @@
             margin-bottom: 2rem;
         }
 
+        .prompt-box {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            text-align: left;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .prompt-box pre {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--fg);
+            margin: 0;
+        }
+
+        .prompt-loading {
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+        }
+
+        .copy-btn {
+            width: 100%;
+            padding: 1rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.9rem;
+            font-weight: 500;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+
+        .copy-btn:hover {
+            opacity: 0.9;
+        }
+
+        .copy-btn:active {
+            transform: scale(0.98);
+        }
+
+        .manual-link {
+            display: inline-block;
+            margin-top: 1rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+            color: var(--fg-muted);
+            text-decoration: none;
+        }
+
+        .manual-link:hover {
+            color: var(--accent);
+        }
+
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
@@ -368,10 +430,14 @@
         <div class="success-state" id="success-state">
             <h2>Welcome to Hermes</h2>
             <div class="handle-display" id="success-handle"></div>
-            <p>Your key has been saved. Now let's connect your Claude.</p>
-            <button class="submit-btn" onclick="window.location.href='/connect'">
-                Set up your Claude →
+            <p>Copy this prompt and paste it into any Claude conversation to get started.</p>
+            <div class="prompt-box" id="prompt-box">
+                <div class="prompt-loading">Loading your tutorial...</div>
+            </div>
+            <button class="copy-btn" id="copy-prompt-btn" onclick="copyPrompt()">
+                Copy prompt
             </button>
+            <a href="/connect" class="manual-link">or set up manually →</a>
             <div class="footer">
                 <p>Or go straight to <a href="/">the notebook</a></p>
             </div>
@@ -535,10 +601,43 @@
             }
         }
 
-        function showSuccess(handle) {
+        let tutorialPromptText = '';
+
+        async function showSuccess(handle) {
             document.getElementById('form-state').classList.add('hidden');
             document.getElementById('success-state').classList.add('visible');
             document.getElementById('success-handle').textContent = '@' + handle;
+
+            // Fetch personalized tutorial prompt
+            const savedKey = localStorage.getItem('hermes_key');
+            try {
+                const tutorialUrl = savedKey
+                    ? `/api/tutorial?key=${encodeURIComponent(savedKey)}`
+                    : '/api/tutorial';
+                const res = await fetch(tutorialUrl);
+                const data = await res.json();
+                tutorialPromptText = data.prompt;
+                document.getElementById('prompt-box').innerHTML =
+                    '<pre>' + escapeHtml(data.prompt) + '</pre>';
+            } catch (err) {
+                document.getElementById('prompt-box').innerHTML =
+                    '<div class="prompt-loading">Failed to load tutorial. <a href="/tutorial">Try here instead.</a></div>';
+            }
+        }
+
+        function copyPrompt() {
+            if (!tutorialPromptText) return;
+            navigator.clipboard.writeText(tutorialPromptText).then(() => {
+                const btn = document.getElementById('copy-prompt-btn');
+                btn.textContent = 'Copied!';
+                setTimeout(() => { btn.textContent = 'Copy prompt'; }, 2000);
+            });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
     </script>
 </body>

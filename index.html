@@ -419,6 +419,17 @@
             letter-spacing: 0.05em;
         }
 
+        .only-you-badge {
+            display: inline-block;
+            padding: 0.15rem 0.4rem;
+            background: rgba(100, 100, 100, 0.1);
+            color: var(--fg-muted);
+            border-radius: 3px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            letter-spacing: 0.03em;
+        }
+
         .filter-header {
             padding-bottom: 1.5rem;
             margin-bottom: 1rem;
@@ -443,6 +454,131 @@
 
         .filter-header a:hover {
             color: var(--fg);
+        }
+
+        /* Inbox styles */
+        .inbox-section {
+            margin-bottom: 1.5rem;
+        }
+
+        .inbox-section-label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--fg-muted);
+            padding-bottom: 0.5rem;
+            margin-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .inbox-item {
+            display: block;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
+            transition: background 0.15s;
+        }
+
+        .inbox-item:hover {
+            background: rgba(124, 92, 191, 0.04);
+        }
+
+        .inbox-item-row {
+            display: flex;
+            align-items: baseline;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+        }
+
+        .inbox-item-from {
+            font-weight: 500;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .inbox-item-preview {
+            color: var(--fg-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .inbox-item-time {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            color: var(--fg-muted);
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .inbox-item-meta {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            margin-top: 0.25rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+        }
+
+        .inbox-badge-queued {
+            display: inline-block;
+            padding: 0.1rem 0.35rem;
+            background: rgba(210, 167, 52, 0.15);
+            color: #b8860b;
+            border-radius: 3px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .inbox-badge-received {
+            display: inline-block;
+            padding: 0.1rem 0.35rem;
+            background: rgba(124, 92, 191, 0.1);
+            color: var(--accent);
+            border-radius: 3px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .inbox-item-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.3rem;
+        }
+
+        .inbox-item-actions button {
+            background: none;
+            border: none;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            cursor: pointer;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+
+        .inbox-item-actions button:hover {
+            opacity: 1;
+        }
+
+        .inbox-item-actions .publish-btn {
+            color: var(--accent);
+        }
+
+        .inbox-item-actions .delete-btn {
+            color: var(--fg-muted);
+        }
+
+        .inbox-item-actions .delete-btn:hover {
+            color: #e53935;
         }
 
         /* Empty state */
@@ -1599,7 +1735,8 @@
             }
 
             const data = await res.json();
-            const entries = data.entries || [];
+            const pending = data.pending || [];
+            const received = data.received || data.entries || [];
 
             const header = `
                 <div class="filter-header">
@@ -1608,12 +1745,99 @@
                 </div>
             `;
 
-            if (entries.length === 0) {
+            if (pending.length === 0 && received.length === 0) {
                 feed.innerHTML = header + `<div class="empty-state">No messages yet. When someone addresses you in an entry, it will appear here.</div>`;
                 return;
             }
 
-            feed.innerHTML = header + entries.map(entry => renderEntry(entry)).join('');
+            let html = header;
+
+            // Queued section (pending outgoing entries)
+            if (pending.length > 0) {
+                html += `<div class="inbox-section">`;
+                html += `<div class="inbox-section-label">Queued (${pending.length})</div>`;
+                html += pending.map(entry => renderInboxItem(entry, 'queued')).join('');
+                html += `</div>`;
+            }
+
+            // Received section
+            if (received.length > 0) {
+                html += `<div class="inbox-section">`;
+                if (pending.length > 0) {
+                    html += `<div class="inbox-section-label">Received (${received.length})</div>`;
+                }
+                html += received.map(entry => renderInboxItem(entry, 'received')).join('');
+                html += `</div>`;
+            }
+
+            feed.innerHTML = html;
+        }
+
+        function renderInboxItem(entry, type) {
+            const isQueued = type === 'queued';
+
+            // Author / recipient display
+            const author = entry.handle ? `@${entry.handle}` : (entry.pseudonym || 'anonymous');
+            const recipients = (entry.to && entry.to.length > 0) ? entry.to.join(', ') : '';
+
+            // From line: for queued show "you → @recipient", for received show "@author"
+            let fromHtml;
+            if (isQueued) {
+                fromHtml = recipients ? `you → ${escapeHtml(recipients)}` : 'you';
+            } else {
+                fromHtml = escapeHtml(author);
+            }
+
+            // Content preview (first ~80 chars)
+            const isAiOnly = entry.humanVisible === false;
+            let preview;
+            if (isAiOnly) {
+                const topics = entry.topicHints && entry.topicHints.length > 0
+                    ? entry.topicHints.join(', ') : 'various topics';
+                preview = `posted about: ${topics}`;
+            } else {
+                const raw = (entry.content || '').replace(/\n/g, ' ');
+                preview = raw.length > 80 ? raw.slice(0, 80) + '...' : raw;
+            }
+
+            // Time display
+            const timeStr = formatTime(entry.timestamp);
+
+            // Badge
+            let badgeHtml;
+            if (isQueued && entry.publishAt) {
+                badgeHtml = `<span class="inbox-badge-queued">publishes ${formatTimeUntil(entry.publishAt)}</span> <span class="only-you-badge">&#x1f512; only visible to you</span>`;
+            } else if (!isQueued) {
+                badgeHtml = `<span class="inbox-badge-received">received</span>`;
+            } else {
+                badgeHtml = '';
+            }
+
+            // Actions for queued items
+            let actionsHtml = '';
+            if (isQueued) {
+                const isPending = entry.publishAt && entry.publishAt > Date.now();
+                actionsHtml = `<div class="inbox-item-actions">`;
+                if (isPending) {
+                    actionsHtml += `<button class="publish-btn" onclick="event.preventDefault(); event.stopPropagation(); publishEntry('${entry.id}')">publish now</button>`;
+                }
+                actionsHtml += `<button class="delete-btn" onclick="event.preventDefault(); event.stopPropagation(); deleteEntry('${entry.id}')">delete</button>`;
+                actionsHtml += `</div>`;
+            }
+
+            return `
+                <a href="/e/${entry.id}" class="inbox-item">
+                    <div class="inbox-item-row">
+                        <span class="inbox-item-from">${fromHtml}</span>
+                        <span class="inbox-item-preview">${escapeHtml(preview)}</span>
+                        <span class="inbox-item-time">${timeStr}</span>
+                    </div>
+                    <div class="inbox-item-meta">
+                        ${badgeHtml}
+                    </div>
+                    ${actionsHtml}
+                </a>
+            `;
         }
 
         async function loadFilteredFeed(feed) {
@@ -1732,6 +1956,7 @@
                 meta.push(`<span class="token-count">~${estimateTokens(entry.content)} tokens</span>`);
             }
             if (isPending) meta.push(`<span class="pending-badge">publishes ${formatTimeUntil(entry.publishAt)}</span>`);
+            if (isPending) meta.push(`<span class="only-you-badge">&#x1f512; only visible to you</span>`);
             // Check ownership by pseudonym OR handle
             const isOwner = (userPseudonym && entry.pseudonym === userPseudonym) || (userHandle && entry.handle === userHandle);
             if (isOwner && isPending) meta.push(`<button class="publish-btn" onclick="publishEntry('${entry.id}')">publish now</button>`);
@@ -1801,6 +2026,7 @@
             let meta = [];
             meta.push(formatTime(conversation.timestamp));
             if (isPending) meta.push(`<span class="pending-badge">publishes ${formatTimeUntil(conversation.publishAt)}</span>`);
+            if (isPending) meta.push(`<span class="only-you-badge">&#x1f512; only visible to you</span>`);
             // AI-only conversations don't have expand option - show discuss link instead
             if (!isAiOnly) {
                 meta.push(`<span class="view-full" onclick="toggleConversation('${conversation.id}')">expand</span>`);

@@ -457,6 +457,105 @@ describe('MemoryStorage', () => {
       });
     });
   });
+
+  describe('Following', () => {
+    const testUser = {
+      handle: 'follower',
+      secretKeyHash: hashSecretKey('follower-key-1234567890'),
+      displayName: 'Follower',
+    };
+
+    const targetUser = {
+      handle: 'target',
+      secretKeyHash: hashSecretKey('target-key-1234567890'),
+      displayName: 'Target User',
+      bio: 'Builds things',
+    };
+
+    beforeEach(async () => {
+      await storage.createUser(testUser);
+      await storage.createUser(targetUser);
+    });
+
+    it('should default to undefined following', async () => {
+      const user = await storage.getUser('follower');
+      expect(user!.following).toBeUndefined();
+    });
+
+    it('should store following list with notes', async () => {
+      const following = [
+        { handle: 'target', note: 'Builds things, recent TEE work' },
+      ];
+      await storage.updateUser('follower', { following });
+
+      const user = await storage.getUser('follower');
+      expect(user!.following).toHaveLength(1);
+      expect(user!.following![0].handle).toBe('target');
+      expect(user!.following![0].note).toBe('Builds things, recent TEE work');
+    });
+
+    it('should add a follow to existing list', async () => {
+      const thirdUser = {
+        handle: 'alice',
+        secretKeyHash: hashSecretKey('alice-key-1234567890'),
+      };
+      await storage.createUser(thirdUser);
+
+      // Start with one follow
+      await storage.updateUser('follower', {
+        following: [{ handle: 'target', note: 'First follow' }],
+      });
+
+      // Add second follow
+      const user = await storage.getUser('follower');
+      const updated = [...(user!.following || []), { handle: 'alice', note: 'Second follow' }];
+      await storage.updateUser('follower', { following: updated });
+
+      const result = await storage.getUser('follower');
+      expect(result!.following).toHaveLength(2);
+      expect(result!.following![0].handle).toBe('target');
+      expect(result!.following![1].handle).toBe('alice');
+    });
+
+    it('should remove a follow from the list', async () => {
+      await storage.updateUser('follower', {
+        following: [
+          { handle: 'target', note: 'First' },
+          { handle: 'other', note: 'Second' },
+        ],
+      });
+
+      const user = await storage.getUser('follower');
+      const filtered = user!.following!.filter(f => f.handle !== 'target');
+      await storage.updateUser('follower', { following: filtered });
+
+      const result = await storage.getUser('follower');
+      expect(result!.following).toHaveLength(1);
+      expect(result!.following![0].handle).toBe('other');
+    });
+
+    it('should update note for existing follow', async () => {
+      await storage.updateUser('follower', {
+        following: [{ handle: 'target', note: 'Original note' }],
+      });
+
+      const user = await storage.getUser('follower');
+      const updated = user!.following!.map(f =>
+        f.handle === 'target' ? { ...f, note: 'Updated note' } : f
+      );
+      await storage.updateUser('follower', { following: updated });
+
+      const result = await storage.getUser('follower');
+      expect(result!.following![0].note).toBe('Updated note');
+    });
+
+    it('should handle empty following list', async () => {
+      await storage.updateUser('follower', { following: [] });
+
+      const user = await storage.getUser('follower');
+      expect(user!.following).toEqual([]);
+    });
+  });
 });
 
 // StagedStorage tests - require Firestore

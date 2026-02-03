@@ -609,6 +609,36 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
+    id: 'system_hermes_follow',
+    name: 'hermes_follow',
+    description: 'Manage your following list. Follow users to boost their entries in search and get context for addressing.',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['follow', 'unfollow', 'list', 'update_note'],
+          description: 'What action to take.',
+        },
+        handle: {
+          type: 'string',
+          description: 'For follow/unfollow/update_note: the handle to act on (without @).',
+        },
+        note: {
+          type: 'string',
+          description: 'For follow/update_note: a living note about who this person is and why they matter. Claude should auto-generate this from their bio + recent entries.',
+        },
+      },
+      required: ['action'],
+    },
+    public: true,
+    author: 'hermes',
+    cloneCount: 0,
+    createdAt: 0,
+  },
+  {
     id: 'system_hermes_skills_browse',
     name: 'hermes_skills_browse',
     description: 'Browse the public skills gallery. Find skills created by others that you can clone and customize.',
@@ -1237,6 +1267,15 @@ function createMCPServer(secretKey: string) {
       }
     }
 
+    // Add following roster so Claude knows who to address
+    const following = user?.following || [];
+    if (following.length > 0) {
+      const rosterText = following
+        .map(f => `• @${f.handle} — ${f.note}`)
+        .join('\n');
+      dynamicDescription += `\n\nPEOPLE YOU FOLLOW:\n${rosterText}\n\nWhen writing entries relevant to someone here, consider using "to" to address them.`;
+    }
+
     // Add triggered skills to the description so Claude watches for them
     const triggeredSkills = (user?.skills || []).filter(s => s.triggerCondition);
     if (triggeredSkills.length > 0) {
@@ -1561,25 +1600,34 @@ function createMCPServer(secretKey: string) {
         conversationResults = searchConvos.filter(c => c.pseudonym !== pseudonym);
       }
 
-      // Combine and sort by timestamp
-      const combined: Array<{ type: 'entry' | 'conversation'; id: string; timestamp: number; text: string }> = [
+      // Get followed handles for boosting
+      const searchUser = await storage.getUserByKeyHash(keyHash);
+      const followedHandles = new Set((searchUser?.following || []).map(f => f.handle));
+
+      // Combine and sort by timestamp, boosting followed users
+      const combined: Array<{ type: 'entry' | 'conversation'; id: string; timestamp: number; text: string; followed: boolean }> = [
         ...entryResults.map(e => ({
           type: 'entry' as const,
           id: e.id,
           timestamp: e.timestamp,
           text: `[${new Date(e.timestamp).toISOString().split('T')[0]}] ${e.handle ? '@' + e.handle : e.pseudonym}: ${e.content}`,
+          followed: !!(e.handle && followedHandles.has(e.handle)),
         })),
         ...conversationResults.map(c => ({
           type: 'conversation' as const,
           id: c.id,
           timestamp: c.timestamp,
           text: `[${new Date(c.timestamp).toISOString().split('T')[0]}] ${c.pseudonym} posted a conversation with ${formatPlatformName(c.platform)}: ${c.summary}`,
+          followed: false,
         })),
       ];
 
-      // Sort by timestamp (newest first) and limit
+      // Sort: followed users first, then by timestamp (newest first)
       const results = combined
-        .sort((a, b) => b.timestamp - a.timestamp)
+        .sort((a, b) => {
+          if (a.followed !== b.followed) return a.followed ? -1 : 1;
+          return b.timestamp - a.timestamp;
+        })
         .slice(0, limit);
 
       if (results.length === 0) {
@@ -2429,6 +2477,141 @@ function createMCPServer(secretKey: string) {
       }
     }
 
+    // Handle follow tool
+    if (name === 'hermes_follow') {
+      const action = (args as { action?: string })?.action;
+      const targetHandle = (args as { handle?: string })?.handle?.replace(/^@/, '').toLowerCase();
+      const note = (args as { note?: string })?.note;
+
+      if (!action || !['follow', 'unfollow', 'list', 'update_note'].includes(action)) {
+        return {
+          content: [{ type: 'text' as const, text: 'Action must be one of: follow, unfollow, list, update_note.' }],
+          isError: true,
+        };
+      }
+
+      const currentUser = await storage.getUserByKeyHash(keyHash);
+      if (!currentUser?.handle) {
+        return {
+          content: [{ type: 'text' as const, text: 'You need a handle to use following. Claim one in settings.' }],
+          isError: true,
+        };
+      }
+
+      const following = currentUser.following || [];
+
+      if (action === 'list') {
+        if (following.length === 0) {
+          return {
+            content: [{ type: 'text' as const, text: 'You are not following anyone yet. Use action: "follow" with a handle to start.' }],
+          };
+        }
+
+        const roster = following.map(f => `• @${f.handle} — ${f.note}`).join('\n');
+        return {
+          content: [{ type: 'text' as const, text: `Following ${following.length} users:\n\n${roster}` }],
+        };
+      }
+
+      if (!targetHandle) {
+        return {
+          content: [{ type: 'text' as const, text: 'Handle is required for follow/unfollow/update_note.' }],
+          isError: true,
+        };
+      }
+
+      if (targetHandle === currentUser.handle) {
+        return {
+          content: [{ type: 'text' as const, text: 'You cannot follow yourself.' }],
+          isError: true,
+        };
+      }
+
+      if (action === 'follow') {
+        // Check if already following
+        if (following.some(f => f.handle === targetHandle)) {
+          return {
+            content: [{ type: 'text' as const, text: `Already following @${targetHandle}. Use action: "update_note" to change the note.` }],
+          };
+        }
+
+        // Validate handle exists
+        const targetUser = await storage.getUser(targetHandle);
+        if (!targetUser) {
+          return {
+            content: [{ type: 'text' as const, text: `User @${targetHandle} not found.` }],
+            isError: true,
+          };
+        }
+
+        // Auto-generate note if not provided
+        let followNote = note || '';
+        if (!followNote) {
+          const parts: string[] = [];
+          if (targetUser.bio) parts.push(targetUser.bio);
+
+          // Get recent entries for context
+          const recentEntries = await storage.getEntriesByHandle(targetHandle, 5);
+          if (recentEntries.length > 0) {
+            const topics = recentEntries
+              .map(e => e.content.slice(0, 80))
+              .join('; ');
+            parts.push(`Recent: ${topics}`);
+          }
+
+          followNote = parts.length > 0 ? parts.join('. ') : `Followed on ${new Date().toISOString().split('T')[0]}`;
+        }
+
+        const updatedFollowing = [...following, { handle: targetHandle, note: followNote }];
+        await storage.updateUser(currentUser.handle, { following: updatedFollowing });
+
+        return {
+          content: [{ type: 'text' as const, text: `Now following @${targetHandle} — ${followNote}` }],
+        };
+      }
+
+      if (action === 'unfollow') {
+        if (!following.some(f => f.handle === targetHandle)) {
+          return {
+            content: [{ type: 'text' as const, text: `Not following @${targetHandle}.` }],
+          };
+        }
+
+        const updatedFollowing = following.filter(f => f.handle !== targetHandle);
+        await storage.updateUser(currentUser.handle, { following: updatedFollowing });
+
+        return {
+          content: [{ type: 'text' as const, text: `Unfollowed @${targetHandle}.` }],
+        };
+      }
+
+      if (action === 'update_note') {
+        if (!note) {
+          return {
+            content: [{ type: 'text' as const, text: 'Note is required for update_note action.' }],
+            isError: true,
+          };
+        }
+
+        const existingFollow = following.find(f => f.handle === targetHandle);
+        if (!existingFollow) {
+          return {
+            content: [{ type: 'text' as const, text: `Not following @${targetHandle}. Follow them first.` }],
+            isError: true,
+          };
+        }
+
+        const updatedFollowing = following.map(f =>
+          f.handle === targetHandle ? { ...f, note } : f
+        );
+        await storage.updateUser(currentUser.handle, { following: updatedFollowing });
+
+        return {
+          content: [{ type: 'text' as const, text: `Updated note for @${targetHandle}: ${note}` }],
+        };
+      }
+    }
+
     // Handle browse_public_skills tool
     if (name === 'hermes_skills_browse') {
       const query = (args as { query?: string })?.query?.toLowerCase();
@@ -2772,20 +2955,25 @@ const server = createServer(async (req, res) => {
       const limit = parseInt(url.searchParams.get('limit') || '50');
       const offset = parseInt(url.searchParams.get('offset') || '0');
       const secretKey = url.searchParams.get('key');
+      const followingOnly = url.searchParams.get('following') === 'true';
 
-      let entries = await storage.getEntries(limit, offset);
+      let entries = await storage.getEntries(followingOnly ? limit * 3 : limit, offset);
       const total = await storage.getEntryCount();
 
       // If user has a key, include their pending entries and identify user for visibility
       let authorPseudonym: string | null = null;
       let authorHandle: string | null = null;
       let authorEmail: string | undefined;
+      let followedHandleSet: Set<string> | null = null;
       if (secretKey && isValidSecretKey(secretKey)) {
         authorPseudonym = derivePseudonym(secretKey);
         const keyHash = hashSecretKey(secretKey);
         const user = await storage.getUserByKeyHash(keyHash);
         authorHandle = user?.handle || null;
         authorEmail = user?.email;
+        if (followingOnly && user?.following) {
+          followedHandleSet = new Set(user.following.map(f => f.handle));
+        }
         if (storage instanceof StagedStorage) {
           const pendingEntries = await storage.getPendingEntriesByPseudonym(authorPseudonym);
           // Merge pending entries and sort by timestamp
@@ -2794,10 +2982,17 @@ const server = createServer(async (req, res) => {
       }
 
       // Filter and process entries based on visibility
-      const visibleEntries = entries.filter(e => {
+      let visibleEntries = entries.filter(e => {
         const isAuthor = e.pseudonym === authorPseudonym || e.handle === authorHandle;
         return canViewEntry(e, authorHandle || undefined, authorEmail, isAuthor);
       });
+
+      // Filter to followed users only if requested
+      if (followingOnly && followedHandleSet) {
+        visibleEntries = visibleEntries
+          .filter(e => e.handle && followedHandleSet!.has(e.handle))
+          .slice(0, limit);
+      }
 
       // Strip content from hidden entries (except for author's own entries)
       const strippedEntries = visibleEntries.map(e => {
@@ -2807,6 +3002,235 @@ const server = createServer(async (req, res) => {
 
       res.writeHead(200);
       res.end(JSON.stringify({ entries: strippedEntries, total, limit, offset }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/following - List followed users with notes + profile info
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/following') {
+      const secretKey = url.searchParams.get('key');
+
+      if (!secretKey || !isValidSecretKey(secretKey)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(secretKey);
+      const user = await storage.getUserByKeyHash(keyHash);
+
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      const following = user.following || [];
+
+      // Enrich with profile info
+      const enriched = await Promise.all(following.map(async (f) => {
+        const targetUser = await storage.getUser(f.handle);
+        return {
+          handle: f.handle,
+          note: f.note,
+          displayName: targetUser?.displayName || null,
+          bio: targetUser?.bio || null,
+        };
+      }));
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ following: enriched }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/follow - Follow a user
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/follow') {
+      const body = await new Promise<string>((resolve) => {
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => resolve(data));
+      });
+
+      let parsed: { secret_key?: string; handle?: string; note?: string };
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        return;
+      }
+
+      const { secret_key, handle: targetHandle, note } = parsed;
+
+      if (!secret_key || !isValidSecretKey(secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      if (!targetHandle) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Handle is required' }));
+        return;
+      }
+
+      const normalizedHandle = targetHandle.replace(/^@/, '').toLowerCase();
+      const keyHash = hashSecretKey(secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      if (normalizedHandle === user.handle) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Cannot follow yourself' }));
+        return;
+      }
+
+      const following = user.following || [];
+      if (following.some(f => f.handle === normalizedHandle)) {
+        res.writeHead(409);
+        res.end(JSON.stringify({ error: 'Already following this user' }));
+        return;
+      }
+
+      const targetUser = await storage.getUser(normalizedHandle);
+      if (!targetUser) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'User not found' }));
+        return;
+      }
+
+      const followNote = note || targetUser.bio || `Followed on ${new Date().toISOString().split('T')[0]}`;
+      const updatedFollowing = [...following, { handle: normalizedHandle, note: followNote }];
+      await storage.updateUser(user.handle, { following: updatedFollowing });
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, following: { handle: normalizedHandle, note: followNote } }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/unfollow - Unfollow a user
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/unfollow') {
+      const body = await new Promise<string>((resolve) => {
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => resolve(data));
+      });
+
+      let parsed: { secret_key?: string; handle?: string };
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        return;
+      }
+
+      const { secret_key, handle: targetHandle } = parsed;
+
+      if (!secret_key || !isValidSecretKey(secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      if (!targetHandle) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Handle is required' }));
+        return;
+      }
+
+      const normalizedHandle = targetHandle.replace(/^@/, '').toLowerCase();
+      const keyHash = hashSecretKey(secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      const following = user.following || [];
+      if (!following.some(f => f.handle === normalizedHandle)) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Not following this user' }));
+        return;
+      }
+
+      const updatedFollowing = following.filter(f => f.handle !== normalizedHandle);
+      await storage.updateUser(user.handle, { following: updatedFollowing });
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/following/note - Update note for a followed user
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/following/note') {
+      const body = await new Promise<string>((resolve) => {
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => resolve(data));
+      });
+
+      let parsed: { secret_key?: string; handle?: string; note?: string };
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        return;
+      }
+
+      const { secret_key, handle: targetHandle, note: newNote } = parsed;
+
+      if (!secret_key || !isValidSecretKey(secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      if (!targetHandle || !newNote) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Handle and note are required' }));
+        return;
+      }
+
+      const normalizedHandle = targetHandle.replace(/^@/, '').toLowerCase();
+      const keyHash = hashSecretKey(secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      const following = user.following || [];
+      if (!following.some(f => f.handle === normalizedHandle)) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Not following this user' }));
+        return;
+      }
+
+      const updatedFollowing = following.map(f =>
+        f.handle === normalizedHandle ? { ...f, note: newNote } : f
+      );
+      await storage.updateUser(user.handle, { following: updatedFollowing });
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true }));
       return;
     }
 

@@ -881,6 +881,15 @@ Use search_notebook with handle "${handle}" to explore their recent entries. The
             return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
         }
 
+        // Generate "Follow with Claude" URL
+        function generateFollowUrl(handle) {
+            const prompt = `I want to follow @${handle} on Hermes.
+
+Look up their profile and recent entries using hermes_search with handle "${handle}", then use hermes_follow with action "follow" and handle "${handle}". Write a note that captures who they are and what they write about.`;
+
+            return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
+        }
+
         // Generate avatar HTML from handle
         function renderAvatar(handle, large = false, small = false) {
             let hash = 0;
@@ -1343,6 +1352,11 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
 
                 // Ask Claude about this user
                 profileHtml += `<a href="${generateAskAboutUrl(profile.handle)}" target="_blank" class="ask-btn">Ask Claude about @${escapeHtml(profile.handle)}</a>`;
+
+                // Follow with Claude (only for other people's profiles)
+                if (!isOwnProfile) {
+                    profileHtml += `<a href="${generateFollowUrl(profile.handle)}" target="_blank" class="ask-btn" style="margin-left: 0.5rem;">Follow with Claude →</a>`;
+                }
 
                 // Add edit button if this is the user's own profile
                 if (isOwnProfile) {

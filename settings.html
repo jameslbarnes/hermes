@@ -552,6 +552,25 @@
                 </div>
             </div>
 
+            <!-- Following section -->
+            <div class="section">
+                <div class="section-header">
+                    <span class="section-title">Following</span>
+                    <span class="save-indicator" id="following-saved">Saved</span>
+                </div>
+                <div class="field">
+                    <label>Follow someone</label>
+                    <p class="hint">Follow users to boost their entries in search and get context for addressing. Following goes through Claude so it can generate a note about who they are.</p>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <input type="text" id="follow-handle" class="text-input mono" placeholder="handle (without @)" style="flex: 1;">
+                        <a id="follow-link" href="#" target="_blank" class="btn" style="text-decoration: none; text-align: center;" onclick="return openFollowInClaude()">follow with claude →</a>
+                    </div>
+                </div>
+                <div id="following-list" style="margin-top: 1rem;">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
             <!-- Privacy section -->
             <div class="section">
                 <div class="section-header">
@@ -668,6 +687,9 @@
 
             // Load profile data
             loadProfile(data.handle);
+
+            // Load following list
+            loadFollowing();
 
             // Load email
             document.getElementById('email').value = data.email || '';
@@ -980,6 +1002,98 @@ Generated: ${new Date().toISOString()}
                 showToast(e.message);
                 btn.textContent = 'Claim';
                 btn.disabled = false;
+            }
+        }
+
+        // ─── Following ────────────────────────────────────────────
+
+        async function loadFollowing() {
+            if (!currentKey) return;
+            try {
+                const res = await fetch(`/api/following?key=${encodeURIComponent(currentKey)}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                renderFollowing(data.following || []);
+            } catch (e) {
+                console.error('Failed to load following:', e);
+            }
+        }
+
+        function renderFollowing(list) {
+            const container = document.getElementById('following-list');
+            if (list.length === 0) {
+                container.innerHTML = '<p style="color: var(--fg-muted); font-size: 0.9rem; font-style: italic;">Not following anyone yet.</p>';
+                return;
+            }
+            container.innerHTML = list.map(f => `
+                <div style="display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.75rem 0; border-top: 1px solid var(--border);">
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem; font-weight: 500;">
+                            <a href="/u/${f.handle}" style="color: var(--accent); text-decoration: none;">@${f.handle}</a>
+                            ${f.displayName ? `<span style="color: var(--fg-muted); font-weight: 400;"> · ${f.displayName}</span>` : ''}
+                        </div>
+                        <div style="margin-top: 0.35rem;">
+                            <textarea class="text-input" style="width: 100%; font-size: 0.85rem; resize: vertical; min-height: 2.5rem; padding: 0.4rem 0.6rem;"
+                                onchange="updateFollowNote('${f.handle}', this.value)">${f.note}</textarea>
+                        </div>
+                    </div>
+                    <button class="btn" style="font-size: 0.75rem; padding: 0.3rem 0.6rem; color: var(--error); border-color: var(--error);"
+                        onclick="unfollowUser('${f.handle}')">Unfollow</button>
+                </div>
+            `).join('');
+        }
+
+        function openFollowInClaude() {
+            const input = document.getElementById('follow-handle');
+            const handle = input.value.trim().replace(/^@/, '').toLowerCase();
+            if (!handle) {
+                showToast('Enter a handle first');
+                return false;
+            }
+
+            const prompt = `I want to follow @${handle} on Hermes.
+
+Look up their profile and recent entries using hermes_search with handle "${handle}", then use hermes_follow with action "follow" and handle "${handle}". Write a note that captures who they are and what they write about.`;
+
+            window.open(`https://claude.ai/new?q=${encodeURIComponent(prompt)}`, '_blank');
+            input.value = '';
+            return false;
+        }
+
+        async function unfollowUser(handle) {
+            try {
+                const res = await fetch('/api/unfollow', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ secret_key: currentKey, handle })
+                });
+
+                if (!res.ok) {
+                    const data = await res.json();
+                    showToast(data.error || 'Failed to unfollow');
+                    return;
+                }
+
+                flashSaved('following-saved');
+                await loadFollowing();
+            } catch (e) {
+                showToast('Failed to unfollow');
+            }
+        }
+
+        async function updateFollowNote(handle, note) {
+            try {
+                const res = await fetch('/api/following/note', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ secret_key: currentKey, handle, note })
+                });
+
+                if (res.ok) {
+                    flashSaved('following-saved');
+                }
+            } catch (e) {
+                showToast('Failed to update note');
             }
         }
 

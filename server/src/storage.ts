@@ -145,6 +145,7 @@ export interface User {
   customPrompt?: string;     // Additional ambient prompt instructions
   skillOverrides?: Record<string, Partial<Skill>>;  // Overrides for system skills (key = skill name)
   disabledSkills?: string[]; // Names of system skills to hide from tool list
+  following?: { handle: string; note: string }[];  // Users this person follows, with living notes
 }
 
 export interface Comment {

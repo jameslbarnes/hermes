@@ -22,13 +22,17 @@ export interface JournalEntry {
   publishAt?: number; // When entry becomes public. If undefined or in past, entry is published.
   isReflection?: boolean; // True for longform markdown reflections
   model?: string; // Model that wrote the entry (e.g., "claude-sonnet-4", "opus-4")
-  humanVisible?: boolean; // Show full content in human feed? Default true. False = AI-only (stub shown)
+  humanVisible?: boolean; // @deprecated Use aiOnly. Show full content in human feed? Default true. False = AI-only (stub shown)
+  aiOnly?: boolean; // Humans see stub, full content only via AI search. Orthogonal to access control.
   topicHints?: string[]; // For AI-only entries: topics covered (e.g., ["auth", "TEE"])
 
   // Unified addressing system
-  to?: string[];             // Destinations: @handles, emails, webhook URLs
+  to?: string[];             // Destinations: @handles, #channels, emails, webhook URLs. Empty = public.
   inReplyTo?: string;        // Parent entry ID (for threading)
-  visibility?: EntryVisibility; // Access control: public (default), private (recipients only), ai-only (stub in feed)
+  visibility?: EntryVisibility; // @deprecated Derived from `to`. Kept for backward compat.
+
+  // Channel
+  channel?: string;          // @deprecated Use #channel in `to`. Channel ID if posted via a channel skill.
 }
 
 export interface Summary {
@@ -75,16 +79,42 @@ export interface EmailVerification {
   expiresAt: number;         // Token expiration timestamp
 }
 
-// System skill definition (used for MCP tool definitions)
+// Parameter definition for user-created skills
+export interface SkillParameter {
+  name: string;
+  type: 'string' | 'boolean' | 'number' | 'array';
+  description: string;
+  required?: boolean;
+  enum?: string[];
+  default?: any;
+}
+
+// Skill definition (used for MCP tool definitions)
 export interface Skill {
   id: string;                // Unique ID for the skill
   name: string;              // Tool name (e.g., "hermes_write_entry")
   description: string;       // What this skill does
   instructions: string;      // Detailed instructions for Claude to follow
-  inputSchema?: Record<string, any>;  // Full MCP inputSchema
+  inputSchema?: Record<string, any>;  // For builtin skills (complex schemas)
+  parameters?: SkillParameter[];      // For user skills (generates inputSchema)
 
   // Handler type
   handlerType?: 'builtin' | 'instructions';  // 'builtin' = server handles, 'instructions' = Claude follows instructions
+
+  // Trigger
+  triggerCondition?: string;           // e.g., "when user mentions Project X"
+
+  // Addressing (for user skills)
+  to?: string[];                       // @handles, #channels, emails, webhook URLs
+  visibility?: EntryVisibility;        // @deprecated Use aiOnly + to. Default for entries created by this skill.
+  humanVisible?: boolean;              // @deprecated Use aiOnly. Override user default.
+  aiOnly?: boolean;                    // Entries from this skill are AI-only
+
+  // Gallery
+  public?: boolean;                    // Visible in gallery
+  author?: string;                     // Creator handle
+  clonedFrom?: string;                 // "author/skillId"
+  cloneCount?: number;
 
   // Metadata
   createdAt: number;
@@ -104,9 +134,50 @@ export interface User {
   stagingDelayMs?: number;   // How long entries stay in staging (default 1 hour)
   createdAt: number;
   legacyPseudonym?: string;  // "Quiet Feather#79c30b" if migrated from old system
-  defaultHumanVisible?: boolean; // Default visibility for new entries (default true)
+  defaultHumanVisible?: boolean; // @deprecated Use defaultAiOnly. Default visibility for new entries (default true)
+  defaultAiOnly?: boolean; // Default: false. When true, new entries are AI-only (humans see stub).
   skillOverrides?: Record<string, Partial<Skill>>;  // Overrides for system tools (key = tool name)
+  skills?: Skill[];                                  // User-created skills
   following?: { handle: string; note: string }[];  // Users this person follows, with living notes
+  onboardedAt?: number;  // Set on first meaningful action (write, follow, clone)
+  lastDailyQuestionAt?: number;  // UTC timestamp of last daily question trigger, resets by calendar day
+}
+
+// ─────────────────────────────────────────────────────────────
+// Channel types
+// ─────────────────────────────────────────────────────────────
+
+export interface ChannelSubscriber {
+  handle: string;
+  role: 'admin' | 'member';
+  joinedAt: number;
+}
+
+export interface Channel {
+  id: string;                    // slug, e.g. "flashbots"
+  name: string;                  // display name, e.g. "Flashbots"
+  description?: string;          // what this channel is about
+  visibility: 'public' | 'private';  // @deprecated Use joinRule. Kept for backward compat.
+  joinRule?: 'open' | 'invite';  // Who can join: 'open' = anyone, 'invite' = need token. Replaces visibility.
+  createdBy: string;             // handle of creator
+  createdAt: number;
+  skills: Skill[];               // channel-scoped skills
+  subscribers: ChannelSubscriber[];
+}
+
+export interface ChannelInvite {
+  token: string;                 // random token for invite links
+  channelId: string;
+  createdBy: string;
+  createdAt: number;
+  expiresAt?: number;
+  maxUses?: number;
+  uses: number;
+}
+
+/** Validate channel ID: lowercase alphanumeric + hyphens, 2-30 chars, no leading/trailing hyphens */
+export function isValidChannelId(id: string): boolean {
+  return /^[a-z0-9][a-z0-9-]{0,28}[a-z0-9]$/.test(id);
 }
 
 // Common stop words to exclude from search
@@ -232,6 +303,46 @@ export interface Storage {
 
   /** Delete a conversation by ID */
   deleteConversation(id: string): Promise<void>;
+
+  // ─────────────────────────────────────────────────────────────
+  // Channel methods
+  // ─────────────────────────────────────────────────────────────
+
+  /** Create a new channel */
+  createChannel(channel: Channel): Promise<Channel>;
+
+  /** Get a channel by ID */
+  getChannel(id: string): Promise<Channel | null>;
+
+  /** Update a channel */
+  updateChannel(id: string, updates: Partial<Omit<Channel, 'id' | 'createdBy' | 'createdAt'>>): Promise<Channel | null>;
+
+  /** Delete a channel */
+  deleteChannel(id: string): Promise<void>;
+
+  /** List channels, optionally filtered by subscriber handle, visibility, or joinRule */
+  listChannels(opts?: { handle?: string; visibility?: string; joinRule?: string }): Promise<Channel[]>;
+
+  /** Add a subscriber to a channel */
+  addSubscriber(channelId: string, handle: string, role: 'admin' | 'member'): Promise<void>;
+
+  /** Remove a subscriber from a channel */
+  removeSubscriber(channelId: string, handle: string): Promise<void>;
+
+  /** Get all channels a user is subscribed to */
+  getSubscribedChannels(handle: string): Promise<Channel[]>;
+
+  /** Create an invite for a channel */
+  createInvite(invite: ChannelInvite): Promise<ChannelInvite>;
+
+  /** Get an invite by token */
+  getInvite(token: string): Promise<ChannelInvite | null>;
+
+  /** Use an invite (increment uses, return the channel) */
+  useInvite(token: string): Promise<Channel>;
+
+  /** Get entries for a channel */
+  getChannelEntries(channelId: string, limit?: number): Promise<JournalEntry[]>;
 
 }
 
@@ -447,6 +558,117 @@ export class MemoryStorage implements Storage {
     this.conversations = this.conversations.filter(c => c.id !== id);
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // Channel methods
+  // ─────────────────────────────────────────────────────────────
+
+  private channels: Map<string, Channel> = new Map();
+  private invites: Map<string, ChannelInvite> = new Map();
+
+  async createChannel(channel: Channel): Promise<Channel> {
+    if (this.channels.has(channel.id)) {
+      throw new Error(`Channel "${channel.id}" already exists.`);
+    }
+    this.channels.set(channel.id, { ...channel });
+    return channel;
+  }
+
+  async getChannel(id: string): Promise<Channel | null> {
+    return this.channels.get(id) || null;
+  }
+
+  async updateChannel(id: string, updates: Partial<Omit<Channel, 'id' | 'createdBy' | 'createdAt'>>): Promise<Channel | null> {
+    const channel = this.channels.get(id);
+    if (!channel) return null;
+    const updated = { ...channel, ...updates };
+    this.channels.set(id, updated);
+    return updated;
+  }
+
+  async deleteChannel(id: string): Promise<void> {
+    this.channels.delete(id);
+    // Also clean up invites for this channel
+    for (const [token, invite] of this.invites) {
+      if (invite.channelId === id) {
+        this.invites.delete(token);
+      }
+    }
+  }
+
+  async listChannels(opts?: { handle?: string; visibility?: string; joinRule?: string }): Promise<Channel[]> {
+    let channels = Array.from(this.channels.values());
+    if (opts?.handle) {
+      channels = channels.filter(c =>
+        c.subscribers.some(s => s.handle === opts.handle)
+      );
+    }
+    if (opts?.visibility) {
+      channels = channels.filter(c => c.visibility === opts.visibility);
+    }
+    if (opts?.joinRule) {
+      channels = channels.filter(c => {
+        // Map legacy visibility to joinRule for filtering
+        const effectiveJoinRule = c.joinRule || (c.visibility === 'private' ? 'invite' : 'open');
+        return effectiveJoinRule === opts.joinRule;
+      });
+    }
+    return channels;
+  }
+
+  async addSubscriber(channelId: string, handle: string, role: 'admin' | 'member'): Promise<void> {
+    const channel = this.channels.get(channelId);
+    if (!channel) throw new Error(`Channel "${channelId}" not found.`);
+    // Check if already subscribed
+    if (channel.subscribers.some(s => s.handle === handle)) {
+      return; // Already subscribed, no-op
+    }
+    channel.subscribers.push({ handle, role, joinedAt: Date.now() });
+  }
+
+  async removeSubscriber(channelId: string, handle: string): Promise<void> {
+    const channel = this.channels.get(channelId);
+    if (!channel) throw new Error(`Channel "${channelId}" not found.`);
+    channel.subscribers = channel.subscribers.filter(s => s.handle !== handle);
+  }
+
+  async getSubscribedChannels(handle: string): Promise<Channel[]> {
+    return Array.from(this.channels.values()).filter(c =>
+      c.subscribers.some(s => s.handle === handle)
+    );
+  }
+
+  async createInvite(invite: ChannelInvite): Promise<ChannelInvite> {
+    this.invites.set(invite.token, { ...invite });
+    return invite;
+  }
+
+  async getInvite(token: string): Promise<ChannelInvite | null> {
+    return this.invites.get(token) || null;
+  }
+
+  async useInvite(token: string): Promise<Channel> {
+    const invite = this.invites.get(token);
+    if (!invite) throw new Error('Invite not found.');
+    if (invite.expiresAt && Date.now() > invite.expiresAt) {
+      throw new Error('Invite has expired.');
+    }
+    if (invite.maxUses && invite.uses >= invite.maxUses) {
+      throw new Error('Invite has reached maximum uses.');
+    }
+    invite.uses++;
+    const channel = this.channels.get(invite.channelId);
+    if (!channel) throw new Error(`Channel "${invite.channelId}" not found.`);
+    return channel;
+  }
+
+  async getChannelEntries(channelId: string, limit = 50): Promise<JournalEntry[]> {
+    const channelDest = `#${channelId}`;
+    return this.entries
+      .filter(e => e.channel === channelId || (e.to && e.to.includes(channelDest)))
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
+  }
+
 }
 
 /**
@@ -525,6 +747,10 @@ export class FirestoreStorage implements Storage {
       docData.humanVisible = newEntry.humanVisible;
     }
 
+    if (newEntry.aiOnly !== undefined) {
+      docData.aiOnly = newEntry.aiOnly;
+    }
+
     if (newEntry.topicHints && newEntry.topicHints.length > 0) {
       docData.topicHints = newEntry.topicHints;
     }
@@ -540,6 +766,10 @@ export class FirestoreStorage implements Storage {
 
     if (newEntry.visibility) {
       docData.visibility = newEntry.visibility;
+    }
+
+    if (newEntry.channel) {
+      docData.channel = newEntry.channel;
     }
 
     await this.db.collection(this.collection).doc(id).set(docData);
@@ -1124,6 +1354,172 @@ export class FirestoreStorage implements Storage {
     await this.db.collection(this.conversationsCollection).doc(id).delete();
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // Channel methods
+  // ─────────────────────────────────────────────────────────────
+
+  private channelsCollection = 'channels';
+  private invitesCollection = 'channel_invites';
+
+  async createChannel(channel: Channel): Promise<Channel> {
+    const existing = await this.db.collection(this.channelsCollection).doc(channel.id).get();
+    if (existing.exists) {
+      throw new Error(`Channel "${channel.id}" already exists.`);
+    }
+    const channelData: Record<string, any> = {
+      name: channel.name,
+      description: channel.description || null,
+      visibility: channel.visibility,
+      createdBy: channel.createdBy,
+      createdAt: channel.createdAt,
+      skills: channel.skills,
+      subscribers: channel.subscribers,
+    };
+    if (channel.joinRule) {
+      channelData.joinRule = channel.joinRule;
+    }
+    await this.db.collection(this.channelsCollection).doc(channel.id).set(channelData);
+    return channel;
+  }
+
+  async getChannel(id: string): Promise<Channel | null> {
+    const doc = await this.db.collection(this.channelsCollection).doc(id).get();
+    if (!doc.exists) return null;
+    return { id: doc.id, ...doc.data() } as Channel;
+  }
+
+  async updateChannel(id: string, updates: Partial<Omit<Channel, 'id' | 'createdBy' | 'createdAt'>>): Promise<Channel | null> {
+    const ref = this.db.collection(this.channelsCollection).doc(id);
+    const doc = await ref.get();
+    if (!doc.exists) return null;
+    await ref.update(updates);
+    const updated = await ref.get();
+    return { id: updated.id, ...updated.data() } as Channel;
+  }
+
+  async deleteChannel(id: string): Promise<void> {
+    await this.db.collection(this.channelsCollection).doc(id).delete();
+    // Clean up invites for this channel
+    const invites = await this.db.collection(this.invitesCollection)
+      .where('channelId', '==', id).get();
+    const batch = this.db.batch();
+    invites.docs.forEach(doc => batch.delete(doc.ref));
+    if (!invites.empty) await batch.commit();
+  }
+
+  async listChannels(opts?: { handle?: string; visibility?: string; joinRule?: string }): Promise<Channel[]> {
+    let query: FirebaseFirestore.Query = this.db.collection(this.channelsCollection);
+    if (opts?.visibility) {
+      query = query.where('visibility', '==', opts.visibility);
+    }
+    if (opts?.joinRule) {
+      query = query.where('joinRule', '==', opts.joinRule);
+    }
+    const snapshot = await query.get();
+    let channels = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Channel));
+    if (opts?.handle) {
+      channels = channels.filter(c => c.subscribers.some(s => s.handle === opts.handle));
+    }
+    return channels;
+  }
+
+  async addSubscriber(channelId: string, handle: string, role: 'admin' | 'member'): Promise<void> {
+    const ref = this.db.collection(this.channelsCollection).doc(channelId);
+    const doc = await ref.get();
+    if (!doc.exists) throw new Error(`Channel "${channelId}" not found.`);
+    const channel = doc.data() as Omit<Channel, 'id'>;
+    if (channel.subscribers.some(s => s.handle === handle)) return;
+    channel.subscribers.push({ handle, role, joinedAt: Date.now() });
+    await ref.update({ subscribers: channel.subscribers });
+  }
+
+  async removeSubscriber(channelId: string, handle: string): Promise<void> {
+    const ref = this.db.collection(this.channelsCollection).doc(channelId);
+    const doc = await ref.get();
+    if (!doc.exists) throw new Error(`Channel "${channelId}" not found.`);
+    const channel = doc.data() as Omit<Channel, 'id'>;
+    channel.subscribers = channel.subscribers.filter(s => s.handle !== handle);
+    await ref.update({ subscribers: channel.subscribers });
+  }
+
+  async getSubscribedChannels(handle: string): Promise<Channel[]> {
+    // Firestore doesn't support querying array of objects by nested field well,
+    // so we get all channels and filter in memory
+    const snapshot = await this.db.collection(this.channelsCollection).get();
+    return snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() } as Channel))
+      .filter(c => c.subscribers.some(s => s.handle === handle));
+  }
+
+  async createInvite(invite: ChannelInvite): Promise<ChannelInvite> {
+    await this.db.collection(this.invitesCollection).doc(invite.token).set({
+      channelId: invite.channelId,
+      createdBy: invite.createdBy,
+      createdAt: invite.createdAt,
+      expiresAt: invite.expiresAt || null,
+      maxUses: invite.maxUses || null,
+      uses: invite.uses,
+    });
+    return invite;
+  }
+
+  async getInvite(token: string): Promise<ChannelInvite | null> {
+    const doc = await this.db.collection(this.invitesCollection).doc(token).get();
+    if (!doc.exists) return null;
+    return { token: doc.id, ...doc.data() } as ChannelInvite;
+  }
+
+  async useInvite(token: string): Promise<Channel> {
+    const inviteRef = this.db.collection(this.invitesCollection).doc(token);
+    const inviteDoc = await inviteRef.get();
+    if (!inviteDoc.exists) throw new Error('Invite not found.');
+    const invite = { token: inviteDoc.id, ...inviteDoc.data() } as ChannelInvite;
+    if (invite.expiresAt && Date.now() > invite.expiresAt) {
+      throw new Error('Invite has expired.');
+    }
+    if (invite.maxUses && invite.uses >= invite.maxUses) {
+      throw new Error('Invite has reached maximum uses.');
+    }
+    await inviteRef.update({ uses: invite.uses + 1 });
+    const channel = await this.getChannel(invite.channelId);
+    if (!channel) throw new Error(`Channel "${invite.channelId}" not found.`);
+    return channel;
+  }
+
+  async getChannelEntries(channelId: string, limit = 50): Promise<JournalEntry[]> {
+    // Query both legacy `channel` field and new `#channel` in `to` array
+    const channelDest = `#${channelId}`;
+
+    const [byChannel, byTo] = await Promise.all([
+      this.db
+        .collection(this.collection)
+        .where('channel', '==', channelId)
+        .orderBy('timestamp', 'desc')
+        .limit(limit)
+        .get(),
+      this.db
+        .collection(this.collection)
+        .where('to', 'array-contains', channelDest)
+        .orderBy('timestamp', 'desc')
+        .limit(limit)
+        .get(),
+    ]);
+
+    // Merge and dedup
+    const seen = new Set<string>();
+    const results: JournalEntry[] = [];
+    for (const doc of [...byChannel.docs, ...byTo.docs]) {
+      if (!seen.has(doc.id)) {
+        seen.add(doc.id);
+        results.push({ id: doc.id, ...doc.data() } as JournalEntry);
+      }
+    }
+
+    return results
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
+  }
+
 }
 
 /**
@@ -1558,6 +1954,69 @@ export class StagedStorage implements Storage {
    */
   isConversationPending(id: string): boolean {
     return this.pendingConversations.has(id);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Channel methods (delegated to FirestoreStorage)
+  // ─────────────────────────────────────────────────────────────
+
+  async createChannel(channel: Channel): Promise<Channel> {
+    return this.published.createChannel(channel);
+  }
+
+  async getChannel(id: string): Promise<Channel | null> {
+    return this.published.getChannel(id);
+  }
+
+  async updateChannel(id: string, updates: Partial<Omit<Channel, 'id' | 'createdBy' | 'createdAt'>>): Promise<Channel | null> {
+    return this.published.updateChannel(id, updates);
+  }
+
+  async deleteChannel(id: string): Promise<void> {
+    return this.published.deleteChannel(id);
+  }
+
+  async listChannels(opts?: { handle?: string; visibility?: string; joinRule?: string }): Promise<Channel[]> {
+    return this.published.listChannels(opts);
+  }
+
+  async addSubscriber(channelId: string, handle: string, role: 'admin' | 'member'): Promise<void> {
+    return this.published.addSubscriber(channelId, handle, role);
+  }
+
+  async removeSubscriber(channelId: string, handle: string): Promise<void> {
+    return this.published.removeSubscriber(channelId, handle);
+  }
+
+  async getSubscribedChannels(handle: string): Promise<Channel[]> {
+    return this.published.getSubscribedChannels(handle);
+  }
+
+  async createInvite(invite: ChannelInvite): Promise<ChannelInvite> {
+    return this.published.createInvite(invite);
+  }
+
+  async getInvite(token: string): Promise<ChannelInvite | null> {
+    return this.published.getInvite(token);
+  }
+
+  async useInvite(token: string): Promise<Channel> {
+    return this.published.useInvite(token);
+  }
+
+  async getChannelEntries(channelId: string, limit = 50): Promise<JournalEntry[]> {
+    // Include pending channel entries (match both legacy channel field and #channel in to)
+    const published = await this.published.getChannelEntries(channelId, limit);
+    const channelDest = `#${channelId}`;
+    const pendingEntries: JournalEntry[] = [];
+    for (const entry of this.pending.values()) {
+      if (entry.channel === channelId || (entry.to && entry.to.includes(channelDest))) {
+        pendingEntries.push(entry);
+      }
+    }
+    return [...pendingEntries, ...published]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
   }
 
 }

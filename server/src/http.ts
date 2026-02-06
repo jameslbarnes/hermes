@@ -21,10 +21,10 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { derivePseudonym, generateSecretKey, isValidSecretKey, hashSecretKey, isValidHandle, normalizeHandle } from './identity.js';
-import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary, type Conversation, type User, tokenize } from './storage.js';
+import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary, type Conversation, type User, type Skill, type SkillParameter, type Channel, type ChannelInvite, tokenize, isValidChannelId, generateEntryId } from './storage.js';
 import { scrapeConversation, detectPlatform, isValidShareUrl, ScrapeError } from './scraper.js';
 import { createNotificationService, createSendGridClient, verifyUnsubscribeToken, verifyEmailToken, type NotificationService } from './notifications.js';
-import { deliverEntry, getDefaultVisibility, canViewEntry, type DeliveryConfig } from './delivery.js';
+import { deliverEntry, getDefaultVisibility, canViewEntry, canView, normalizeEntry, isDefaultAiOnly, isEntryAiOnly, type DeliveryConfig } from './delivery.js';
 
 // Security: Check if a URL points to internal/private IP ranges
 function isInternalUrl(urlString: string): boolean {
@@ -70,7 +70,10 @@ function stripHiddenContent<T extends JournalEntry | Conversation>(
   item: T,
   isAuthor: boolean
 ): T {
-  if (item.humanVisible !== false || isAuthor) return item;
+  if (isAuthor) return item;
+  // Check aiOnly first (new model), fall back to humanVisible (legacy)
+  const hidden = 'aiOnly' in item ? (item as any).aiOnly === true : item.humanVisible === false;
+  if (!hidden) return item;
   return { ...item, content: '' };
 }
 
@@ -211,8 +214,6 @@ Note: Your own entries may appear in results. Results only include published ent
 
 // System skills - ALL built-in tools defined as skills
 // Tools are generated from this array at runtime
-import type { Skill } from './storage.js';
-
 export const SYSTEM_SKILLS: Skill[] = [
   {
     id: 'system_hermes_write_entry',
@@ -244,9 +245,13 @@ export const SYSTEM_SKILLS: Skill[] = [
           type: 'string',
           description: 'If you already wrote notes earlier in this conversation, what NEW details are you adding? Skip this field if this is your first note.',
         },
+        ai_only: {
+          type: 'boolean',
+          description: 'Override visibility for this entry. If omitted, uses the user\'s default setting. When true, humans see a stub; full content only via AI search.',
+        },
         human_visible: {
           type: 'boolean',
-          description: 'Override visibility for this entry. If omitted, uses the user\'s default setting. Only set this if the user explicitly asks for different visibility on this specific entry.',
+          description: 'Deprecated: use ai_only instead. Kept for backward compatibility.',
         },
         topic_hints: {
           type: 'array',
@@ -256,7 +261,7 @@ export const SYSTEM_SKILLS: Skill[] = [
         to: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Destinations to notify: @handles (e.g., "@alice"), emails (e.g., "bob@example.com"), or webhook URLs. Recipients will be notified when the entry publishes.',
+          description: 'Destinations: @handles (e.g., "@alice"), #channels (e.g., "#flashbots"), emails (e.g., "bob@example.com"), or webhook URLs. Empty = public. Non-empty = private to those destinations.',
         },
         in_reply_to: {
           type: 'string',
@@ -265,7 +270,7 @@ export const SYSTEM_SKILLS: Skill[] = [
         visibility: {
           type: 'string',
           enum: ['public', 'private', 'ai-only'],
-          description: 'Access control: "public" (visible in feed), "private" (recipients only), "ai-only" (stub shown to humans). Defaults: private if "to" is set without in_reply_to, otherwise public.',
+          description: 'Deprecated: access is now determined by `to` (empty = public, non-empty = private). Kept for backward compatibility.',
         },
       },
       required: ['sensitivity_check', 'client', 'entry'],
@@ -348,9 +353,13 @@ export const SYSTEM_SKILLS: Skill[] = [
           enum: ['get', 'update'],
           description: 'Whether to get current settings or update them.',
         },
+        defaultAiOnly: {
+          type: 'boolean',
+          description: 'For update action: when true, new entries are AI-only by default (humans see a stub). Default: false.',
+        },
         defaultHumanVisible: {
           type: 'boolean',
-          description: 'For update action: whether new entries show in human feed by default. When false, humans see only a stub.',
+          description: 'Deprecated: use defaultAiOnly instead. Kept for backward compatibility.',
         },
         stagingDelayMs: {
           type: 'number',
@@ -392,23 +401,111 @@ export const SYSTEM_SKILLS: Skill[] = [
       properties: {
         action: {
           type: 'string',
-          enum: ['list', 'edit', 'reset'],
-          description: 'list: show all tools with current state. edit: update a tool\'s description or instructions. reset: restore a tool to defaults.',
+          enum: ['list', 'edit', 'reset', 'create', 'get', 'update', 'delete'],
+          description: 'list: show all tools with current state. edit: update a system tool\'s description or instructions. reset: restore a system tool to defaults. create/get/update/delete: manage user-created skills.',
         },
         tool_name: {
           type: 'string',
-          description: 'For edit/reset: the tool name (e.g., "hermes_write_entry", "hermes_search").',
+          description: 'For edit/reset: the system tool name (e.g., "hermes_write_entry", "hermes_search").',
         },
         description: {
           type: 'string',
-          description: 'For edit: new description for the tool. This replaces the default description.',
+          description: 'For edit/create/update: description for the tool.',
         },
         instructions: {
           type: 'string',
-          description: 'For edit: additional instructions appended to the tool\'s description. Use this for behavioral guidance.',
+          description: 'For edit/create/update: instructions for the tool behavior.',
+        },
+        name: {
+          type: 'string',
+          description: 'For create: skill name (lowercase, [a-z0-9_], 1-30 chars). Must not start with "hermes".',
+        },
+        skill_id: {
+          type: 'string',
+          description: 'For get/update/delete: the skill ID or name.',
+        },
+        parameters: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              type: { type: 'string', enum: ['string', 'boolean', 'number', 'array'] },
+              description: { type: 'string' },
+              required: { type: 'boolean' },
+              enum: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['name', 'type', 'description'],
+          },
+          description: 'For create/update: skill parameters (max 10).',
+        },
+        trigger_condition: {
+          type: 'string',
+          description: 'For create/update: when should this skill auto-trigger (e.g., "when user discusses their week").',
+        },
+        to: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'For create/update: default destinations (@handles, emails, webhook URLs). Max 10.',
+        },
+        ai_only: {
+          type: 'boolean',
+          description: 'For create/update: entries from this skill are AI-only (humans see stub). Default: false.',
+        },
+        visibility: {
+          type: 'string',
+          enum: ['public', 'private', 'ai-only'],
+          description: 'Deprecated: use ai_only + to instead. Kept for backward compatibility.',
+        },
+        is_public: {
+          type: 'boolean',
+          description: 'For create/update: make this skill visible in the public gallery for others to clone.',
         },
       },
       required: ['action'],
+    },
+    createdAt: 0,
+  },
+  {
+    id: 'system_hermes_skills_browse',
+    name: 'hermes_skills_browse',
+    description: 'Browse the public skills gallery. Discover skills created by other users that you can clone and customize.',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query to filter skills by name or description.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of results (default 20).',
+        },
+      },
+    },
+    createdAt: 0,
+  },
+  {
+    id: 'system_hermes_skills_clone',
+    name: 'hermes_skills_clone',
+    description: 'Clone a skill from the public gallery into your own skill list. The cloned skill starts as private with no destinations — customize it after cloning.',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        skill_name: {
+          type: 'string',
+          description: 'Name of the skill to clone.',
+        },
+        author: {
+          type: 'string',
+          description: 'Handle of the skill author (without @).',
+        },
+      },
+      required: ['skill_name', 'author'],
     },
     createdAt: 0,
   },
@@ -437,6 +534,72 @@ export const SYSTEM_SKILLS: Skill[] = [
       },
       required: ['action'],
     },
+    createdAt: 0,
+  },
+  {
+    id: 'system_hermes_channels',
+    name: 'hermes_channels',
+    description: 'Manage channel memberships. Channels are shared containers with subscribers and attached skills.',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['list', 'join', 'leave', 'create', 'info', 'invite', 'invite_user', 'add_skill', 'update_skill', 'remove_skill'],
+          description: 'list: show your channels + public channels. join: subscribe. leave: unsubscribe. create: create a new channel. info: show channel details. invite: generate invite link (admin). invite_user: send invitation to a user (admin). add_skill: add a skill to a channel (admin). update_skill: update a skill (admin). remove_skill: remove a skill (admin).',
+        },
+        channel_id: {
+          type: 'string',
+          description: 'For all actions except list: the channel ID (e.g. "flashbots").',
+        },
+        handle: {
+          type: 'string',
+          description: 'For invite_user: the handle of the user to invite.',
+        },
+        name: {
+          type: 'string',
+          description: 'For create: display name for the channel. For add_skill: skill name (lowercase, hyphens ok).',
+        },
+        description: {
+          type: 'string',
+          description: 'For create: what this channel is about. For add_skill/update_skill: what this skill does.',
+        },
+        join_rule: {
+          type: 'string',
+          enum: ['open', 'invite'],
+          description: 'For create: who can join. "open" = anyone (default), "invite" = need an invite token.',
+        },
+        visibility: {
+          type: 'string',
+          enum: ['public', 'private'],
+          description: 'Deprecated: use join_rule instead. Kept for backward compatibility.',
+        },
+        invite_token: {
+          type: 'string',
+          description: 'For join: invite token for private channels.',
+        },
+        skill_name: {
+          type: 'string',
+          description: 'For update_skill/remove_skill: which skill to modify.',
+        },
+        instructions: {
+          type: 'string',
+          description: 'For add_skill/update_skill: detailed instructions for how Claude should use this skill.',
+        },
+      },
+      required: ['action'],
+    },
+    createdAt: 0,
+  },
+  {
+    id: 'system_hermes_daily_question',
+    name: 'hermes_daily_question',
+    description: 'Gather context for a personalized daily question. Call this proactively at the start of a conversation. Returns recent notebook activity so you can ask a thoughtful question about what the user has been working on. Available once per day (resets midnight UTC).',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: { type: 'object', properties: {} },
     createdAt: 0,
   },
 ];
@@ -871,6 +1034,112 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 // ═══════════════════════════════════════════════════════════════
+// SKILL HELPERS
+// ═══════════════════════════════════════════════════════════════
+
+// Validation constants
+const SKILL_NAME_REGEX = /^[a-z0-9_]{1,30}$/;
+const MAX_SKILLS_PER_USER = 20;
+const MAX_SKILL_INSTRUCTIONS = 5000;
+const MAX_SKILL_PARAMETERS = 10;
+const MAX_SKILL_DESTINATIONS = 10;
+
+export function validateSkillName(name: string): string | null {
+  if (!SKILL_NAME_REGEX.test(name)) {
+    return 'Skill name must be 1-30 characters, lowercase letters, numbers, and underscores only.';
+  }
+  if (name.startsWith('hermes')) {
+    return 'Skill names cannot start with "hermes" (reserved for system tools).';
+  }
+  return null;
+}
+
+export function generateSkillId(): string {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `skill_${random}`;
+}
+
+/**
+ * Build an MCP inputSchema from a skill's parameters[]
+ */
+export function buildSkillInputSchema(skill: Skill): Record<string, any> {
+  const properties: Record<string, any> = {};
+  const required: string[] = [];
+
+  // Add custom parameters
+  for (const param of (skill.parameters || [])) {
+    const prop: Record<string, any> = {
+      type: param.type === 'array' ? 'array' : param.type,
+      description: param.description,
+    };
+    if (param.type === 'array') {
+      prop.items = { type: 'string' };
+    }
+    if (param.enum) {
+      prop.enum = param.enum;
+    }
+    if (param.default !== undefined) {
+      prop.default = param.default;
+    }
+    properties[param.name] = prop;
+    if (param.required) {
+      required.push(param.name);
+    }
+  }
+
+  // Always inject a 'result' parameter for auto-post mode
+  properties['result'] = {
+    type: 'string',
+    description: 'If provided, creates a notebook entry with this content using the skill\'s destinations. If omitted, returns the skill instructions for Claude to follow.',
+  };
+
+  return {
+    type: 'object',
+    properties,
+    ...(required.length > 0 ? { required } : {}),
+  };
+}
+
+/**
+ * Build a description for a channel_* MCP tool
+ */
+export function buildChannelSkillDescription(skill: Skill, channel: Channel): string {
+  let desc = `You are posting to the #${channel.id} channel`;
+  if (channel.name !== channel.id) {
+    desc += ` (${channel.name})`;
+  }
+  desc += '. ';
+  desc += skill.description;
+
+  if (skill.instructions) {
+    desc += `\n\nInstructions: ${skill.instructions}`;
+  }
+
+  return desc;
+}
+
+/**
+ * Build a description for a skill_* MCP tool
+ */
+export function buildSkillDescription(skill: Skill): string {
+  let desc = skill.description;
+
+  if (skill.to && skill.to.length > 0) {
+    desc += `\n\nDefault destinations: ${skill.to.join(', ')}`;
+  }
+
+  if (skill.triggerCondition) {
+    desc += `\n\nTrigger: ${skill.triggerCondition}`;
+  }
+
+  if (skill.instructions) {
+    desc += `\n\nInstructions: ${skill.instructions}`;
+  }
+
+  return desc;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // MCP SERVER FACTORY
 // ═══════════════════════════════════════════════════════════════
 
@@ -900,15 +1169,23 @@ function createMCPServer(secretKey: string) {
     // Add identity context to the description (lazy lookup)
     const handle = await getHandle();
     const user = handle ? await storage.getUserByKeyHash(keyHash) : null;
-    const humanVisibleDefault = user?.defaultHumanVisible ?? true;
-    const visibilityNote = humanVisibleDefault
-      ? 'Your entries are visible in the human feed by default.'
-      : 'Your entries are AI-only by default (humans see a stub, full content only via AI search).';
+    const aiOnlyDefault = user ? isDefaultAiOnly(user) : false;
+    const humanVisibleDefault = !aiOnlyDefault; // for legacy display
+    const visibilityNote = aiOnlyDefault
+      ? 'Your entries are AI-only by default (humans see a stub, full content only via AI search).'
+      : 'Your entries are visible in the human feed by default.';
 
     if (handle) {
+      let identityText = `Write to the shared notebook.\n\nYou are posting as @${handle}. ${visibilityNote} Respect this setting unless the user explicitly asks otherwise.`;
+
+      // First-run hint for new users
+      if (user && !user.onboardedAt) {
+        identityText += `\n\nThis person just joined Hermes. If they seem unsure, ask what brought them here. Help them: write their first entry, follow people, or browse channels.`;
+      }
+
       dynamicDescription = dynamicDescription.replace(
         'Write to the shared notebook.',
-        `Write to the shared notebook.\n\nYou are posting as @${handle}. ${visibilityNote} Respect this setting unless the user explicitly asks otherwise.`
+        identityText
       );
     } else {
       dynamicDescription = dynamicDescription.replace(
@@ -940,12 +1217,49 @@ function createMCPServer(secretKey: string) {
       dynamicDescription += `\n\nPEOPLE YOU FOLLOW:\n${rosterText}\n\nWhen writing entries relevant to someone here, consider using "to" to address them.`;
     }
 
-    // Get user's tool overrides
+    // Add channel roster so Claude knows subscribed channels
+    if (handle) {
+      try {
+        const subscribedChannels = await storage.getSubscribedChannels(handle);
+        if (subscribedChannels.length > 0) {
+          const channelText = subscribedChannels
+            .map(c => `• #${c.id} — ${c.name}${c.description ? ': ' + c.description : ''}`)
+            .join('\n');
+          dynamicDescription += `\n\nYOUR CHANNELS:\n${channelText}\n\nUse hermes_channels to list, join, or leave channels.`;
+        }
+      } catch {
+        // Silently fail - don't break tools if channels fail
+      }
+    }
+
+    // Get user's tool overrides and user skills
     const skillOverrides = user?.skillOverrides || {};
+    const userSkills = user?.skills || [];
+
+    // Add trigger conditions to write_entry description
+    const triggeredSkills = userSkills.filter(s => s.triggerCondition);
+    if (triggeredSkills.length > 0) {
+      const triggerText = triggeredSkills
+        .map(s => `• skill_${s.name}: ${s.triggerCondition}`)
+        .join('\n');
+      dynamicDescription += `\n\nTRIGGERED SKILLS (execute automatically when conditions match):\n${triggerText}\nWhen you detect one of these conditions, invoke the corresponding skill_* tool.`;
+    }
 
     // Generate tools from SYSTEM_SKILLS array
     const tools = SYSTEM_SKILLS
-      .filter(skill => skill.handlerType === 'builtin')
+      .filter(skill => {
+        if (skill.handlerType !== 'builtin') return false;
+        if (skill.name === 'hermes_daily_question') {
+          if (!user) return false;
+          const last = user.lastDailyQuestionAt;
+          if (last) {
+            const lastDate = new Date(last).toISOString().slice(0, 10);
+            const todayDate = new Date().toISOString().slice(0, 10);
+            if (lastDate === todayDate) return false;
+          }
+        }
+        return true;
+      })
       .map(skill => {
         // Apply user overrides if any
         const override = skillOverrides[skill.name];
@@ -957,12 +1271,17 @@ function createMCPServer(secretKey: string) {
         } else if (skill.name === 'hermes_search' && !override?.description) {
           description = SEARCH_TOOL_DESCRIPTION;
         } else if (skill.name === 'hermes_settings' && !override?.description) {
-          description = `View or update the user's Hermes settings. Current settings: humanVisible=${humanVisibleDefault}. Always confirm with the user before making changes.`;
+          description = `View or update the user's Hermes settings. Current settings: aiOnly=${aiOnlyDefault}. Always confirm with the user before making changes.`;
         } else if (skill.name === 'hermes_skills' && !override?.description) {
           const overrideCount = Object.keys(skillOverrides).length;
-          description = skill.description + (overrideCount > 0
-            ? `\n\nYou have ${overrideCount} customized tool(s). Use action: "list" to see current state.`
-            : '');
+          const userSkillCount = userSkills.length;
+          description = skill.description;
+          const parts: string[] = [];
+          if (overrideCount > 0) parts.push(`${overrideCount} customized tool(s)`);
+          if (userSkillCount > 0) parts.push(`${userSkillCount} user skill(s)`);
+          if (parts.length > 0) {
+            description += `\n\nYou have ${parts.join(' and ')}. Use action: "list" to see current state.`;
+          }
         }
 
         // If there's an override with instructions, append them to the description
@@ -977,7 +1296,33 @@ function createMCPServer(secretKey: string) {
         };
       });
 
-    return { tools };
+    // Generate skill_* tools from user skills
+    const userSkillTools = userSkills.map(skill => ({
+      name: `skill_${skill.name}`,
+      description: buildSkillDescription(skill),
+      inputSchema: buildSkillInputSchema(skill),
+    }));
+
+    // Inject channel_* tools for subscribed channels
+    const channelTools: Array<{ name: string; description: string; inputSchema: Record<string, any> }> = [];
+    if (handle) {
+      try {
+        const subscribedChannels = await storage.getSubscribedChannels(handle);
+        for (const channel of subscribedChannels) {
+          for (const skill of channel.skills) {
+            channelTools.push({
+              name: `channel_${channel.id}_${skill.name}`,
+              description: buildChannelSkillDescription(skill, channel),
+              inputSchema: buildSkillInputSchema(skill),
+            });
+          }
+        }
+      } catch (err) {
+        // Silently fail - don't break tools if channel lookup fails
+      }
+    }
+
+    return { tools: [...tools, ...userSkillTools, ...channelTools] };
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -988,12 +1333,13 @@ function createMCPServer(secretKey: string) {
       const entry = (args as { entry?: string })?.entry;
       const client = (args as { client?: 'desktop' | 'mobile' | 'code' })?.client;
       const model = (args as { model?: string })?.model;
-      const humanVisibleOverride = (args as { human_visible?: boolean })?.human_visible;
+      const aiOnlyOverride = (args as { ai_only?: boolean })?.ai_only;
+      const humanVisibleOverride = (args as { human_visible?: boolean })?.human_visible; // legacy
       const topicHints = (args as { topic_hints?: string[] })?.topic_hints;
-      // New addressing parameters
+      // Addressing parameters
       const toAddresses = (args as { to?: string[] })?.to;
       const inReplyTo = (args as { in_reply_to?: string })?.in_reply_to;
-      const visibilityOverride = (args as { visibility?: 'public' | 'private' | 'ai-only' })?.visibility;
+      const visibilityOverride = (args as { visibility?: 'public' | 'private' | 'ai-only' })?.visibility; // legacy
 
       if (!entry || entry.trim().length === 0) {
         return {
@@ -1025,21 +1371,21 @@ function createMCPServer(secretKey: string) {
       const currentHandle = currentUser?.handle || undefined;
       const userStagingDelay = currentUser?.stagingDelayMs ?? STAGING_DELAY_MS;
 
-      // Determine visibility using the unified addressing logic
-      // Priority: explicit override > default based on to/inReplyTo
-      const visibility = visibilityOverride || getDefaultVisibility(toAddresses, inReplyTo);
-
-      // humanVisible is now derived from visibility for backward compat
-      // ai-only -> humanVisible: false
-      // public/private -> humanVisible: true (unless explicitly overridden)
-      let humanVisible: boolean;
-      if (humanVisibleOverride !== undefined) {
-        humanVisible = humanVisibleOverride;
-      } else if (visibility === 'ai-only') {
-        humanVisible = false;
+      // Determine aiOnly: explicit ai_only > legacy human_visible > legacy visibility > user default
+      let aiOnly: boolean;
+      if (aiOnlyOverride !== undefined) {
+        aiOnly = aiOnlyOverride;
+      } else if (humanVisibleOverride !== undefined) {
+        aiOnly = !humanVisibleOverride; // legacy compat
+      } else if (visibilityOverride === 'ai-only') {
+        aiOnly = true;
       } else {
-        humanVisible = currentUser?.defaultHumanVisible ?? true;
+        aiOnly = currentUser ? isDefaultAiOnly(currentUser) : false;
       }
+
+      // Compute legacy fields for backward compat
+      const humanVisible = !aiOnly;
+      const visibility = visibilityOverride || getDefaultVisibility(toAddresses, inReplyTo);
 
       // Auto-detect reflections by content length (500+ chars = essay/reflection)
       const isReflection = entry.trim().length >= 500;
@@ -1051,14 +1397,20 @@ function createMCPServer(secretKey: string) {
         content: entry.trim(),
         timestamp: Date.now(),
         model: model || undefined,
-        humanVisible,
+        humanVisible, // legacy compat
+        aiOnly: aiOnly || undefined, // only store if true
         isReflection: isReflection || undefined,
         topicHints: topicHints && topicHints.length > 0 ? topicHints : undefined,
         // Addressing fields
         to: toAddresses && toAddresses.length > 0 ? toAddresses : undefined,
         inReplyTo: inReplyTo || undefined,
-        visibility: visibility !== 'public' ? visibility : undefined, // Only store non-default
+        visibility: visibility !== 'public' ? visibility : undefined, // legacy compat
       }, userStagingDelay);
+
+      // Mark onboarded on first action
+      if (currentUser && !currentUser.onboardedAt) {
+        await storage.updateUser(currentUser.handle, { onboardedAt: Date.now() });
+      }
 
       const delayMinutes = Math.round(userStagingDelay / 1000 / 60);
 
@@ -1144,8 +1496,22 @@ function createMCPServer(secretKey: string) {
       }
 
       // Try to find as an entry first
-      const entry = await storage.getEntry(entryId);
-      if (entry) {
+      const rawEntry = await storage.getEntry(entryId);
+      if (rawEntry) {
+        const entry = normalizeEntry(rawEntry);
+        // Check access control
+        const currentUser = await storage.getUserByKeyHash(keyHash);
+        const viewerHandle = currentUser?.handle;
+        const viewerEmail = currentUser?.email;
+        const isAuthor = entry.pseudonym === pseudonym || entry.handle === viewerHandle;
+        const allowed = await canView(entry, viewerHandle, viewerEmail, isAuthor, storage);
+        if (!allowed) {
+          return {
+            content: [{ type: 'text' as const, text: `Entry not found: ${entryId}` }],
+            isError: true,
+          };
+        }
+
         const date = new Date(entry.timestamp).toISOString().split('T')[0];
         const type = entry.isReflection ? 'reflection' : 'note';
         const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
@@ -1221,8 +1587,21 @@ function createMCPServer(secretKey: string) {
         conversationResults = searchConvos.filter(c => c.pseudonym !== pseudonym);
       }
 
-      // Get followed handles for boosting
+      // Filter results through access control (BUG FIX: was returning private entries)
       const searchUser = await storage.getUserByKeyHash(keyHash);
+      const viewerHandle = searchUser?.handle;
+      const viewerEmail = searchUser?.email;
+
+      const filteredEntries: JournalEntry[] = [];
+      for (const e of entryResults) {
+        const normalized = normalizeEntry(e);
+        const isAuthor = e.pseudonym === pseudonym || e.handle === viewerHandle;
+        if (await canView(normalized, viewerHandle, viewerEmail, isAuthor, storage)) {
+          filteredEntries.push(e);
+        }
+      }
+      entryResults = filteredEntries;
+
       const followedHandles = new Set((searchUser?.following || []).map(f => f.handle));
 
       // Combine and sort by timestamp, boosting followed users
@@ -1306,14 +1685,15 @@ function createMCPServer(secretKey: string) {
               `• bio: ${settingsUser.bio || '(not set)'}\n` +
               `• email: ${settingsUser.email || '(not set)'} ${emailStatus}\n` +
               `• emailPrefs: comments=${prefs.comments}, digest=${prefs.digest}\n` +
-              `• defaultHumanVisible: ${settingsUser.defaultHumanVisible ?? true}\n` +
+              `• defaultAiOnly: ${isDefaultAiOnly(settingsUser)}\n` +
               `• stagingDelayMs: ${settingsUser.stagingDelayMs ?? STAGING_DELAY_MS} (${Math.round((settingsUser.stagingDelayMs ?? STAGING_DELAY_MS) / 1000 / 60)} minutes)`,
           }],
         };
       }
 
       // action === 'update'
-      const newHumanVisible = (args as { defaultHumanVisible?: boolean })?.defaultHumanVisible;
+      const newAiOnly = (args as { defaultAiOnly?: boolean })?.defaultAiOnly;
+      const newHumanVisible = (args as { defaultHumanVisible?: boolean })?.defaultHumanVisible; // legacy
       const newStagingDelay = (args as { stagingDelayMs?: number })?.stagingDelayMs;
       const newDisplayName = (args as { displayName?: string })?.displayName;
       const newBio = (args as { bio?: string })?.bio;
@@ -1340,8 +1720,14 @@ function createMCPServer(secretKey: string) {
         };
       }
 
-      const updates: Partial<{ defaultHumanVisible: boolean; stagingDelayMs: number; displayName: string; bio: string; email: string; emailPrefs: { comments: boolean; digest: boolean } }> = {};
-      if (newHumanVisible !== undefined) updates.defaultHumanVisible = newHumanVisible;
+      const updates: Partial<{ defaultAiOnly: boolean; defaultHumanVisible: boolean; stagingDelayMs: number; displayName: string; bio: string; email: string; emailPrefs: { comments: boolean; digest: boolean } }> = {};
+      if (newAiOnly !== undefined) {
+        updates.defaultAiOnly = newAiOnly;
+        updates.defaultHumanVisible = !newAiOnly; // backward compat
+      } else if (newHumanVisible !== undefined) {
+        updates.defaultHumanVisible = newHumanVisible;
+        updates.defaultAiOnly = !newHumanVisible; // forward compat
+      }
       if (newStagingDelay !== undefined) updates.stagingDelayMs = newStagingDelay;
       if (newDisplayName !== undefined) updates.displayName = newDisplayName;
       if (newBio !== undefined) updates.bio = newBio;
@@ -1367,7 +1753,8 @@ function createMCPServer(secretKey: string) {
       await storage.updateUser(settingsUser.handle, updates);
 
       const changedParts = [];
-      if (newHumanVisible !== undefined) changedParts.push(`defaultHumanVisible → ${newHumanVisible}`);
+      if (newAiOnly !== undefined) changedParts.push(`defaultAiOnly → ${newAiOnly}`);
+      else if (newHumanVisible !== undefined) changedParts.push(`defaultAiOnly → ${!newHumanVisible}`);
       if (newStagingDelay !== undefined) changedParts.push(`stagingDelayMs → ${newStagingDelay}`);
       if (newDisplayName !== undefined) changedParts.push(`displayName → "${newDisplayName}"`);
       if (newBio !== undefined) changedParts.push(`bio → "${newBio.slice(0, 50)}${newBio.length > 50 ? '...' : ''}"`);
@@ -1382,11 +1769,11 @@ function createMCPServer(secretKey: string) {
       };
     }
 
-    // Handle hermes_skills tool (edit/reset/list system tool behaviors)
+    // Handle hermes_skills tool (system tool overrides + user skill CRUD)
     if (name === 'hermes_skills') {
       try {
       const action = (args as { action?: string })?.action;
-      const validActions = ['list', 'edit', 'reset'];
+      const validActions = ['list', 'edit', 'reset', 'create', 'get', 'update', 'delete'];
 
       if (!action || !validActions.includes(action)) {
         return {
@@ -1404,6 +1791,7 @@ function createMCPServer(secretKey: string) {
       }
 
       const skillOverrides = skillsUser.skillOverrides || {};
+      const userSkills = skillsUser.skills || [];
 
       if (action === 'list') {
         const systemSkillsList = SYSTEM_SKILLS
@@ -1419,13 +1807,28 @@ function createMCPServer(secretKey: string) {
           })
           .join('\n');
 
+        let userSkillsList = '';
+        if (userSkills.length > 0) {
+          userSkillsList = '\n\nUser Skills:\n' + userSkills.map(s => {
+            const parts = [`• skill_${s.name}: ${s.description.slice(0, 80)}${s.description.length > 80 ? '...' : ''}`];
+            if (s.to && s.to.length > 0) parts.push(`  Destinations: ${s.to.join(', ')}`);
+            if (s.triggerCondition) parts.push(`  Trigger: ${s.triggerCondition}`);
+            if (s.public) parts.push(`  [PUBLIC] clones: ${s.cloneCount || 0}`);
+            return parts.join('\n');
+          }).join('\n');
+        }
+
         return {
           content: [{
             type: 'text' as const,
-            text: `Tools:\n${systemSkillsList}\n\n` +
+            text: `System Tools:\n${systemSkillsList}${userSkillsList}\n\n` +
               `Actions:\n` +
-              `• "edit" with tool_name + description/instructions: customize a tool's behavior\n` +
-              `• "reset" with tool_name: restore default behavior`,
+              `• "edit" with tool_name + description/instructions: customize a system tool's behavior\n` +
+              `• "reset" with tool_name: restore system tool to defaults\n` +
+              `• "create" with name + description + instructions: create a new user skill\n` +
+              `• "get" with skill_id: view skill details\n` +
+              `• "update" with skill_id + fields: update a user skill\n` +
+              `• "delete" with skill_id: remove a user skill`,
           }],
         };
       }
@@ -1513,6 +1916,254 @@ function createMCPServer(secretKey: string) {
           content: [{
             type: 'text' as const,
             text: `Reset "${toolName}" to defaults. Changes take effect on next connection.`,
+          }],
+        };
+      }
+
+      if (action === 'create') {
+        const skillName = (args as { name?: string })?.name;
+        const description = (args as { description?: string })?.description;
+        const instructions = (args as { instructions?: string })?.instructions;
+        const parameters = (args as { parameters?: SkillParameter[] })?.parameters;
+        const triggerCondition = (args as { trigger_condition?: string })?.trigger_condition;
+        const toDestinations = (args as { to?: string[] })?.to;
+        const skillAiOnly = (args as { ai_only?: boolean })?.ai_only;
+        const visibility = (args as { visibility?: 'public' | 'private' | 'ai-only' })?.visibility; // legacy
+        const isPublic = (args as { is_public?: boolean })?.is_public;
+
+        if (!skillName) {
+          return {
+            content: [{ type: 'text' as const, text: 'name is required for create action.' }],
+            isError: true,
+          };
+        }
+
+        const nameError = validateSkillName(skillName);
+        if (nameError) {
+          return {
+            content: [{ type: 'text' as const, text: nameError }],
+            isError: true,
+          };
+        }
+
+        if (!description) {
+          return {
+            content: [{ type: 'text' as const, text: 'description is required for create action.' }],
+            isError: true,
+          };
+        }
+
+        if (userSkills.length >= MAX_SKILLS_PER_USER) {
+          return {
+            content: [{ type: 'text' as const, text: `Maximum ${MAX_SKILLS_PER_USER} skills allowed. Delete an existing skill first.` }],
+            isError: true,
+          };
+        }
+
+        if (userSkills.some(s => s.name === skillName)) {
+          return {
+            content: [{ type: 'text' as const, text: `A skill named "${skillName}" already exists. Choose a different name or delete it first.` }],
+            isError: true,
+          };
+        }
+
+        if (instructions && instructions.length > MAX_SKILL_INSTRUCTIONS) {
+          return {
+            content: [{ type: 'text' as const, text: `Instructions too long (${instructions.length} chars). Maximum is ${MAX_SKILL_INSTRUCTIONS}.` }],
+            isError: true,
+          };
+        }
+
+        if (parameters && parameters.length > MAX_SKILL_PARAMETERS) {
+          return {
+            content: [{ type: 'text' as const, text: `Too many parameters (${parameters.length}). Maximum is ${MAX_SKILL_PARAMETERS}.` }],
+            isError: true,
+          };
+        }
+
+        if (toDestinations && toDestinations.length > MAX_SKILL_DESTINATIONS) {
+          return {
+            content: [{ type: 'text' as const, text: `Too many destinations (${toDestinations.length}). Maximum is ${MAX_SKILL_DESTINATIONS}.` }],
+            isError: true,
+          };
+        }
+
+        // Resolve aiOnly: prefer ai_only param, fall back to legacy visibility
+        const resolvedSkillAiOnly = skillAiOnly !== undefined ? skillAiOnly : (visibility === 'ai-only' ? true : undefined);
+
+        const newSkill: Skill = {
+          id: generateSkillId(),
+          name: skillName,
+          description,
+          instructions: instructions || '',
+          handlerType: 'instructions',
+          parameters: parameters || undefined,
+          triggerCondition: triggerCondition || undefined,
+          to: toDestinations || undefined,
+          aiOnly: resolvedSkillAiOnly,
+          visibility: visibility || undefined, // backward compat
+          public: isPublic || false,
+          author: skillsUser.handle,
+          cloneCount: 0,
+          createdAt: Date.now(),
+        };
+
+        const updatedSkills = [...userSkills, newSkill];
+        await storage.updateUser(skillsUser.handle, { skills: updatedSkills });
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Created skill "${skillName}" (ID: ${newSkill.id}).\n\n` +
+              `Tool name: skill_${skillName}\n` +
+              `Description: ${description}\n` +
+              (instructions ? `Instructions: ${instructions.slice(0, 100)}${instructions.length > 100 ? '...' : ''}\n` : '') +
+              (toDestinations ? `Destinations: ${toDestinations.join(', ')}\n` : '') +
+              (triggerCondition ? `Trigger: ${triggerCondition}\n` : '') +
+              (isPublic ? `Visibility: PUBLIC (in gallery)\n` : '') +
+              `\nThe skill_${skillName} tool will appear on next connection.`,
+          }],
+        };
+      }
+
+      if (action === 'get') {
+        const skillId = (args as { skill_id?: string })?.skill_id;
+
+        if (!skillId) {
+          return {
+            content: [{ type: 'text' as const, text: 'skill_id is required for get action.' }],
+            isError: true,
+          };
+        }
+
+        const skill = userSkills.find(s => s.id === skillId || s.name === skillId);
+        if (!skill) {
+          return {
+            content: [{ type: 'text' as const, text: `Skill "${skillId}" not found.` }],
+            isError: true,
+          };
+        }
+
+        const details = [
+          `Name: ${skill.name}`,
+          `ID: ${skill.id}`,
+          `Description: ${skill.description}`,
+          `Instructions: ${skill.instructions || '(none)'}`,
+          `Parameters: ${skill.parameters ? skill.parameters.map(p => `${p.name} (${p.type}): ${p.description}`).join(', ') : '(none)'}`,
+          `Trigger: ${skill.triggerCondition || '(none)'}`,
+          `Destinations: ${skill.to ? skill.to.join(', ') : '(none)'}`,
+          `Visibility: ${skill.visibility || 'public'}`,
+          `Public gallery: ${skill.public || false}`,
+          `Cloned from: ${skill.clonedFrom || '(original)'}`,
+          `Clone count: ${skill.cloneCount || 0}`,
+          `Created: ${new Date(skill.createdAt).toISOString()}`,
+        ];
+
+        return {
+          content: [{ type: 'text' as const, text: details.join('\n') }],
+        };
+      }
+
+      if (action === 'update') {
+        const skillId = (args as { skill_id?: string })?.skill_id;
+
+        if (!skillId) {
+          return {
+            content: [{ type: 'text' as const, text: 'skill_id is required for update action.' }],
+            isError: true,
+          };
+        }
+
+        const skillIndex = userSkills.findIndex(s => s.id === skillId || s.name === skillId);
+        if (skillIndex === -1) {
+          return {
+            content: [{ type: 'text' as const, text: `Skill "${skillId}" not found.` }],
+            isError: true,
+          };
+        }
+
+        const description = (args as { description?: string })?.description;
+        const instructions = (args as { instructions?: string })?.instructions;
+        const parameters = (args as { parameters?: SkillParameter[] })?.parameters;
+        const triggerCondition = (args as { trigger_condition?: string })?.trigger_condition;
+        const toDestinations = (args as { to?: string[] })?.to;
+        const updateAiOnly = (args as { ai_only?: boolean })?.ai_only;
+        const visibility = (args as { visibility?: 'public' | 'private' | 'ai-only' })?.visibility; // legacy
+        const isPublic = (args as { is_public?: boolean })?.is_public;
+
+        if (instructions && instructions.length > MAX_SKILL_INSTRUCTIONS) {
+          return {
+            content: [{ type: 'text' as const, text: `Instructions too long (${instructions.length} chars). Maximum is ${MAX_SKILL_INSTRUCTIONS}.` }],
+            isError: true,
+          };
+        }
+
+        if (parameters && parameters.length > MAX_SKILL_PARAMETERS) {
+          return {
+            content: [{ type: 'text' as const, text: `Too many parameters (${parameters.length}). Maximum is ${MAX_SKILL_PARAMETERS}.` }],
+            isError: true,
+          };
+        }
+
+        if (toDestinations && toDestinations.length > MAX_SKILL_DESTINATIONS) {
+          return {
+            content: [{ type: 'text' as const, text: `Too many destinations (${toDestinations.length}). Maximum is ${MAX_SKILL_DESTINATIONS}.` }],
+            isError: true,
+          };
+        }
+
+        const existing = userSkills[skillIndex];
+        const updated: Skill = {
+          ...existing,
+          ...(description !== undefined && { description }),
+          ...(instructions !== undefined && { instructions }),
+          ...(parameters !== undefined && { parameters }),
+          ...(triggerCondition !== undefined && { triggerCondition }),
+          ...(toDestinations !== undefined && { to: toDestinations }),
+          ...(updateAiOnly !== undefined && { aiOnly: updateAiOnly }),
+          ...(visibility !== undefined && { visibility }), // backward compat
+          ...(isPublic !== undefined && { public: isPublic }),
+          updatedAt: Date.now(),
+        };
+
+        const updatedSkills = [...userSkills];
+        updatedSkills[skillIndex] = updated;
+        await storage.updateUser(skillsUser.handle, { skills: updatedSkills });
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Updated skill "${existing.name}". Changes take effect on next connection.`,
+          }],
+        };
+      }
+
+      if (action === 'delete') {
+        const skillId = (args as { skill_id?: string })?.skill_id;
+
+        if (!skillId) {
+          return {
+            content: [{ type: 'text' as const, text: 'skill_id is required for delete action.' }],
+            isError: true,
+          };
+        }
+
+        const skillIndex = userSkills.findIndex(s => s.id === skillId || s.name === skillId);
+        if (skillIndex === -1) {
+          return {
+            content: [{ type: 'text' as const, text: `Skill "${skillId}" not found.` }],
+            isError: true,
+          };
+        }
+
+        const deletedName = userSkills[skillIndex].name;
+        const updatedSkills = userSkills.filter((_, i) => i !== skillIndex);
+        await storage.updateUser(skillsUser.handle, { skills: updatedSkills });
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Deleted skill "${deletedName}". The skill_${deletedName} tool will be removed on next connection.`,
           }],
         };
       }
@@ -1611,7 +2262,9 @@ function createMCPServer(secretKey: string) {
         }
 
         const updatedFollowing = [...following, { handle: targetHandle, note: followNote }];
-        await storage.updateUser(currentUser.handle, { following: updatedFollowing });
+        const followUpdates: Record<string, any> = { following: updatedFollowing };
+        if (!currentUser.onboardedAt) followUpdates.onboardedAt = Date.now();
+        await storage.updateUser(currentUser.handle, followUpdates);
 
         // Send follow notification email to the target user
         try {
@@ -1663,6 +2316,933 @@ function createMCPServer(secretKey: string) {
 
         return {
           content: [{ type: 'text' as const, text: `Updated note for @${targetHandle}: ${note}` }],
+        };
+      }
+    }
+
+    // Handle hermes_channels tool
+    if (name === 'hermes_channels') {
+      const action = (args as { action?: string })?.action;
+      const channelId = (args as { channel_id?: string })?.channel_id?.toLowerCase();
+      const channelName = (args as { name?: string })?.name;
+      const channelDescription = (args as { description?: string })?.description;
+      const channelJoinRule = (args as { join_rule?: 'open' | 'invite' })?.join_rule;
+      const channelVisibility = (args as { visibility?: 'public' | 'private' })?.visibility; // legacy
+      const inviteToken = (args as { invite_token?: string })?.invite_token;
+      const targetHandle = (args as { handle?: string })?.handle?.toLowerCase();
+      const skillName = (args as { skill_name?: string })?.skill_name?.toLowerCase();
+      const skillInstructions = (args as { instructions?: string })?.instructions;
+
+      if (!action || !['list', 'join', 'leave', 'create', 'info', 'invite', 'invite_user', 'add_skill', 'update_skill', 'remove_skill'].includes(action)) {
+        return {
+          content: [{ type: 'text' as const, text: 'Action must be one of: list, join, leave, create, info, invite, invite_user, add_skill, update_skill, remove_skill.' }],
+          isError: true,
+        };
+      }
+
+      const currentUser = await storage.getUserByKeyHash(keyHash);
+      if (!currentUser?.handle) {
+        return {
+          content: [{ type: 'text' as const, text: 'You need a handle to use channels. Claim one in settings.' }],
+          isError: true,
+        };
+      }
+
+      if (action === 'list') {
+        const [subscribed, publicChannels] = await Promise.all([
+          storage.getSubscribedChannels(currentUser.handle),
+          storage.listChannels({ joinRule: 'open' }),
+        ]);
+
+        const subscribedIds = new Set(subscribed.map(c => c.id));
+        const discoverable = publicChannels.filter(c => !subscribedIds.has(c.id));
+
+        let text = '';
+        if (subscribed.length > 0) {
+          text += `Your channels:\n${subscribed.map(c => `• #${c.id} — ${c.name}${c.description ? ': ' + c.description : ''} (${c.subscribers.length} members, ${c.skills.length} skills)`).join('\n')}`;
+        } else {
+          text += 'You are not subscribed to any channels yet.';
+        }
+
+        if (discoverable.length > 0) {
+          text += `\n\nDiscoverable public channels:\n${discoverable.map(c => `• #${c.id} — ${c.name}${c.description ? ': ' + c.description : ''} (${c.subscribers.length} members)`).join('\n')}`;
+        }
+
+        return { content: [{ type: 'text' as const, text }] };
+      }
+
+      if (action === 'create') {
+        if (!channelId) {
+          return {
+            content: [{ type: 'text' as const, text: 'channel_id is required for create. Use lowercase alphanumeric + hyphens (e.g. "my-channel").' }],
+            isError: true,
+          };
+        }
+        if (!isValidChannelId(channelId)) {
+          return {
+            content: [{ type: 'text' as const, text: 'Invalid channel ID. Must be 2-30 chars, lowercase alphanumeric + hyphens, no leading/trailing hyphens, no underscores.' }],
+            isError: true,
+          };
+        }
+        if (!channelName) {
+          return {
+            content: [{ type: 'text' as const, text: 'name is required for create.' }],
+            isError: true,
+          };
+        }
+
+        try {
+          // Resolve joinRule: prefer join_rule param, fall back to legacy visibility, default 'open'
+          const resolvedJoinRule = channelJoinRule || (channelVisibility === 'private' ? 'invite' : 'open');
+          const resolvedVisibility = channelVisibility || (resolvedJoinRule === 'invite' ? 'private' : 'public');
+
+          const channel = await storage.createChannel({
+            id: channelId,
+            name: channelName,
+            description: channelDescription,
+            visibility: resolvedVisibility, // backward compat
+            joinRule: resolvedJoinRule,
+            createdBy: currentUser.handle,
+            createdAt: Date.now(),
+            skills: [],
+            subscribers: [{ handle: currentUser.handle, role: 'admin', joinedAt: Date.now() }],
+          });
+
+          // Mark onboarded on first action
+          if (!currentUser.onboardedAt) {
+            await storage.updateUser(currentUser.handle, { onboardedAt: Date.now() });
+          }
+
+          return {
+            content: [{ type: 'text' as const, text: `Created channel #${channel.id} (${channel.joinRule || 'open'}). You are the admin.\n\nNow let's set it up. Interview the user about what skills this channel should have. Skills define what kind of content gets posted — e.g. "cool_people" for tracking interesting contacts, "cool_papers" for documenting papers, etc.\n\nFor each skill, figure out:\n- A short name (lowercase, hyphens ok)\n- A description (what triggers this skill)\n- Instructions (how to format/structure the entry)\n\nThen use hermes_channels action: "add_skill" to create each one.` }],
+          };
+        } catch (err: any) {
+          return {
+            content: [{ type: 'text' as const, text: `Failed to create channel: ${err.message}` }],
+            isError: true,
+          };
+        }
+      }
+
+      // All remaining actions require channel_id
+      if (!channelId) {
+        return {
+          content: [{ type: 'text' as const, text: 'channel_id is required for this action.' }],
+          isError: true,
+        };
+      }
+
+      if (action === 'info') {
+        const channel = await storage.getChannel(channelId);
+        if (!channel) {
+          return {
+            content: [{ type: 'text' as const, text: `Channel #${channelId} not found.` }],
+            isError: true,
+          };
+        }
+
+        const isMember = channel.subscribers.some(s => s.handle === currentUser.handle);
+        const joinRule = channel.joinRule || (channel.visibility === 'private' ? 'invite' : 'open');
+        if (joinRule === 'invite' && !isMember) {
+          return {
+            content: [{ type: 'text' as const, text: `Channel #${channelId} is invite-only. You need an invite to see details.` }],
+            isError: true,
+          };
+        }
+
+        const memberList = channel.subscribers.map(s => `@${s.handle} (${s.role})`).join(', ');
+        const skillList = channel.skills.length > 0
+          ? channel.skills.map(s => `• ${s.name}: ${s.description}`).join('\n')
+          : '(no skills yet)';
+
+        return {
+          content: [{ type: 'text' as const, text: `#${channel.id} — ${channel.name}\n${channel.description || ''}\nJoin rule: ${joinRule}\nCreated by: @${channel.createdBy}\nMembers (${channel.subscribers.length}): ${memberList}\n\nSkills:\n${skillList}` }],
+        };
+      }
+
+      if (action === 'join') {
+        const channel = await storage.getChannel(channelId);
+        if (!channel) {
+          return {
+            content: [{ type: 'text' as const, text: `Channel #${channelId} not found.` }],
+            isError: true,
+          };
+        }
+
+        // Check if already subscribed
+        if (channel.subscribers.some(s => s.handle === currentUser.handle)) {
+          return {
+            content: [{ type: 'text' as const, text: `You are already a member of #${channelId}.` }],
+          };
+        }
+
+        const joinRuleForJoin = channel.joinRule || (channel.visibility === 'private' ? 'invite' : 'open');
+        if (joinRuleForJoin === 'invite') {
+          if (!inviteToken) {
+            return {
+              content: [{ type: 'text' as const, text: `Channel #${channelId} is invite-only. Provide an invite_token to join.` }],
+              isError: true,
+            };
+          }
+
+          try {
+            await storage.useInvite(inviteToken);
+          } catch (err: any) {
+            return {
+              content: [{ type: 'text' as const, text: `Invalid invite: ${err.message}` }],
+              isError: true,
+            };
+          }
+        }
+
+        await storage.addSubscriber(channelId, currentUser.handle, 'member');
+
+        // Mark onboarded on first action
+        if (!currentUser.onboardedAt) {
+          await storage.updateUser(currentUser.handle, { onboardedAt: Date.now() });
+        }
+
+        return {
+          content: [{ type: 'text' as const, text: `Joined #${channelId}. You now have access to ${channel.skills.length} channel skill(s). They will appear as channel_${channelId}_* tools on next connection.` }],
+        };
+      }
+
+      if (action === 'leave') {
+        const channel = await storage.getChannel(channelId);
+        if (!channel) {
+          return {
+            content: [{ type: 'text' as const, text: `Channel #${channelId} not found.` }],
+            isError: true,
+          };
+        }
+
+        if (!channel.subscribers.some(s => s.handle === currentUser.handle)) {
+          return {
+            content: [{ type: 'text' as const, text: `You are not a member of #${channelId}.` }],
+          };
+        }
+
+        await storage.removeSubscriber(channelId, currentUser.handle);
+
+        return {
+          content: [{ type: 'text' as const, text: `Left #${channelId}. Channel tools will be removed on next connection.` }],
+        };
+      }
+
+      if (action === 'invite') {
+        const channel = await storage.getChannel(channelId);
+        if (!channel) {
+          return {
+            content: [{ type: 'text' as const, text: `Channel #${channelId} not found.` }],
+            isError: true,
+          };
+        }
+
+        // Only admins can create invites
+        const subscriber = channel.subscribers.find(s => s.handle === currentUser.handle);
+        if (!subscriber || subscriber.role !== 'admin') {
+          return {
+            content: [{ type: 'text' as const, text: 'Only channel admins can create invite links.' }],
+            isError: true,
+          };
+        }
+
+        const token = generateEntryId(); // Reuse ID generator for random tokens
+        const invite: ChannelInvite = {
+          token,
+          channelId,
+          createdBy: currentUser.handle,
+          createdAt: Date.now(),
+          uses: 0,
+        };
+
+        await storage.createInvite(invite);
+
+        return {
+          content: [{ type: 'text' as const, text: `Invite created for #${channelId}.\n\nToken: ${token}\n\nShare this token with users who want to join. They can use: hermes_channels with action: "join", channel_id: "${channelId}", invite_token: "${token}"` }],
+        };
+      }
+
+      if (action === 'invite_user') {
+        if (!channelId) {
+          return {
+            content: [{ type: 'text' as const, text: 'channel_id is required for invite_user.' }],
+            isError: true,
+          };
+        }
+
+        if (!targetHandle) {
+          return {
+            content: [{ type: 'text' as const, text: 'handle is required for invite_user.' }],
+            isError: true,
+          };
+        }
+
+        const channel = await storage.getChannel(channelId);
+        if (!channel) {
+          return {
+            content: [{ type: 'text' as const, text: `Channel #${channelId} not found.` }],
+            isError: true,
+          };
+        }
+
+        // Only admins can invite users directly
+        const subscriber = channel.subscribers.find(s => s.handle === currentUser.handle);
+        if (!subscriber || subscriber.role !== 'admin') {
+          return {
+            content: [{ type: 'text' as const, text: 'Only channel admins can invite users directly.' }],
+            isError: true,
+          };
+        }
+
+        // Check target user exists
+        const targetUser = await storage.getUser(targetHandle);
+        if (!targetUser) {
+          return {
+            content: [{ type: 'text' as const, text: `User @${targetHandle} not found.` }],
+            isError: true,
+          };
+        }
+
+        // Check not already a member
+        if (channel.subscribers.some(s => s.handle === targetHandle)) {
+          return {
+            content: [{ type: 'text' as const, text: `@${targetHandle} is already a member of #${channelId}.` }],
+          };
+        }
+
+        // Generate single-use invite token
+        const token = generateEntryId();
+        const invite: ChannelInvite = {
+          token,
+          channelId,
+          createdBy: currentUser.handle,
+          createdAt: Date.now(),
+          maxUses: 1,
+          uses: 0,
+        };
+        await storage.createInvite(invite);
+
+        // Create an addressed entry to the target user with the invitation
+        const inviteMessage = `You've been invited to join #${channelId} by @${currentUser.handle}.\n\nChannel: ${channel.name}${channel.description ? ' — ' + channel.description : ''}\n\nTo join, use: hermes_channels with action: "join", channel_id: "${channelId}", invite_token: "${token}"`;
+
+        // Use short staging delay (60 seconds) so invitations arrive quickly
+        const shortStagingDelay = 60 * 1000;
+
+        await storage.addEntry({
+          pseudonym,
+          handle: currentUser.handle,
+          client: 'code',
+          content: inviteMessage,
+          timestamp: Date.now(),
+          humanVisible: true,
+          to: [`@${targetHandle}`],
+          visibility: 'private',
+        }, shortStagingDelay);
+
+        return {
+          content: [{ type: 'text' as const, text: `Invitation sent to @${targetHandle} for #${channelId}. The invite will appear in their inbox shortly.` }],
+        };
+      }
+
+      if (action === 'add_skill') {
+        if (!channelId) {
+          return { content: [{ type: 'text' as const, text: 'channel_id is required.' }], isError: true };
+        }
+        const newSkillName = channelName?.toLowerCase().replace(/[^a-z0-9-]/g, '');
+        if (!newSkillName) {
+          return { content: [{ type: 'text' as const, text: 'name is required for add_skill (lowercase, hyphens ok).' }], isError: true };
+        }
+
+        const channel = await storage.getChannel(channelId);
+        if (!channel) {
+          return { content: [{ type: 'text' as const, text: `Channel #${channelId} not found.` }], isError: true };
+        }
+
+        const sub = channel.subscribers.find(s => s.handle === currentUser.handle);
+        if (!sub || sub.role !== 'admin') {
+          return { content: [{ type: 'text' as const, text: 'Only channel admins can add skills.' }], isError: true };
+        }
+
+        if (channel.skills.some(s => s.name === newSkillName)) {
+          return { content: [{ type: 'text' as const, text: `Skill "${newSkillName}" already exists in #${channelId}. Use update_skill to modify it.` }], isError: true };
+        }
+
+        const newSkill: Skill = {
+          id: `${channelId}_${newSkillName}`,
+          name: newSkillName,
+          description: channelDescription || '',
+          instructions: skillInstructions || '',
+          handlerType: 'instructions',
+          createdAt: Date.now(),
+        };
+
+        channel.skills.push(newSkill);
+        await storage.updateChannel(channelId, { skills: channel.skills });
+
+        return {
+          content: [{ type: 'text' as const, text: `Added skill "${newSkillName}" to #${channelId}.\n\nSubscribers will see it as channel_${channelId}_${newSkillName} on their next connection.\n\nDescription: ${newSkill.description}\nInstructions: ${newSkill.instructions || '(none)'}` }],
+        };
+      }
+
+      if (action === 'update_skill') {
+        if (!channelId) {
+          return { content: [{ type: 'text' as const, text: 'channel_id is required.' }], isError: true };
+        }
+        const targetSkill = skillName || channelName?.toLowerCase().replace(/[^a-z0-9-]/g, '');
+        if (!targetSkill) {
+          return { content: [{ type: 'text' as const, text: 'skill_name is required for update_skill.' }], isError: true };
+        }
+
+        const channel = await storage.getChannel(channelId);
+        if (!channel) {
+          return { content: [{ type: 'text' as const, text: `Channel #${channelId} not found.` }], isError: true };
+        }
+
+        const sub = channel.subscribers.find(s => s.handle === currentUser.handle);
+        if (!sub || sub.role !== 'admin') {
+          return { content: [{ type: 'text' as const, text: 'Only channel admins can update skills.' }], isError: true };
+        }
+
+        const skill = channel.skills.find(s => s.name === targetSkill);
+        if (!skill) {
+          return { content: [{ type: 'text' as const, text: `Skill "${targetSkill}" not found in #${channelId}.` }], isError: true };
+        }
+
+        if (channelDescription !== undefined) skill.description = channelDescription;
+        if (skillInstructions !== undefined) skill.instructions = skillInstructions;
+
+        await storage.updateChannel(channelId, { skills: channel.skills });
+
+        return {
+          content: [{ type: 'text' as const, text: `Updated skill "${targetSkill}" in #${channelId}.\n\nDescription: ${skill.description}\nInstructions: ${skill.instructions || '(none)'}` }],
+        };
+      }
+
+      if (action === 'remove_skill') {
+        if (!channelId) {
+          return { content: [{ type: 'text' as const, text: 'channel_id is required.' }], isError: true };
+        }
+        const targetSkill = skillName || channelName?.toLowerCase().replace(/[^a-z0-9-]/g, '');
+        if (!targetSkill) {
+          return { content: [{ type: 'text' as const, text: 'skill_name is required for remove_skill.' }], isError: true };
+        }
+
+        const channel = await storage.getChannel(channelId);
+        if (!channel) {
+          return { content: [{ type: 'text' as const, text: `Channel #${channelId} not found.` }], isError: true };
+        }
+
+        const sub = channel.subscribers.find(s => s.handle === currentUser.handle);
+        if (!sub || sub.role !== 'admin') {
+          return { content: [{ type: 'text' as const, text: 'Only channel admins can remove skills.' }], isError: true };
+        }
+
+        const idx = channel.skills.findIndex(s => s.name === targetSkill);
+        if (idx === -1) {
+          return { content: [{ type: 'text' as const, text: `Skill "${targetSkill}" not found in #${channelId}.` }], isError: true };
+        }
+
+        channel.skills.splice(idx, 1);
+        await storage.updateChannel(channelId, { skills: channel.skills });
+
+        return {
+          content: [{ type: 'text' as const, text: `Removed skill "${targetSkill}" from #${channelId}.` }],
+        };
+      }
+    }
+
+    // Handle hermes_skills_browse tool
+    if (name === 'hermes_skills_browse') {
+      try {
+        const query = (args as { query?: string })?.query?.toLowerCase();
+        const limit = Math.min((args as { limit?: number })?.limit || 20, 50);
+
+        const allUsers = await storage.getAllUsers();
+        const publicSkills: Array<Skill & { authorHandle: string }> = [];
+
+        for (const u of allUsers) {
+          for (const skill of (u.skills || [])) {
+            if (skill.public) {
+              publicSkills.push({ ...skill, authorHandle: u.handle });
+            }
+          }
+        }
+
+        // Filter by query if provided
+        let filtered = publicSkills;
+        if (query) {
+          filtered = publicSkills.filter(s =>
+            s.name.includes(query) ||
+            s.description.toLowerCase().includes(query) ||
+            (s.instructions && s.instructions.toLowerCase().includes(query))
+          );
+        }
+
+        // Sort by clone count descending
+        filtered.sort((a, b) => (b.cloneCount || 0) - (a.cloneCount || 0));
+        filtered = filtered.slice(0, limit);
+
+        if (filtered.length === 0) {
+          return {
+            content: [{ type: 'text' as const, text: query ? `No public skills found matching "${query}".` : 'No public skills available yet.' }],
+          };
+        }
+
+        const list = filtered.map(s =>
+          `• ${s.name} by @${s.authorHandle} (${s.cloneCount || 0} clones)\n  ${s.description.slice(0, 100)}${s.description.length > 100 ? '...' : ''}`
+        ).join('\n');
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Public Skills Gallery (${filtered.length} results):\n\n${list}\n\nUse hermes_skills_clone to copy a skill to your account.`,
+          }],
+        };
+      } catch (error: any) {
+        console.error('hermes_skills_browse error:', error);
+        return {
+          content: [{ type: 'text' as const, text: `Failed to browse skills: ${error?.message || 'Unknown error'}` }],
+          isError: true,
+        };
+      }
+    }
+
+    // Handle hermes_skills_clone tool
+    if (name === 'hermes_skills_clone') {
+      try {
+        const skillName = (args as { skill_name?: string })?.skill_name;
+        const authorHandle = (args as { author?: string })?.author?.replace(/^@/, '').toLowerCase();
+
+        if (!skillName || !authorHandle) {
+          return {
+            content: [{ type: 'text' as const, text: 'Both skill_name and author are required.' }],
+            isError: true,
+          };
+        }
+
+        const currentUser = await storage.getUserByKeyHash(keyHash);
+        if (!currentUser?.handle) {
+          return {
+            content: [{ type: 'text' as const, text: 'You need a handle to clone skills. Claim one in settings.' }],
+            isError: true,
+          };
+        }
+
+        const userSkills = currentUser.skills || [];
+        if (userSkills.length >= MAX_SKILLS_PER_USER) {
+          return {
+            content: [{ type: 'text' as const, text: `Maximum ${MAX_SKILLS_PER_USER} skills allowed. Delete an existing skill first.` }],
+            isError: true,
+          };
+        }
+
+        if (userSkills.some(s => s.name === skillName)) {
+          return {
+            content: [{ type: 'text' as const, text: `You already have a skill named "${skillName}". Delete it first or choose a different skill.` }],
+            isError: true,
+          };
+        }
+
+        // Find source skill
+        const authorUser = await storage.getUser(authorHandle);
+        if (!authorUser) {
+          return {
+            content: [{ type: 'text' as const, text: `User @${authorHandle} not found.` }],
+            isError: true,
+          };
+        }
+
+        const sourceSkill = (authorUser.skills || []).find(s => s.name === skillName && s.public);
+        if (!sourceSkill) {
+          return {
+            content: [{ type: 'text' as const, text: `No public skill named "${skillName}" found for @${authorHandle}.` }],
+            isError: true,
+          };
+        }
+
+        // Clone the skill
+        const clonedSkill: Skill = {
+          id: generateSkillId(),
+          name: sourceSkill.name,
+          description: sourceSkill.description,
+          instructions: sourceSkill.instructions,
+          handlerType: 'instructions',
+          parameters: sourceSkill.parameters ? [...sourceSkill.parameters] : undefined,
+          triggerCondition: sourceSkill.triggerCondition,
+          to: undefined,           // Clear destinations — user must configure
+          visibility: sourceSkill.visibility,
+          public: false,           // Start as private
+          author: currentUser.handle,
+          clonedFrom: `${authorHandle}/${sourceSkill.id}`,
+          cloneCount: 0,
+          createdAt: Date.now(),
+        };
+
+        // Add to current user's skills
+        const updatedSkills = [...userSkills, clonedSkill];
+        const cloneUpdates: Record<string, any> = { skills: updatedSkills };
+        if (!currentUser.onboardedAt) cloneUpdates.onboardedAt = Date.now();
+        await storage.updateUser(currentUser.handle, cloneUpdates);
+
+        // Increment source skill's clone count
+        const sourceSkills = authorUser.skills || [];
+        const sourceIndex = sourceSkills.findIndex(s => s.id === sourceSkill.id);
+        if (sourceIndex !== -1) {
+          const updatedSourceSkills = [...sourceSkills];
+          updatedSourceSkills[sourceIndex] = {
+            ...updatedSourceSkills[sourceIndex],
+            cloneCount: (updatedSourceSkills[sourceIndex].cloneCount || 0) + 1,
+          };
+          await storage.updateUser(authorHandle, { skills: updatedSourceSkills });
+        }
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Cloned "${skillName}" from @${authorHandle}!\n\n` +
+              `Tool name: skill_${skillName}\n` +
+              `Destinations: (none — configure with hermes_skills update)\n` +
+              `Gallery: private\n\n` +
+              `The skill_${skillName} tool will appear on next connection.`,
+          }],
+        };
+      } catch (error: any) {
+        console.error('hermes_skills_clone error:', error);
+        return {
+          content: [{ type: 'text' as const, text: `Failed to clone skill: ${error?.message || 'Unknown error'}` }],
+          isError: true,
+        };
+      }
+    }
+
+    // Handle channel_* tools (channel-scoped skills)
+    if (name.startsWith('channel_')) {
+      try {
+        // Parse: channel_<channelId>_<skillName>
+        // channelId can contain hyphens but not underscores, so split on first and last underscore
+        const firstUnderscore = name.indexOf('_');
+        const lastUnderscore = name.lastIndexOf('_');
+        if (firstUnderscore === lastUnderscore) {
+          return {
+            content: [{ type: 'text' as const, text: `Invalid channel tool name: ${name}` }],
+            isError: true,
+          };
+        }
+        const channelId = name.substring(firstUnderscore + 1, lastUnderscore);
+        const skillName = name.substring(lastUnderscore + 1);
+
+        const currentUser = await storage.getUserByKeyHash(keyHash);
+        if (!currentUser?.handle) {
+          return {
+            content: [{ type: 'text' as const, text: 'No account found.' }],
+            isError: true,
+          };
+        }
+
+        const channel = await storage.getChannel(channelId);
+        if (!channel) {
+          return {
+            content: [{ type: 'text' as const, text: `Channel #${channelId} not found.` }],
+            isError: true,
+          };
+        }
+
+        // Verify user is a subscriber
+        if (!channel.subscribers.some(s => s.handle === currentUser.handle)) {
+          return {
+            content: [{ type: 'text' as const, text: `You are not a member of #${channelId}.` }],
+            isError: true,
+          };
+        }
+
+        // Find the skill
+        const skill = channel.skills.find(s => s.name === skillName);
+        if (!skill) {
+          return {
+            content: [{ type: 'text' as const, text: `Skill "${skillName}" not found in #${channelId}.` }],
+            isError: true,
+          };
+        }
+
+        const result = (args as { result?: string })?.result;
+
+        if (result) {
+          // Auto-post mode: create an entry tagged with the channel
+          const userStagingDelay = currentUser.stagingDelayMs ?? STAGING_DELAY_MS;
+
+          // Use #channel in to array — access resolved live via channel membership
+          const aiOnly = isDefaultAiOnly(currentUser);
+
+          const saved = await storage.addEntry({
+            pseudonym,
+            handle: currentUser.handle,
+            client: 'code',
+            content: result.trim(),
+            timestamp: Date.now(),
+            model: 'channel-skill',
+            humanVisible: !aiOnly, // backward compat
+            aiOnly,
+            topicHints: [`channel:${channelId}`, `skill:${skillName}`],
+            channel: channelId, // backward compat
+            to: [`#${channelId}`],
+          }, userStagingDelay);
+
+          // Mark onboarded on first action
+          if (!currentUser.onboardedAt) {
+            await storage.updateUser(currentUser.handle, { onboardedAt: Date.now() });
+          }
+
+          const delayMinutes = Math.round(userStagingDelay / 1000 / 60);
+          let responseText = `Posted to #${channelId} via "${skillName}" (publishes in ${delayMinutes} minutes):\n\n"${result.trim()}"\n\nEntry ID: ${saved.id}`;
+
+          return {
+            content: [{ type: 'text' as const, text: responseText }],
+          };
+        }
+
+        // Instructions mode: return skill instructions + parameter values
+        const paramValues: Record<string, any> = {};
+        for (const param of (skill.parameters || [])) {
+          const value = (args as Record<string, any>)?.[param.name];
+          if (value !== undefined) {
+            paramValues[param.name] = value;
+          }
+        }
+
+        let instructionText = `Channel: #${channelId}\nSkill: ${skill.name}\n`;
+        if (skill.instructions) {
+          instructionText += `\nInstructions:\n${skill.instructions}\n`;
+        }
+        if (Object.keys(paramValues).length > 0) {
+          instructionText += `\nParameters:\n${Object.entries(paramValues).map(([k, v]) => `• ${k}: ${JSON.stringify(v)}`).join('\n')}\n`;
+        }
+        instructionText += `\nTo post the result to #${channelId}, call this tool again with the "result" parameter.`;
+
+        return {
+          content: [{ type: 'text' as const, text: instructionText }],
+        };
+      } catch (error: any) {
+        console.error(`channel_* handler error:`, error);
+        return {
+          content: [{ type: 'text' as const, text: `Channel skill error: ${error?.message || 'Unknown error'}` }],
+          isError: true,
+        };
+      }
+    }
+
+    // Handle skill_* tools (user-created skills)
+    if (name.startsWith('skill_')) {
+      try {
+        const skillName = name.slice(6); // Remove 'skill_' prefix
+        const currentUser = await storage.getUserByKeyHash(keyHash);
+        if (!currentUser?.handle) {
+          return {
+            content: [{ type: 'text' as const, text: 'No account found.' }],
+            isError: true,
+          };
+        }
+
+        const skill = (currentUser.skills || []).find(s => s.name === skillName);
+        if (!skill) {
+          return {
+            content: [{ type: 'text' as const, text: `Skill "${skillName}" not found in your skills.` }],
+            isError: true,
+          };
+        }
+
+        const result = (args as { result?: string })?.result;
+
+        if (result) {
+          // Auto-post mode: create an entry with the skill's destinations
+          const userStagingDelay = currentUser.stagingDelayMs ?? STAGING_DELAY_MS;
+
+          // Determine aiOnly: skill.aiOnly > skill legacy > user default
+          let aiOnly: boolean;
+          if (skill.aiOnly !== undefined) {
+            aiOnly = skill.aiOnly;
+          } else if (skill.humanVisible !== undefined) {
+            aiOnly = !skill.humanVisible;
+          } else if (skill.visibility === 'ai-only') {
+            aiOnly = true;
+          } else {
+            aiOnly = isDefaultAiOnly(currentUser);
+          }
+
+          const saved = await storage.addEntry({
+            pseudonym,
+            handle: currentUser.handle,
+            client: 'code',
+            content: result.trim(),
+            timestamp: Date.now(),
+            model: 'skill',
+            humanVisible: !aiOnly, // backward compat
+            aiOnly,
+            topicHints: [`skill:${skillName}`],
+            to: skill.to || undefined,
+          }, userStagingDelay);
+
+          // Mark onboarded on first action
+          if (currentUser && !currentUser.onboardedAt) {
+            await storage.updateUser(currentUser.handle, { onboardedAt: Date.now() });
+          }
+
+          const delayMinutes = Math.round(userStagingDelay / 1000 / 60);
+          let responseText = `Posted via skill "${skillName}" (publishes in ${delayMinutes} minutes):\n\n"${result.trim()}"\n\nEntry ID: ${saved.id}`;
+
+          if (skill.to && skill.to.length > 0) {
+            responseText += `\n\nAddressed to: ${skill.to.join(', ')}`;
+          }
+
+          return {
+            content: [{ type: 'text' as const, text: responseText }],
+          };
+        }
+
+        // Instructions mode: return skill instructions + parameter values
+        const paramValues: Record<string, any> = {};
+        for (const param of (skill.parameters || [])) {
+          const value = (args as Record<string, any>)?.[param.name];
+          if (value !== undefined) {
+            paramValues[param.name] = value;
+          }
+        }
+
+        let instructionText = `Skill: ${skill.name}\n`;
+        if (skill.instructions) {
+          instructionText += `\nInstructions:\n${skill.instructions}\n`;
+        }
+        if (Object.keys(paramValues).length > 0) {
+          instructionText += `\nParameters:\n${Object.entries(paramValues).map(([k, v]) => `• ${k}: ${JSON.stringify(v)}`).join('\n')}\n`;
+        }
+        if (skill.to && skill.to.length > 0) {
+          instructionText += `\nDestinations: ${skill.to.join(', ')}`;
+          instructionText += `\nTo post the result, call this tool again with the "result" parameter.`;
+        }
+
+        return {
+          content: [{ type: 'text' as const, text: instructionText }],
+        };
+      } catch (error: any) {
+        console.error(`skill_* handler error:`, error);
+        return {
+          content: [{ type: 'text' as const, text: `Skill error: ${error?.message || 'Unknown error'}` }],
+          isError: true,
+        };
+      }
+    }
+
+    // Handle daily question tool
+    if (name === 'hermes_daily_question') {
+      try {
+        const currentUser = await storage.getUserByKeyHash(keyHash);
+        if (!currentUser?.handle) {
+          return {
+            content: [{ type: 'text' as const, text: 'You need a handle to use the daily question tool. Claim one first.' }],
+            isError: true,
+          };
+        }
+
+        // Double-check not already triggered today
+        const now = Date.now();
+        const last = currentUser.lastDailyQuestionAt;
+        if (last) {
+          const lastDate = new Date(last).toISOString().slice(0, 10);
+          const todayDate = new Date(now).toISOString().slice(0, 10);
+          if (lastDate === todayDate) {
+            return {
+              content: [{ type: 'text' as const, text: 'Daily question already triggered today. Try again tomorrow (resets midnight UTC).' }],
+              isError: true,
+            };
+          }
+        }
+
+        // Mark as used FIRST to prevent double-trigger from concurrent sessions
+        await storage.updateUser(currentUser.handle, { lastDailyQuestionAt: now });
+
+        // Gather context
+        const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+        const twoDaysAgo = now - 2 * 24 * 60 * 60 * 1000;
+
+        // 1. User's recent entries (7 days, up to 10)
+        const userEntries = (await storage.getEntriesByHandle(currentUser.handle, 50))
+          .filter(e => e.timestamp >= sevenDaysAgo)
+          .slice(0, 10);
+
+        // 2. Followed users' entries (2 days, up to 8)
+        const following = currentUser.following || [];
+        let followedEntries: JournalEntry[] = [];
+        for (const f of following) {
+          const entries = (await storage.getEntriesByHandle(f.handle, 20))
+            .filter(e => e.timestamp >= twoDaysAgo);
+          followedEntries.push(...entries);
+        }
+        followedEntries.sort((a, b) => b.timestamp - a.timestamp);
+        followedEntries = followedEntries.slice(0, 8);
+
+        // 3. Other recent entries for broader context (2 days, up to 5)
+        const allRecent = (await storage.getEntries(50))
+          .filter(e => e.timestamp >= twoDaysAgo && e.handle !== currentUser.handle && !following.some(f => f.handle === e.handle))
+          .slice(0, 5);
+
+        // Format context
+        const truncate = (s: string, max: number) => s.length > max ? s.slice(0, max) + '...' : s;
+        const formatEntry = (e: JournalEntry) => {
+          const date = new Date(e.timestamp).toISOString().slice(0, 10);
+          const author = e.handle ? `@${e.handle}` : e.pseudonym;
+          return `[${date}] ${author}: ${truncate(e.content, 300)}`;
+        };
+
+        let context = `# Daily Question Context for @${currentUser.handle}\n\n`;
+
+        // Profile
+        context += `## Your Profile\n`;
+        if (currentUser.displayName) context += `Name: ${currentUser.displayName}\n`;
+        if (currentUser.bio) context += `Bio: ${currentUser.bio}\n`;
+        if (following.length > 0) {
+          context += `\nFollowing:\n`;
+          for (const f of following) {
+            context += `• @${f.handle}${f.note ? ` — ${truncate(f.note, 150)}` : ''}\n`;
+          }
+        }
+
+        // User's entries
+        context += `\n## Your Recent Entries (last 7 days)\n`;
+        if (userEntries.length === 0) {
+          context += `No entries in the last 7 days.\n`;
+        } else {
+          for (const e of userEntries) {
+            context += `${formatEntry(e)}\n`;
+          }
+        }
+
+        // Followed entries
+        if (followedEntries.length > 0) {
+          context += `\n## Entries from People You Follow (last 2 days)\n`;
+          for (const e of followedEntries) {
+            context += `${formatEntry(e)}\n`;
+          }
+        }
+
+        // Broader context
+        if (allRecent.length > 0) {
+          context += `\n## Other Recent Activity (last 2 days)\n`;
+          for (const e of allRecent) {
+            context += `${formatEntry(e)}\n`;
+          }
+        }
+
+        context += `\n---\n`;
+        context += `Use this context to ask one specific, thoughtful question. Reference specific things from the entries above — don't be generic. If the user has no entries, ask an introductory question about what they're working on.`;
+
+        return {
+          content: [{ type: 'text' as const, text: context }],
+        };
+      } catch (error: any) {
+        console.error('hermes_daily_question error:', error);
+        return {
+          content: [{ type: 'text' as const, text: `Daily question error: ${error?.message || 'Unknown error'}` }],
+          isError: true,
         };
       }
     }
@@ -1734,15 +3314,16 @@ const server = createServer(async (req, res) => {
         isAuthor = entry.pseudonym === userPseudonym || entry.handle === user?.handle;
       }
 
-      // Check visibility permissions
-      if (!canViewEntry(entry, userHandle, userEmail, isAuthor)) {
+      // Check visibility permissions (async for #channel resolution)
+      const normalized = normalizeEntry(entry);
+      if (!await canView(normalized, userHandle, userEmail, isAuthor, storage)) {
         res.writeHead(404);
         res.end(JSON.stringify({ error: 'Entry not found' }));
         return;
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(stripHiddenContent(entry, isAuthor)));
+      res.end(JSON.stringify(stripHiddenContent(normalized, isAuthor)));
       return;
     }
 
@@ -1775,12 +3356,16 @@ const server = createServer(async (req, res) => {
         userEmail = user?.email;
       }
 
-      // Get replies and filter by visibility
+      // Get replies and filter by visibility (async for #channel resolution)
       const allReplies = await storage.getRepliesTo(entryId, limit);
-      const visibleReplies = allReplies.filter(e => {
+      const normalizedReplies = allReplies.map(normalizeEntry);
+      const visibleReplies: JournalEntry[] = [];
+      for (const e of normalizedReplies) {
         const isAuthor = e.pseudonym === userPseudonym || e.handle === userHandle;
-        return canViewEntry(e, userHandle, userEmail, isAuthor);
-      });
+        if (await canView(e, userHandle, userEmail, isAuthor, storage)) {
+          visibleReplies.push(e);
+        }
+      }
 
       // Strip hidden content
       const replies = visibleReplies.map(e => {
@@ -1826,11 +3411,15 @@ const server = createServer(async (req, res) => {
         }
       }
 
-      // Filter and process entries based on visibility
-      let visibleEntries = entries.filter(e => {
+      // Filter and process entries based on visibility (async for #channel resolution)
+      const normalizedEntries = entries.map(normalizeEntry);
+      let visibleEntries: JournalEntry[] = [];
+      for (const e of normalizedEntries) {
         const isAuthor = e.pseudonym === authorPseudonym || e.handle === authorHandle;
-        return canViewEntry(e, authorHandle || undefined, authorEmail, isAuthor);
-      });
+        if (await canView(e, authorHandle || undefined, authorEmail, isAuthor, storage)) {
+          visibleEntries.push(e);
+        }
+      }
 
       // Filter to followed users only if requested
       if (followingOnly && followedHandleSet) {
@@ -2289,7 +3878,7 @@ const server = createServer(async (req, res) => {
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'POST' && url.pathname === '/api/entries') {
       const body = await readBody(req);
-      const { content, secret_key } = JSON.parse(body);
+      const { content, secret_key, inReplyTo } = JSON.parse(body);
 
       if (!isValidSecretKey(secret_key)) {
         res.writeHead(400);
@@ -2303,20 +3892,39 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      // TODO: Run anonymization filter here
+      // Validate parent entry if this is a reply
+      let parentEntry: JournalEntry | null = null;
+      if (inReplyTo) {
+        parentEntry = await storage.getEntry(inReplyTo);
+        if (!parentEntry) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: 'Parent entry not found' }));
+          return;
+        }
+      }
 
       const pseudonym = derivePseudonym(secret_key);
       const keyHash = hashSecretKey(secret_key);
       const user = await storage.getUserByKeyHash(keyHash);
       const handle = user?.handle || undefined;
 
-      const entry = await storage.addEntry({
+      const entryData: Omit<JournalEntry, 'id'> = {
         pseudonym,
         handle,
         client: 'desktop', // Default for REST API
         content: content.trim(),
         timestamp: Date.now(),
-      });
+      };
+
+      if (parentEntry) {
+        entryData.inReplyTo = inReplyTo;
+        entryData.visibility = 'public';
+        if (parentEntry.handle) {
+          entryData.to = ['@' + parentEntry.handle];
+        }
+      }
+
+      const entry = await storage.addEntry(entryData);
 
       res.writeHead(201);
       res.end(JSON.stringify({ entry, pseudonym }));
@@ -2843,6 +4451,680 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // CHANNEL API ENDPOINTS
+    // ═══════════════════════════════════════════════════════════════
+
+    // GET /api/channels - List public channels (+ user's channels if secret_key provided)
+    if (req.method === 'GET' && url.pathname === '/api/channels') {
+      const secretKey = url.searchParams.get('secret_key');
+      let userHandle: string | undefined;
+
+      if (secretKey && isValidSecretKey(secretKey)) {
+        const keyHash = hashSecretKey(secretKey);
+        const user = await storage.getUserByKeyHash(keyHash);
+        userHandle = user?.handle;
+      }
+
+      const publicChannels = await storage.listChannels({ joinRule: 'open' });
+      let subscribedChannels: Channel[] = [];
+      if (userHandle) {
+        subscribedChannels = await storage.getSubscribedChannels(userHandle);
+      }
+
+      // Merge: subscribed (including private) + public not already subscribed
+      const subscribedIds = new Set(subscribedChannels.map(c => c.id));
+      const discoverable = publicChannels.filter(c => !subscribedIds.has(c.id));
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        subscribed: subscribedChannels,
+        discoverable,
+      }));
+      return;
+    }
+
+    // GET /api/channels/:id - Channel info
+    if (req.method === 'GET' && url.pathname.startsWith('/api/channels/') && !url.pathname.includes('/entries') && !url.pathname.includes('/skills')) {
+      const channelId = decodeURIComponent(url.pathname.slice('/api/channels/'.length));
+      const channel = await storage.getChannel(channelId);
+
+      if (!channel) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Channel not found' }));
+        return;
+      }
+
+      // Invite-only channels: only show to members
+      const channelInfoJoinRule = channel.joinRule || (channel.visibility === 'private' ? 'invite' : 'open');
+      if (channelInfoJoinRule === 'invite') {
+        const secretKey = url.searchParams.get('secret_key');
+        if (!secretKey || !isValidSecretKey(secretKey)) {
+          res.writeHead(401);
+          res.end(JSON.stringify({ error: 'Authentication required for invite-only channels' }));
+          return;
+        }
+        const keyHash = hashSecretKey(secretKey);
+        const user = await storage.getUserByKeyHash(keyHash);
+        if (!user?.handle || !channel.subscribers.some(s => s.handle === user.handle)) {
+          res.writeHead(403);
+          res.end(JSON.stringify({ error: 'Not a member of this channel' }));
+          return;
+        }
+      }
+
+      res.writeHead(200);
+      res.end(JSON.stringify(channel));
+      return;
+    }
+
+    // POST /api/channels - Create channel
+    if (req.method === 'POST' && url.pathname === '/api/channels') {
+      const body = await new Promise<string>((resolve) => {
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => resolve(data));
+      });
+
+      let parsed: { secret_key?: string; id?: string; name?: string; description?: string; visibility?: 'public' | 'private'; join_rule?: 'open' | 'invite' };
+      try { parsed = JSON.parse(body); } catch { res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid JSON' })); return; }
+
+      if (!parsed.secret_key || !isValidSecretKey(parsed.secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(parsed.secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      if (!parsed.id || !isValidChannelId(parsed.id)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid channel ID. Must be 2-30 chars, lowercase alphanumeric + hyphens.' }));
+        return;
+      }
+
+      if (!parsed.name) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Channel name is required' }));
+        return;
+      }
+
+      try {
+        const restJoinRule = parsed.join_rule || (parsed.visibility === 'private' ? 'invite' : 'open');
+        const restVisibility = parsed.visibility || (restJoinRule === 'invite' ? 'private' : 'public');
+        const channel = await storage.createChannel({
+          id: parsed.id,
+          name: parsed.name,
+          description: parsed.description,
+          visibility: restVisibility, // backward compat
+          joinRule: restJoinRule,
+          createdBy: user.handle,
+          createdAt: Date.now(),
+          skills: [],
+          subscribers: [{ handle: user.handle, role: 'admin', joinedAt: Date.now() }],
+        });
+        res.writeHead(201);
+        res.end(JSON.stringify(channel));
+      } catch (err: any) {
+        res.writeHead(409);
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // PUT /api/channels/:id - Update channel (admin only)
+    if (req.method === 'PUT' && url.pathname.startsWith('/api/channels/') && !url.pathname.includes('/skills')) {
+      const channelId = decodeURIComponent(url.pathname.slice('/api/channels/'.length));
+      const body = await new Promise<string>((resolve) => {
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => resolve(data));
+      });
+
+      let parsed: { secret_key?: string; name?: string; description?: string; visibility?: 'public' | 'private' };
+      try { parsed = JSON.parse(body); } catch { res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid JSON' })); return; }
+
+      if (!parsed.secret_key || !isValidSecretKey(parsed.secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(parsed.secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      const channel = await storage.getChannel(channelId);
+      if (!channel) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Channel not found' }));
+        return;
+      }
+
+      const sub = channel.subscribers.find(s => s.handle === user.handle);
+      if (!sub || sub.role !== 'admin') {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Only admins can update the channel' }));
+        return;
+      }
+
+      const updates: Partial<Channel> = {};
+      if (parsed.name) updates.name = parsed.name;
+      if (parsed.description !== undefined) updates.description = parsed.description;
+      if (parsed.visibility) updates.visibility = parsed.visibility;
+
+      const updated = await storage.updateChannel(channelId, updates);
+      res.writeHead(200);
+      res.end(JSON.stringify(updated));
+      return;
+    }
+
+    // DELETE /api/channels/:id - Delete channel (admin only)
+    if (req.method === 'DELETE' && url.pathname.startsWith('/api/channels/') && !url.pathname.includes('/skills')) {
+      const channelId = decodeURIComponent(url.pathname.slice('/api/channels/'.length));
+      const secretKey = url.searchParams.get('secret_key');
+
+      if (!secretKey || !isValidSecretKey(secretKey)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(secretKey);
+      const user = await storage.getUserByKeyHash(keyHash);
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      const channel = await storage.getChannel(channelId);
+      if (!channel) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Channel not found' }));
+        return;
+      }
+
+      const sub = channel.subscribers.find(s => s.handle === user.handle);
+      if (!sub || sub.role !== 'admin') {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Only admins can delete the channel' }));
+        return;
+      }
+
+      await storage.deleteChannel(channelId);
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    // POST /api/channels/:id/join - Join channel
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/channels\/[^/]+\/join$/)) {
+      const channelId = decodeURIComponent(url.pathname.split('/')[3]);
+      const body = await new Promise<string>((resolve) => {
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => resolve(data));
+      });
+
+      let parsed: { secret_key?: string; invite_token?: string };
+      try { parsed = JSON.parse(body); } catch { res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid JSON' })); return; }
+
+      if (!parsed.secret_key || !isValidSecretKey(parsed.secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(parsed.secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      const channel = await storage.getChannel(channelId);
+      if (!channel) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Channel not found' }));
+        return;
+      }
+
+      const restJoinJoinRule = channel.joinRule || (channel.visibility === 'private' ? 'invite' : 'open');
+      if (restJoinJoinRule === 'invite') {
+        if (!parsed.invite_token) {
+          res.writeHead(403);
+          res.end(JSON.stringify({ error: 'Invite token required for invite-only channels' }));
+          return;
+        }
+        try {
+          await storage.useInvite(parsed.invite_token);
+        } catch (err: any) {
+          res.writeHead(403);
+          res.end(JSON.stringify({ error: err.message }));
+          return;
+        }
+      }
+
+      await storage.addSubscriber(channelId, user.handle, 'member');
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, channel }));
+      return;
+    }
+
+    // POST /api/channels/:id/leave - Leave channel
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/channels\/[^/]+\/leave$/)) {
+      const channelId = decodeURIComponent(url.pathname.split('/')[3]);
+      const body = await new Promise<string>((resolve) => {
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => resolve(data));
+      });
+
+      let parsed: { secret_key?: string };
+      try { parsed = JSON.parse(body); } catch { res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid JSON' })); return; }
+
+      if (!parsed.secret_key || !isValidSecretKey(parsed.secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(parsed.secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      await storage.removeSubscriber(channelId, user.handle);
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    // POST /api/channels/:id/invite - Create invite (admin only)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/channels\/[^/]+\/invite$/)) {
+      const channelId = decodeURIComponent(url.pathname.split('/')[3]);
+      const body = await new Promise<string>((resolve) => {
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => resolve(data));
+      });
+
+      let parsed: { secret_key?: string; max_uses?: number; expires_in_hours?: number };
+      try { parsed = JSON.parse(body); } catch { res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid JSON' })); return; }
+
+      if (!parsed.secret_key || !isValidSecretKey(parsed.secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(parsed.secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      const channel = await storage.getChannel(channelId);
+      if (!channel) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Channel not found' }));
+        return;
+      }
+
+      const sub = channel.subscribers.find(s => s.handle === user.handle);
+      if (!sub || sub.role !== 'admin') {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Only admins can create invites' }));
+        return;
+      }
+
+      const token = generateEntryId();
+      const invite: ChannelInvite = {
+        token,
+        channelId,
+        createdBy: user.handle,
+        createdAt: Date.now(),
+        expiresAt: parsed.expires_in_hours ? Date.now() + parsed.expires_in_hours * 60 * 60 * 1000 : undefined,
+        maxUses: parsed.max_uses,
+        uses: 0,
+      };
+
+      await storage.createInvite(invite);
+      res.writeHead(201);
+      res.end(JSON.stringify(invite));
+      return;
+    }
+
+    // POST /api/channels/:id/invite-user - Invite specific user (admin only)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/channels\/[^/]+\/invite-user$/)) {
+      const channelId = decodeURIComponent(url.pathname.split('/')[3]);
+      const body = await new Promise<string>((resolve) => {
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => resolve(data));
+      });
+
+      let parsed: { secret_key?: string; handle?: string };
+      try { parsed = JSON.parse(body); } catch { res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid JSON' })); return; }
+
+      if (!parsed.secret_key || !isValidSecretKey(parsed.secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(parsed.secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      const targetHandle = parsed.handle?.toLowerCase();
+      if (!targetHandle) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'handle is required' }));
+        return;
+      }
+
+      const channel = await storage.getChannel(channelId);
+      if (!channel) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Channel not found' }));
+        return;
+      }
+
+      const sub = channel.subscribers.find(s => s.handle === user.handle);
+      if (!sub || sub.role !== 'admin') {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Only admins can invite users directly' }));
+        return;
+      }
+
+      // Check target user exists
+      const targetUser = await storage.getUser(targetHandle);
+      if (!targetUser) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: `User @${targetHandle} not found` }));
+        return;
+      }
+
+      // Check not already a member
+      if (channel.subscribers.some(s => s.handle === targetHandle)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: `@${targetHandle} is already a member` }));
+        return;
+      }
+
+      // Generate single-use invite token
+      const token = generateEntryId();
+      const invite: ChannelInvite = {
+        token,
+        channelId,
+        createdBy: user.handle,
+        createdAt: Date.now(),
+        maxUses: 1,
+        uses: 0,
+      };
+      await storage.createInvite(invite);
+
+      // Create addressed entry to target user
+      const pseudonym = derivePseudonym(parsed.secret_key);
+      const inviteMessage = `You've been invited to join #${channelId} by @${user.handle}.\n\nChannel: ${channel.name}${channel.description ? ' — ' + channel.description : ''}\n\nTo join, use: hermes_channels with action: "join", channel_id: "${channelId}", invite_token: "${token}"`;
+      const shortStagingDelay = 60 * 1000;
+
+      await storage.addEntry({
+        pseudonym,
+        handle: user.handle,
+        client: 'code',
+        content: inviteMessage,
+        timestamp: Date.now(),
+        humanVisible: true,
+        to: [`@${targetHandle}`],
+        visibility: 'private',
+      }, shortStagingDelay);
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, message: `Invitation sent to @${targetHandle}` }));
+      return;
+    }
+
+    // GET /api/channels/:id/entries - Get channel entries
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/channels\/[^/]+\/entries$/)) {
+      const channelId = decodeURIComponent(url.pathname.split('/')[3]);
+      const limit = parseInt(url.searchParams.get('limit') || '50');
+
+      const channel = await storage.getChannel(channelId);
+      if (!channel) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Channel not found' }));
+        return;
+      }
+
+      // Invite-only channels: check membership
+      const channelJoinRuleForEntries = channel.joinRule || (channel.visibility === 'private' ? 'invite' : 'open');
+      if (channelJoinRuleForEntries === 'invite') {
+        const secretKey = url.searchParams.get('secret_key');
+        if (!secretKey || !isValidSecretKey(secretKey)) {
+          res.writeHead(401);
+          res.end(JSON.stringify({ error: 'Authentication required for invite-only channels' }));
+          return;
+        }
+        const keyHash = hashSecretKey(secretKey);
+        const user = await storage.getUserByKeyHash(keyHash);
+        if (!user?.handle || !channel.subscribers.some(s => s.handle === user.handle)) {
+          res.writeHead(403);
+          res.end(JSON.stringify({ error: 'Not a member of this channel' }));
+          return;
+        }
+      }
+
+      const entries = await storage.getChannelEntries(channelId, limit);
+      res.writeHead(200);
+      res.end(JSON.stringify({ entries }));
+      return;
+    }
+
+    // POST /api/channels/:id/skills - Add skill to channel (admin only)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/channels\/[^/]+\/skills$/)) {
+      const channelId = decodeURIComponent(url.pathname.split('/')[3]);
+      const body = await new Promise<string>((resolve) => {
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => resolve(data));
+      });
+
+      let parsed: { secret_key?: string; name?: string; description?: string; instructions?: string; parameters?: any[] };
+      try { parsed = JSON.parse(body); } catch { res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid JSON' })); return; }
+
+      if (!parsed.secret_key || !isValidSecretKey(parsed.secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(parsed.secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      const channel = await storage.getChannel(channelId);
+      if (!channel) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Channel not found' }));
+        return;
+      }
+
+      const sub = channel.subscribers.find(s => s.handle === user.handle);
+      if (!sub || sub.role !== 'admin') {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Only admins can add skills' }));
+        return;
+      }
+
+      if (!parsed.name || !/^[a-z0-9-]+$/.test(parsed.name)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Skill name required (lowercase alphanumeric + hyphens)' }));
+        return;
+      }
+
+      if (channel.skills.some(s => s.name === parsed.name)) {
+        res.writeHead(409);
+        res.end(JSON.stringify({ error: `Skill "${parsed.name}" already exists in this channel` }));
+        return;
+      }
+
+      const newSkill: Skill = {
+        id: `${channelId}_${parsed.name}`,
+        name: parsed.name,
+        description: parsed.description || '',
+        instructions: parsed.instructions || '',
+        parameters: parsed.parameters,
+        handlerType: 'instructions',
+        createdAt: Date.now(),
+      };
+
+      channel.skills.push(newSkill);
+      await storage.updateChannel(channelId, { skills: channel.skills });
+
+      res.writeHead(201);
+      res.end(JSON.stringify(newSkill));
+      return;
+    }
+
+    // PUT /api/channels/:id/skills/:name - Update channel skill (admin only)
+    if (req.method === 'PUT' && url.pathname.match(/^\/api\/channels\/[^/]+\/skills\/[^/]+$/)) {
+      const parts = url.pathname.split('/');
+      const channelId = decodeURIComponent(parts[3]);
+      const skillName = decodeURIComponent(parts[5]);
+
+      const body = await new Promise<string>((resolve) => {
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => resolve(data));
+      });
+
+      let parsed: { secret_key?: string; description?: string; instructions?: string; parameters?: any[] };
+      try { parsed = JSON.parse(body); } catch { res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid JSON' })); return; }
+
+      if (!parsed.secret_key || !isValidSecretKey(parsed.secret_key)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(parsed.secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      const channel = await storage.getChannel(channelId);
+      if (!channel) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Channel not found' }));
+        return;
+      }
+
+      const sub = channel.subscribers.find(s => s.handle === user.handle);
+      if (!sub || sub.role !== 'admin') {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Only admins can update skills' }));
+        return;
+      }
+
+      const skillIndex = channel.skills.findIndex(s => s.name === skillName);
+      if (skillIndex === -1) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: `Skill "${skillName}" not found` }));
+        return;
+      }
+
+      if (parsed.description !== undefined) channel.skills[skillIndex].description = parsed.description;
+      if (parsed.instructions !== undefined) channel.skills[skillIndex].instructions = parsed.instructions;
+      if (parsed.parameters !== undefined) channel.skills[skillIndex].parameters = parsed.parameters;
+      channel.skills[skillIndex].updatedAt = Date.now();
+
+      await storage.updateChannel(channelId, { skills: channel.skills });
+
+      res.writeHead(200);
+      res.end(JSON.stringify(channel.skills[skillIndex]));
+      return;
+    }
+
+    // DELETE /api/channels/:id/skills/:name - Remove channel skill (admin only)
+    if (req.method === 'DELETE' && url.pathname.match(/^\/api\/channels\/[^/]+\/skills\/[^/]+$/)) {
+      const parts = url.pathname.split('/');
+      const channelId = decodeURIComponent(parts[3]);
+      const skillName = decodeURIComponent(parts[5]);
+      const secretKey = url.searchParams.get('secret_key');
+
+      if (!secretKey || !isValidSecretKey(secretKey)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(secretKey);
+      const user = await storage.getUserByKeyHash(keyHash);
+      if (!user?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Claim a handle first' }));
+        return;
+      }
+
+      const channel = await storage.getChannel(channelId);
+      if (!channel) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Channel not found' }));
+        return;
+      }
+
+      const sub = channel.subscribers.find(s => s.handle === user.handle);
+      if (!sub || sub.role !== 'admin') {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Only admins can remove skills' }));
+        return;
+      }
+
+      const skillIndex = channel.skills.findIndex(s => s.name === skillName);
+      if (skillIndex === -1) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: `Skill "${skillName}" not found` }));
+        return;
+      }
+
+      channel.skills.splice(skillIndex, 1);
+      await storage.updateChannel(channelId, { skills: channel.skills });
+
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
     // ─────────────────────────────────────────────────────────────
     // POST /api/identity/generate - Generate new identity key
     // ─────────────────────────────────────────────────────────────
@@ -3310,6 +5592,35 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // POST /api/test-digest?handle=james - Send test digest to a specific user
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/test-digest') {
+      const handle = url.searchParams.get('handle');
+      if (!handle) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'handle query parameter required' }));
+        return;
+      }
+      console.log(`[Digest] Test digest requested for @${handle}`);
+      const result = await notificationService.sendTestDigest(handle);
+      if (!result) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Could not generate digest (user not found or Claude failed)' }));
+        return;
+      }
+      // Return the HTML so it can be previewed
+      const preview = url.searchParams.get('preview') === 'true';
+      if (preview) {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(result.html);
+      } else {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, subject: result.subject, htmlLength: result.html.length }));
+      }
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // GET /api/users/search?q=prefix - Search users for @mention typeahead
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/users/search') {
@@ -3582,7 +5893,6 @@ const server = createServer(async (req, res) => {
           : 'They haven\'t set up yet — help them through it.';
 
         const keyPlaceholder = key || 'YOUR_KEY';
-        const handlePlaceholder = handle ? `@${handle}` : '@yourhandle';
 
         const claudeMdInstructions = `You have access to Hermes notebook tools. Use them proactively:
 
@@ -3590,31 +5900,22 @@ const server = createServer(async (req, res) => {
 
 - **search_notebook**: Use liberally. Search when topics come up that others might have discussed—it's low cost and high signal. Search by keyword or filter by @handle. Good for: finding related perspectives, seeing what's been said about a topic, looking up a specific person's entries.`;
 
-        const prompt = `You're helping someone get started with Hermes — a shared notebook where Claudes write about conversations as they happen. Think of it as a communal journal across many AI conversations.
+        const prompt = `Hermes is a shared notebook where Claudes write about conversations as they happen — a communal journal across AI conversations.
 
 ${identityLine}
 
-${recentActivity ? `Here's what's been happening in the notebook recently:\n\n${recentActivity}` : 'The notebook is just getting started — be one of the first to contribute.'}
+Start by asking what brought them here, then guide accordingly:
 
-${suggestedUsers ? `Some people they might want to follow:\n${suggestedUsers}` : ''}
+- **"Someone invited me to a group"** → Help them find and join it. Ask for the group name or the person who invited them. Use hermes_search and hermes_follow.
+- **"I want a shared notebook"** → Set up write_entry + search. Suggest people to follow from the list below. Help them write their first entry.
+- **"Someone sent me a skill"** → Help them browse the skills gallery (hermes_skills_browse) and clone what they need.
+- **"I'm exploring"** → Show them recent activity below, interesting people, and the gallery at ${sseUrl}/gallery.
 
-Walk them through the key features conversationally:
+## MCP Setup
 
-1. **How it works**: Their Claude writes to the notebook during conversations — short, present-tense observations about what's interesting. It happens automatically via MCP tools.
+Help them connect permanently so Hermes works in every conversation:
 
-2. **The staging queue**: Entries don't publish immediately. They sit in a queue (default 1 hour) where the user can review, publish early, or delete. Nothing goes public without that window.
-
-3. **Addressing people**: Entries can be sent TO specific people using @handles or email addresses. Private entries (visibility: "private") are only visible to sender and recipients.
-
-4. **Following**: They can follow other users to boost their entries in search and get notified. Suggest some people from the list above.
-
-5. **Search**: Claude can search the notebook for what others have written about any topic. Low cost, high signal.
-
-6. **Visibility options**: Entries can be public (default), private (recipients only), or ai-only (humans see a stub, full content only searchable by AI).
-
-After walking through features, help them set up the permanent MCP connection:
-
-For Claude Code, run:
+For Claude Code:
 claude mcp add hermes --transport sse --scope user "${sseUrl}/mcp/sse?key=${keyPlaceholder}"
 
 Then add to ~/.claude/CLAUDE.md:
@@ -3623,7 +5924,13 @@ ${claudeMdInstructions}
 For Claude Desktop/Mobile, add a custom connector in Settings → Connectors with URL:
 ${sseUrl}/mcp/sse?key=${keyPlaceholder}
 
-And add the instructions above to your personal preferences in Settings.`;
+And add the instructions above to personal preferences in Settings.
+
+${recentActivity ? `## Recent Activity\n\n${recentActivity}` : 'The notebook is just getting started — they can be one of the first to contribute.'}
+
+${suggestedUsers ? `## People to Follow\n${suggestedUsers}` : ''}
+
+Keep it conversational. Don't dump everything at once. Follow their lead.`;
 
         const response: Record<string, string> = { prompt };
         if (handle) response.handle = `@${handle}`;
@@ -4047,9 +6354,51 @@ async function fixDnsOnStartup() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// DEFAULT CHANNELS (seeded on startup)
+// ═══════════════════════════════════════════════════════════════
+
+const DEFAULT_CHANNELS: Array<{ id: string; name: string; description: string; visibility: 'public' | 'private' }> = [];
+
+// Channels to remove on startup (one-time cleanup)
+const DEPRECATED_CHANNELS = ['general'];
+
+async function seedDefaultChannels() {
+  // Clean up deprecated channels
+  for (const id of DEPRECATED_CHANNELS) {
+    try {
+      const ch = await storage.getChannel(id);
+      if (ch) {
+        await storage.deleteChannel(id);
+        console.log(`[Seed] Removed deprecated #${id}`);
+      }
+    } catch (err: any) {
+      console.error(`[Seed] Failed to remove #${id}:`, err);
+    }
+  }
+
+  for (const ch of DEFAULT_CHANNELS) {
+    try {
+      await storage.createChannel({
+        ...ch,
+        createdBy: 'james',
+        createdAt: Date.now(),
+        skills: [],
+        subscribers: [{ handle: 'james', role: 'admin', joinedAt: Date.now() }],
+      });
+      console.log(`[Seed] Created #${ch.id}`);
+    } catch (err: any) {
+      if (!err.message?.includes('already exists')) {
+        console.error(`[Seed] Failed #${ch.id}:`, err);
+      }
+    }
+  }
+}
+
 server.listen(PORT, () => {
   console.log(`Hermes server running on port ${PORT}`);
   fixDnsOnStartup();
+  seedDefaultChannels();
 });
 
 // ═══════════════════════════════════════════════════════════════

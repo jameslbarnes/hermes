@@ -8,8 +8,9 @@
  * - Webhook URLs (e.g., "https://webhook.example.com")
  */
 
-import type { Storage, JournalEntry, User } from './storage.js';
+import type { Storage, JournalEntry, User, Channel } from './storage.js';
 import type { NotificationService, EmailClient } from './notifications.js';
+import { canSendEmailTo } from './notifications.js';
 
 // ═══════════════════════════════════════════════════════════════
 // DESTINATION TYPES
@@ -18,7 +19,8 @@ import type { NotificationService, EmailClient } from './notifications.js';
 export type Destination =
   | { type: 'handle'; handle: string; user?: User }
   | { type: 'email'; email: string; user?: User }
-  | { type: 'webhook'; url: string };
+  | { type: 'webhook'; url: string }
+  | { type: 'channel'; channelId: string };
 
 // ═══════════════════════════════════════════════════════════════
 // DESTINATION PARSING
@@ -32,6 +34,12 @@ export type Destination =
  */
 export function parseDestination(dest: string): Destination {
   const trimmed = dest.trim();
+
+  // Channel: starts with #
+  if (trimmed.startsWith('#')) {
+    const channelId = trimmed.slice(1).toLowerCase();
+    return { type: 'channel', channelId };
+  }
 
   // Handle: starts with @
   if (trimmed.startsWith('@')) {
@@ -254,7 +262,7 @@ export async function deliverWebhook(
 
 export interface DeliveryResult {
   destination: string;
-  type: 'handle' | 'email' | 'webhook';
+  type: 'handle' | 'email' | 'webhook' | 'channel';
   success: boolean;
   error?: string;
 }
@@ -268,7 +276,11 @@ export interface DeliveryConfig {
 }
 
 /**
- * Deliver an entry to all destinations in its `to` array
+ * Deliver an entry to all destinations in its `to` array.
+ *
+ * Email recipients (@handles with verified email + bare email addresses)
+ * are batched into a single group email so all recipients can see each
+ * other and reply-all works. Webhooks are delivered individually.
  *
  * @param entry - The entry to deliver
  * @param config - Configuration for delivery (storage, notification service, etc.)
@@ -282,15 +294,19 @@ export async function deliverEntry(
     return [];
   }
 
-  const { storage, notificationService, emailClient, fromEmail, baseUrl } = config;
+  const { storage, emailClient, fromEmail, baseUrl } = config;
   const results: DeliveryResult[] = [];
 
   // Look up the author for CC purposes
   const authorUser = entry.handle ? await storage.getUser(entry.handle) : null;
+  const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
+  const authorEmail = authorUser?.email && authorUser?.emailVerified ? authorUser.email : undefined;
 
   // Resolve destinations
   const destinations = await resolveDestinations(entry.to, storage);
-  const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
+
+  // Partition destinations: collect email recipients for batching
+  const emailRecipients: { destString: string; email: string; type: 'handle' | 'email' }[] = [];
 
   for (let i = 0; i < destinations.length; i++) {
     const dest = destinations[i];
@@ -298,41 +314,46 @@ export async function deliverEntry(
 
     try {
       if (dest.type === 'handle') {
-        // Notify user via in-app notification (and email if configured)
-        if (dest.user) {
-          await notificationService.notifyAddressedEntry?.(entry, dest.user, authorUser || undefined);
-          results.push({ destination: destString, type: 'handle', success: true });
-        } else {
+        if (!dest.user) {
           results.push({ destination: destString, type: 'handle', success: false, error: 'User not found' });
+          continue;
         }
+        // Check if this user has a verified email and can receive emails
+        if (
+          dest.user.email &&
+          dest.user.emailVerified &&
+          (!dest.user.emailPrefs || dest.user.emailPrefs.comments !== false) &&
+          canSendEmailTo(dest.user.handle)
+        ) {
+          emailRecipients.push({ destString, email: dest.user.email, type: 'handle' });
+        }
+        // Mark as success regardless — the handle was resolved
+        results.push({ destination: destString, type: 'handle', success: true });
       } else if (dest.type === 'email') {
-        // Send email directly
         if (emailClient) {
-          // If email resolves to a user, notify them too
+          // For bare email destinations, check rate limit if they resolve to a user
           if (dest.user) {
-            await notificationService.notifyAddressedEntry?.(entry, dest.user, authorUser || undefined);
+            if (
+              dest.user.emailVerified &&
+              (!dest.user.emailPrefs || dest.user.emailPrefs.comments !== false) &&
+              canSendEmailTo(dest.user.handle)
+            ) {
+              emailRecipients.push({ destString, email: dest.email, type: 'email' });
+            }
+          } else {
+            // Bare email with no user — send directly
+            emailRecipients.push({ destString, email: dest.email, type: 'email' });
           }
-
-          // CC the author if they have a verified email
-          const authorCc = authorUser?.email && authorUser?.emailVerified ? authorUser.email : undefined;
-
-          // Send direct email
-          await emailClient.send({
-            from: `Hermes <${fromEmail}>`,
-            to: dest.email,
-            subject: `${author} wrote you something`,
-            html: renderAddressedEntryEmail(entry, author, baseUrl),
-            cc: authorCc,
-            replyTo: authorCc,
-          });
           results.push({ destination: destString, type: 'email', success: true });
         } else {
           results.push({ destination: destString, type: 'email', success: false, error: 'Email not configured' });
         }
       } else if (dest.type === 'webhook') {
-        // POST to webhook
         const result = await deliverWebhook(dest.url, entry, baseUrl);
         results.push({ destination: destString, type: 'webhook', ...result });
+      } else if (dest.type === 'channel') {
+        // Channels don't need active delivery — access is resolved live via membership
+        results.push({ destination: destString, type: 'channel', success: true });
       }
     } catch (err) {
       results.push({
@@ -341,6 +362,33 @@ export async function deliverEntry(
         success: false,
         error: err instanceof Error ? err.message : 'Unknown error',
       });
+    }
+  }
+
+  // Send one group email to all collected recipients
+  if (emailRecipients.length > 0 && emailClient) {
+    try {
+      const recipientEmails = emailRecipients.map(r => r.email);
+
+      // If the author is also a recipient, don't put them in both to and cc
+      const authorIsRecipient = authorEmail && recipientEmails.some(
+        e => e.toLowerCase() === authorEmail.toLowerCase()
+      );
+
+      const cc = authorEmail && !authorIsRecipient ? authorEmail : undefined;
+      const replyTo = authorEmail;
+
+      await emailClient.send({
+        from: `Hermes <${fromEmail}>`,
+        to: recipientEmails,
+        subject: `${author} wrote you something`,
+        html: renderAddressedEntryEmail(entry, author, baseUrl),
+        cc,
+        replyTo,
+      });
+    } catch (err) {
+      // Log but don't fail individual results — the destinations were resolved OK
+      console.error('[Delivery] Group email failed:', err);
     }
   }
 
@@ -382,7 +430,7 @@ function renderAddressedEntryEmail(entry: JournalEntry, author: string, baseUrl:
 
   <div class="footer">
     &mdash;<br>
-    hermes.teleport.computer
+    hermes.teleport.computer &middot; <a href="${baseUrl}/settings">manage notifications</a>
   </div>
 </body>
 </html>
@@ -390,37 +438,157 @@ function renderAddressedEntryEmail(entry: JournalEntry, author: string, baseUrl:
 }
 
 // ═══════════════════════════════════════════════════════════════
-// VISIBILITY HELPERS
+// UNIFIED PRIVACY MODEL
+// ═══════════════════════════════════════════════════════════════
+//
+// One rule: `to` determines access.
+//   - Empty `to` = public (everyone can see)
+//   - Non-empty `to` = private to those destinations
+//
+// `aiOnly` is orthogonal — controls whether humans see full content or a stub.
+// It does NOT affect who has access.
+//
+// Channel membership (#channel in `to`) is resolved live.
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * Determine default visibility based on addressing
- *
- * @param to - Array of destinations (or undefined)
- * @param inReplyTo - Parent entry ID (or undefined)
- * @returns Default visibility value
+ * @deprecated Use canView() instead. Kept for backward compat during transition.
  */
 export function getDefaultVisibility(
   to?: string[],
   inReplyTo?: string
 ): 'public' | 'private' | 'ai-only' {
-  // Has `to` but no `inReplyTo` -> private (DM)
   if (to && to.length > 0 && !inReplyTo) {
     return 'private';
   }
-  // Has `inReplyTo` -> public (reply in thread)
-  // Neither -> public (regular post)
   return 'public';
 }
 
 /**
- * Check if a user can view an entry based on visibility rules
+ * Normalize a legacy entry to the new unified model at read time.
+ * Does NOT mutate — returns a new object.
  *
- * @param entry - The entry to check
- * @param userHandle - The user's handle (without @)
- * @param userEmail - The user's email (optional)
- * @param isAuthor - Whether the user is the entry's author
- * @returns Whether the user can view the entry
+ * Migrations applied:
+ * - `channel: "flashbots"` → adds `#flashbots` to `to`
+ * - `visibility: 'ai-only'` or `humanVisible: false` → sets `aiOnly: true`
+ * - `visibility: 'private'` with `to` → keeps `to` as-is (already correct)
+ */
+export function normalizeEntry(entry: JournalEntry): JournalEntry {
+  const normalized = { ...entry };
+  let to = normalized.to ? [...normalized.to] : [];
+
+  // Migrate channel field to #channel in `to`
+  if (normalized.channel) {
+    const channelDest = `#${normalized.channel}`;
+    if (!to.includes(channelDest)) {
+      to.push(channelDest);
+    }
+  }
+
+  // Migrate visibility/humanVisible to aiOnly
+  if (normalized.aiOnly === undefined) {
+    if (normalized.visibility === 'ai-only' || normalized.humanVisible === false) {
+      normalized.aiOnly = true;
+    }
+  }
+
+  if (to.length > 0) {
+    normalized.to = to;
+  }
+
+  return normalized;
+}
+
+/**
+ * Check if a user's default is AI-only, reading whichever field exists.
+ */
+export function isDefaultAiOnly(user: User): boolean {
+  if ('defaultAiOnly' in user && (user as any).defaultAiOnly !== undefined) {
+    return (user as any).defaultAiOnly;
+  }
+  if (user.defaultHumanVisible !== undefined) {
+    return !user.defaultHumanVisible;
+  }
+  return false; // default: human-visible
+}
+
+/**
+ * Check if an entry should show as AI-only (stub for humans).
+ * Reads `aiOnly` first, falls back to legacy `humanVisible`.
+ */
+export function isEntryAiOnly(entry: JournalEntry): boolean {
+  if (entry.aiOnly !== undefined) return entry.aiOnly;
+  if (entry.humanVisible !== undefined) return !entry.humanVisible;
+  return false;
+}
+
+/**
+ * Unified access control: check if a user can view an entry.
+ *
+ * Rule: `to` determines access.
+ *   - Empty `to` (or undefined) = public
+ *   - Non-empty `to` = private to author + listed destinations
+ *
+ * Channel destinations (#channel) require a storage lookup to check membership.
+ * This function is async because of that.
+ *
+ * @param entry - The entry to check (should be normalized first)
+ * @param viewerHandle - The viewer's handle (without @), if any
+ * @param viewerEmail - The viewer's email, if any
+ * @param isAuthor - Whether the viewer is the entry's author
+ * @param storage - Storage instance for channel membership lookups
+ */
+export async function canView(
+  entry: JournalEntry,
+  viewerHandle: string | undefined,
+  viewerEmail: string | undefined,
+  isAuthor: boolean,
+  storage: Storage
+): Promise<boolean> {
+  // Authors can always see their own entries
+  if (isAuthor) return true;
+
+  // No `to` = public
+  if (!entry.to || entry.to.length === 0) return true;
+
+  // Check each destination
+  for (const dest of entry.to) {
+    // @handle match
+    if (dest.startsWith('@')) {
+      const handle = dest.slice(1).toLowerCase();
+      if (viewerHandle && viewerHandle.toLowerCase() === handle) return true;
+    }
+    // #channel match — check if viewer is a subscriber
+    else if (dest.startsWith('#')) {
+      if (viewerHandle) {
+        const channelId = dest.slice(1);
+        try {
+          const channel = await storage.getChannel(channelId);
+          if (channel && channel.subscribers.some(s => s.handle === viewerHandle)) {
+            return true;
+          }
+        } catch {
+          // Channel lookup failed — deny access for this dest
+        }
+      }
+    }
+    // Email match
+    else if (dest.includes('@') && !dest.startsWith('http')) {
+      if (viewerEmail && dest.toLowerCase() === viewerEmail.toLowerCase()) return true;
+    }
+    // Bare handle match (legacy)
+    else if (!dest.startsWith('http')) {
+      if (viewerHandle && viewerHandle.toLowerCase() === dest.toLowerCase()) return true;
+    }
+    // Webhooks don't grant view access
+  }
+
+  return false;
+}
+
+/**
+ * @deprecated Sync version kept for backward compat. Does NOT check #channel access.
+ * Use canView() for full access checks.
  */
 export function canViewEntry(
   entry: JournalEntry,
@@ -428,33 +596,31 @@ export function canViewEntry(
   userEmail?: string,
   isAuthor?: boolean
 ): boolean {
-  // Authors can always see their own entries
   if (isAuthor) return true;
 
-  // Public entries are visible to everyone
-  if (!entry.visibility || entry.visibility === 'public') return true;
-
-  // AI-only: everyone can see (but content is stripped for non-authors)
-  if (entry.visibility === 'ai-only') return true;
-
-  // Private: only visible to recipients
-  if (entry.visibility === 'private') {
-    if (!entry.to || entry.to.length === 0) return false;
-
-    // Check if user is a recipient
-    if (userHandle) {
-      if (entry.to.includes(`@${userHandle}`) || entry.to.includes(userHandle)) {
-        return true;
-      }
-    }
-    if (userEmail) {
-      if (entry.to.some(dest => dest.toLowerCase() === userEmail.toLowerCase())) {
-        return true;
-      }
-    }
-
-    return false;
+  // No `to` = public (new model)
+  if (!entry.to || entry.to.length === 0) {
+    // Fall back to legacy visibility check
+    if (!entry.visibility || entry.visibility === 'public') return true;
+    if (entry.visibility === 'ai-only') return true;
+    if (entry.visibility === 'private') return false;
+    return true;
   }
 
-  return true;
+  // Has `to` — check if viewer is a recipient
+  for (const dest of entry.to) {
+    if (dest.startsWith('@')) {
+      const handle = dest.slice(1).toLowerCase();
+      if (userHandle && userHandle.toLowerCase() === handle) return true;
+    } else if (dest.startsWith('#')) {
+      // Can't resolve channel membership synchronously — skip
+      // (callers should use async canView instead)
+    } else if (dest.includes('@') && !dest.startsWith('http')) {
+      if (userEmail && dest.toLowerCase() === userEmail.toLowerCase()) return true;
+    } else if (!dest.startsWith('http')) {
+      if (userHandle && userHandle.toLowerCase() === dest.toLowerCase()) return true;
+    }
+  }
+
+  return false;
 }

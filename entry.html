@@ -101,6 +101,151 @@
             color: #c53030;
         }
 
+        /* Reply form */
+        .reply-section {
+            margin-bottom: 2rem;
+        }
+
+        .reply-section h3 {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--fg-muted);
+            margin-bottom: 0.75rem;
+        }
+
+        .reply-form {
+            position: relative;
+        }
+
+        .reply-form textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 0.95rem;
+            background: var(--surface);
+            color: var(--fg);
+            resize: vertical;
+            min-height: 80px;
+            line-height: 1.5;
+        }
+
+        .reply-form textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .reply-form-actions {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            margin-top: 0.5rem;
+        }
+
+        .reply-form .submit-btn {
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+            cursor: pointer;
+            background: var(--accent);
+            border: none;
+            color: white;
+            transition: opacity 0.2s;
+        }
+
+        .reply-form .submit-btn:hover {
+            opacity: 0.9;
+        }
+
+        .reply-form .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .reply-signin {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+            color: var(--fg-muted);
+        }
+
+        .reply-signin a {
+            color: var(--accent);
+        }
+
+        /* Replies list */
+        .replies-section {
+            margin-bottom: 2rem;
+        }
+
+        .replies-section h3 {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--fg-muted);
+            margin-bottom: 0.75rem;
+        }
+
+        .reply-entry {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .reply-entry .entry-meta {
+            margin-bottom: 0.5rem;
+        }
+
+        .reply-entry .entry-content {
+            font-size: 1rem;
+            line-height: 1.6;
+        }
+
+        .mention-dropdown {
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            display: none;
+            z-index: 100;
+            min-width: 200px;
+        }
+
+        .mention-dropdown.visible {
+            display: block;
+        }
+
+        .mention-option {
+            padding: 0.5rem 0.75rem;
+            cursor: pointer;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+        }
+
+        .mention-option:hover, .mention-option.selected {
+            background: var(--bg);
+        }
+
+        .mention-option .handle {
+            color: var(--accent);
+        }
+
+        .mention-option .name {
+            color: var(--fg-muted);
+            margin-left: 0.5rem;
+        }
+
         @media (max-width: 600px) {
             body {
                 padding: 1rem;
@@ -119,6 +264,17 @@
     <script>
         const entryId = window.location.pathname.split('/e/')[1];
 
+        function getEffectiveKey() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('key') || localStorage.getItem('hermes_key');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         function formatDate(timestamp) {
             const date = new Date(timestamp);
             return date.toLocaleDateString('en-US', {
@@ -128,6 +284,18 @@
                 hour: 'numeric',
                 minute: '2-digit'
             });
+        }
+
+        function formatTime(ts) {
+            const date = new Date(ts);
+            const now = new Date();
+            const seconds = Math.floor((now - date) / 1000);
+            if (seconds < 60) return 'just now';
+            if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
+            if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+            if (seconds < 172800) return 'yesterday';
+            if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         }
 
         function renderEntry(entry) {
@@ -149,6 +317,243 @@
             return html;
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // @MENTION TYPEAHEAD
+        // ═══════════════════════════════════════════════════════════════
+
+        let mentionState = {
+            active: false,
+            textarea: null,
+            dropdown: null,
+            startPos: 0,
+            selectedIndex: 0,
+            users: []
+        };
+
+        function initMentions(textarea) {
+            let dropdown = textarea.parentElement.querySelector('.mention-dropdown');
+            if (!dropdown) {
+                dropdown = document.createElement('div');
+                dropdown.className = 'mention-dropdown';
+                textarea.parentElement.appendChild(dropdown);
+            }
+            textarea.addEventListener('input', (e) => handleMentionInput(e, dropdown));
+            textarea.addEventListener('keydown', (e) => handleMentionKeydown(e, dropdown));
+            textarea.addEventListener('blur', () => {
+                setTimeout(() => hideMentionDropdown(dropdown), 150);
+            });
+        }
+
+        async function handleMentionInput(event, dropdown) {
+            const textarea = event.target;
+            const text = textarea.value;
+            const cursorPos = textarea.selectionStart;
+            const textBeforeCursor = text.slice(0, cursorPos);
+            const atMatch = textBeforeCursor.match(/@(\w*)$/);
+            if (atMatch) {
+                const query = atMatch[1];
+                mentionState.active = true;
+                mentionState.textarea = textarea;
+                mentionState.dropdown = dropdown;
+                mentionState.startPos = cursorPos - query.length - 1;
+                if (query.length >= 1) {
+                    const users = await searchUsers(query);
+                    mentionState.users = users;
+                    mentionState.selectedIndex = 0;
+                    showMentionDropdown(dropdown, users);
+                } else {
+                    hideMentionDropdown(dropdown);
+                }
+            } else {
+                mentionState.active = false;
+                hideMentionDropdown(dropdown);
+            }
+        }
+
+        function handleMentionKeydown(event, dropdown) {
+            if (!mentionState.active || mentionState.users.length === 0) return;
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                mentionState.selectedIndex = Math.min(mentionState.selectedIndex + 1, mentionState.users.length - 1);
+                updateDropdownSelection(dropdown);
+            } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                mentionState.selectedIndex = Math.max(mentionState.selectedIndex - 1, 0);
+                updateDropdownSelection(dropdown);
+            } else if (event.key === 'Enter' || event.key === 'Tab') {
+                if (mentionState.users.length > 0) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    insertMention(mentionState.users[mentionState.selectedIndex]);
+                }
+            } else if (event.key === 'Escape') {
+                hideMentionDropdown(dropdown);
+                mentionState.active = false;
+            }
+        }
+
+        async function searchUsers(query) {
+            try {
+                const res = await fetch(`/api/users/search?q=${encodeURIComponent(query)}&limit=5`);
+                if (res.ok) {
+                    const data = await res.json();
+                    return data.users;
+                }
+            } catch (err) {
+                console.error('Failed to search users:', err);
+            }
+            return [];
+        }
+
+        function showMentionDropdown(dropdown, users) {
+            if (users.length === 0) { hideMentionDropdown(dropdown); return; }
+            dropdown.innerHTML = users.map((user, i) => `
+                <div class="mention-option ${i === 0 ? 'selected' : ''}" data-handle="${user.handle}">
+                    <span class="handle">@${escapeHtml(user.handle)}</span>
+                    ${user.displayName ? `<span class="name">${escapeHtml(user.displayName)}</span>` : ''}
+                </div>
+            `).join('');
+            dropdown.querySelectorAll('.mention-option').forEach((option, i) => {
+                option.addEventListener('click', () => {
+                    mentionState.selectedIndex = i;
+                    insertMention(users[i]);
+                });
+            });
+            dropdown.classList.add('visible');
+        }
+
+        function hideMentionDropdown(dropdown) {
+            dropdown.classList.remove('visible');
+            mentionState.users = [];
+        }
+
+        function updateDropdownSelection(dropdown) {
+            dropdown.querySelectorAll('.mention-option').forEach((option, i) => {
+                option.classList.toggle('selected', i === mentionState.selectedIndex);
+            });
+        }
+
+        function insertMention(user) {
+            const textarea = mentionState.textarea;
+            const text = textarea.value;
+            const beforeMention = text.slice(0, mentionState.startPos);
+            const afterMention = text.slice(textarea.selectionStart);
+            const mention = `@${user.handle} `;
+            textarea.value = beforeMention + mention + afterMention;
+            textarea.selectionStart = textarea.selectionEnd = beforeMention.length + mention.length;
+            textarea.focus();
+            hideMentionDropdown(mentionState.dropdown);
+            mentionState.active = false;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // REPLY SYSTEM
+        // ═══════════════════════════════════════════════════════════════
+
+        function renderReplyForm(entry) {
+            const effectiveKey = getEffectiveKey();
+            if (!effectiveKey) {
+                return `<div class="reply-section">
+                    <div class="reply-signin">
+                        <a href="/setup.html">Get an identity key</a> to reply to entries.
+                    </div>
+                </div>`;
+            }
+
+            return `<div class="reply-section">
+                <h3>Reply</h3>
+                <div class="reply-form" id="reply-form">
+                    <textarea id="reply-textarea" placeholder="Write a reply..."></textarea>
+                    <div class="reply-form-actions">
+                        <button class="submit-btn" id="reply-submit-btn">Reply</button>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        function renderReplies(replies) {
+            if (replies.length === 0) return '';
+            return `<div class="replies-section">
+                <h3>Replies (${replies.length})</h3>
+                ${replies.map(reply => {
+                    const authorLink = reply.handle
+                        ? `<a href="/u/${escapeHtml(reply.handle)}" class="entry-author">@${escapeHtml(reply.handle)}</a>`
+                        : `<span class="entry-author">${escapeHtml(reply.pseudonym || '')}</span>`;
+                    const content = marked.parse(reply.content || '');
+                    return `
+                        <div class="reply-entry">
+                            <div class="entry-meta">
+                                ${authorLink}
+                                <span>&middot;</span>
+                                <a href="/e/${reply.id}" style="color: var(--fg-muted); text-decoration: none;">${formatTime(reply.timestamp)}</a>
+                            </div>
+                            <div class="entry-content">${content}</div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>`;
+        }
+
+        async function submitReply() {
+            const textarea = document.getElementById('reply-textarea');
+            const content = textarea.value.trim();
+            if (!content) return;
+
+            const effectiveKey = getEffectiveKey();
+            if (!effectiveKey) {
+                alert('No identity key found');
+                return;
+            }
+
+            const btn = document.getElementById('reply-submit-btn');
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+
+            try {
+                const res = await fetch('/api/entries', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        content,
+                        secret_key: effectiveKey,
+                        inReplyTo: entryId
+                    })
+                });
+
+                if (res.ok) {
+                    textarea.value = '';
+                    btn.disabled = false;
+                    btn.textContent = 'Reply';
+                    // Reload replies
+                    await loadReplies();
+                } else {
+                    const data = await res.json();
+                    alert(data.error || 'Failed to post reply');
+                    btn.disabled = false;
+                    btn.textContent = 'Reply';
+                }
+            } catch (err) {
+                alert('Failed to post reply');
+                btn.disabled = false;
+                btn.textContent = 'Reply';
+            }
+        }
+
+        async function loadReplies() {
+            try {
+                const res = await fetch(`/api/entry/${encodeURIComponent(entryId)}/replies`);
+                if (!res.ok) return;
+                const data = await res.json();
+                const replies = data.replies || [];
+                const repliesContainer = document.getElementById('replies-container');
+                if (repliesContainer) {
+                    repliesContainer.innerHTML = renderReplies(replies);
+                }
+            } catch (err) {
+                console.error('Failed to load replies:', err);
+            }
+        }
+
         async function loadEntry() {
             try {
                 const response = await fetch(`/api/entry/${encodeURIComponent(entryId)}`);
@@ -158,7 +563,33 @@
                 const entry = await response.json();
 
                 document.title = `${entry.handle || entry.pseudonym} - Hermes`;
-                document.getElementById('content').innerHTML = renderEntry(entry);
+
+                // Fetch replies
+                let replies = [];
+                try {
+                    const repliesRes = await fetch(`/api/entry/${encodeURIComponent(entryId)}/replies`);
+                    if (repliesRes.ok) {
+                        const repliesData = await repliesRes.json();
+                        replies = repliesData.replies || [];
+                    }
+                } catch (e) {}
+
+                document.getElementById('content').innerHTML =
+                    renderEntry(entry) +
+                    renderReplyForm(entry) +
+                    `<div id="replies-container">${renderReplies(replies)}</div>`;
+
+                // Wire up reply form
+                const submitBtn = document.getElementById('reply-submit-btn');
+                if (submitBtn) {
+                    submitBtn.addEventListener('click', submitReply);
+                }
+
+                // Init mention typeahead on reply textarea
+                const replyTextarea = document.getElementById('reply-textarea');
+                if (replyTextarea) {
+                    initMentions(replyTextarea);
+                }
             } catch (err) {
                 document.getElementById('content').innerHTML = `
                     <div class="error">

@@ -291,31 +291,137 @@
             margin-bottom: 2rem;
         }
 
-        .prompt-box {
+        .onboard-step {
+            text-align: left;
+            margin-top: 1.5rem;
+        }
+
+        .step-label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--accent);
+            margin-bottom: 0.75rem;
+        }
+
+        .client-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 1rem;
+        }
+
+        .client-tab {
+            padding: 0.5rem 1rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--fg-muted);
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            margin-bottom: -1px;
+            transition: color 0.2s, border-color 0.2s;
+        }
+
+        .client-tab:hover {
+            color: var(--fg);
+        }
+
+        .client-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        .client-panel {
+            display: none;
+        }
+
+        .client-panel.active {
+            display: block;
+        }
+
+        .connect-fields {
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            text-align: left;
-            max-height: 300px;
-            overflow-y: auto;
+            padding: 1rem 1.25rem;
         }
 
-        .prompt-box pre {
+        .connect-field {
+            margin-bottom: 0.75rem;
+        }
+
+        .connect-field:last-child {
+            margin-bottom: 0;
+        }
+
+        .connect-field label {
+            display: block;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--fg-muted);
+            margin-bottom: 0.2rem;
+        }
+
+        .connect-field span {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.85rem;
+        }
+
+        .connect-field-url {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .connect-field-url code {
+            flex: 1;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            word-break: break-all;
+            color: var(--fg-muted);
+        }
+
+        .connect-code {
+            position: relative;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            padding-right: 4rem;
+        }
+
+        .connect-code code {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 0.75rem;
-            line-height: 1.7;
-            white-space: pre-wrap;
-            word-break: break-word;
+            line-height: 1.6;
             color: var(--fg);
-            margin: 0;
+            word-break: break-all;
+            white-space: pre-wrap;
         }
 
-        .prompt-loading {
-            color: var(--fg-muted);
+        .code-copy-btn {
+            position: absolute;
+            top: 0.75rem;
+            right: 0.75rem;
+            background: var(--border);
+            border: none;
+            border-radius: 4px;
+            padding: 0.35rem 0.65rem;
             font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.8rem;
+            font-size: 0.65rem;
+            color: var(--fg-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .code-copy-btn:hover {
+            background: var(--fg-muted);
+            color: var(--bg);
         }
 
         .copy-btn {
@@ -338,19 +444,6 @@
 
         .copy-btn:active {
             transform: scale(0.98);
-        }
-
-        .manual-link {
-            display: inline-block;
-            margin-top: 1rem;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.8rem;
-            color: var(--fg-muted);
-            text-decoration: none;
-        }
-
-        .manual-link:hover {
-            color: var(--accent);
         }
 
         @keyframes fadeIn {
@@ -426,20 +519,60 @@
             </div>
         </div>
 
-        <!-- Success state -->
+        <!-- Success state: inline onboarding flow -->
         <div class="success-state" id="success-state">
             <h2>Welcome to Hermes</h2>
             <div class="handle-display" id="success-handle"></div>
-            <p>Copy this prompt and paste it into any Claude conversation to get started.</p>
-            <div class="prompt-box" id="prompt-box">
-                <div class="prompt-loading">Loading your tutorial...</div>
+
+            <!-- Step 1: Connect -->
+            <div class="onboard-step" id="step-connect">
+                <div class="step-label">Step 1 — Connect your Claude</div>
+
+                <div class="client-tabs">
+                    <button class="client-tab active" onclick="switchClient('code')">Claude Code</button>
+                    <button class="client-tab" onclick="switchClient('desktop')">Desktop / Mobile</button>
+                </div>
+
+                <div class="client-panel active" id="client-code">
+                    <p style="color:var(--fg-muted);margin-bottom:0.75rem;">Run this in your terminal:</p>
+                    <div class="connect-code">
+                        <code id="mcp-cmd-text">Loading...</code>
+                        <button class="code-copy-btn" onclick="copyText('mcp-cmd-text')">Copy</button>
+                    </div>
+                </div>
+
+                <div class="client-panel" id="client-desktop">
+                    <p style="color:var(--fg-muted);margin-bottom:0.75rem;">Go to <strong>Settings → Connectors → Add custom connector</strong> and enter:</p>
+                    <div class="connect-fields">
+                        <div class="connect-field">
+                            <label>Name</label>
+                            <span>hermes</span>
+                        </div>
+                        <div class="connect-field">
+                            <label>URL</label>
+                            <div class="connect-field-url">
+                                <code id="sse-url-text">Loading...</code>
+                                <button class="code-copy-btn" onclick="copyText('sse-url-text')" style="position:static;flex-shrink:0;">Copy</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="copy-btn" onclick="advanceToStep2()" style="margin-top:1rem;">
+                    Done — next step
+                </button>
             </div>
-            <button class="copy-btn" id="copy-prompt-btn" onclick="copyPrompt()">
-                Copy prompt
-            </button>
-            <a href="/connect" class="manual-link">or set up manually →</a>
-            <div class="footer">
-                <p>Or go straight to <a href="/">the notebook</a></p>
+
+            <!-- Step 2: Tutorial -->
+            <div class="onboard-step" id="step-tutorial" style="display:none;">
+                <div class="step-label">Step 2 — Try it out</div>
+                <p style="color:var(--fg-muted);margin-bottom:1rem;">Open a new Claude conversation with the tutorial pre-loaded.</p>
+                <a href="#" id="discuss-btn" target="_blank" class="copy-btn" style="display:block;text-decoration:none;text-align:center;">
+                    Open tutorial in Claude
+                </a>
+                <p style="margin-top:1.5rem;color:var(--fg-muted);font-size:0.85rem;">
+                    Or go straight to <a href="/" style="color:var(--accent);">the notebook</a>
+                </p>
             </div>
         </div>
     </div>
@@ -601,36 +734,53 @@
             }
         }
 
-        let tutorialPromptText = '';
+        const sseBaseUrl = 'https://db82f581256a3c9244c4d7129a67336990d08cdf-3000.dstack-pha-prod9.phala.network';
 
         async function showSuccess(handle) {
             document.getElementById('form-state').classList.add('hidden');
             document.getElementById('success-state').classList.add('visible');
             document.getElementById('success-handle').textContent = '@' + handle;
 
-            // Fetch personalized tutorial prompt
+            // Populate MCP commands with actual key
             const savedKey = localStorage.getItem('hermes_key');
+            const mcpCmd = `claude mcp add hermes --transport sse --scope user "${sseBaseUrl}/mcp/sse?key=${savedKey}"`;
+            document.getElementById('mcp-cmd-text').textContent = mcpCmd;
+            document.getElementById('sse-url-text').textContent = `${sseBaseUrl}/mcp/sse?key=${savedKey}`;
+
+            // Build "Open tutorial in Claude" link
             try {
                 const tutorialUrl = savedKey
                     ? `/api/tutorial?key=${encodeURIComponent(savedKey)}`
                     : '/api/tutorial';
                 const res = await fetch(tutorialUrl);
                 const data = await res.json();
-                tutorialPromptText = data.prompt;
-                document.getElementById('prompt-box').innerHTML =
-                    '<pre>' + escapeHtml(data.prompt) + '</pre>';
+                const discussUrl = `https://claude.ai/new?q=${encodeURIComponent(data.prompt)}`;
+                document.getElementById('discuss-btn').href = discussUrl;
             } catch (err) {
-                document.getElementById('prompt-box').innerHTML =
-                    '<div class="prompt-loading">Failed to load tutorial. <a href="/tutorial">Try here instead.</a></div>';
+                document.getElementById('discuss-btn').href = '/tutorial';
             }
         }
 
-        function copyPrompt() {
-            if (!tutorialPromptText) return;
-            navigator.clipboard.writeText(tutorialPromptText).then(() => {
-                const btn = document.getElementById('copy-prompt-btn');
-                btn.textContent = 'Copied!';
-                setTimeout(() => { btn.textContent = 'Copy prompt'; }, 2000);
+        function advanceToStep2() {
+            document.getElementById('step-connect').style.display = 'none';
+            document.getElementById('step-tutorial').style.display = 'block';
+        }
+
+        function switchClient(client) {
+            document.querySelectorAll('.client-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.client-tab[onclick="switchClient('${client}')"]`).classList.add('active');
+            document.querySelectorAll('.client-panel').forEach(p => p.classList.remove('active'));
+            document.getElementById(`client-${client}`).classList.add('active');
+        }
+
+        function copyText(elementId) {
+            const text = document.getElementById(elementId).textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = document.getElementById(elementId).closest('.connect-code, .connect-field-url').querySelector('.code-copy-btn');
+                if (btn) {
+                    btn.textContent = 'Copied!';
+                    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+                }
             });
         }
 

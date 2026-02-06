@@ -8,7 +8,15 @@ import {
   isInternalUrl,
   getDefaultVisibility,
   canViewEntry,
+  canView,
+  normalizeEntry,
+  isDefaultAiOnly,
+  isEntryAiOnly,
+  deliverEntry,
+  type DeliveryConfig,
 } from './delivery.js';
+import type { JournalEntry, User } from './storage.js';
+import type { EmailClient, NotificationService } from './notifications.js';
 
 describe('Delivery module', () => {
   describe('parseDestination', () => {
@@ -40,6 +48,18 @@ describe('Delivery module', () => {
       const dest = parseDestination('http://localhost:3000/hook');
       expect(dest.type).toBe('webhook');
       expect((dest as any).url).toBe('http://localhost:3000/hook');
+    });
+
+    it('should parse #channel destinations', () => {
+      const dest = parseDestination('#flashbots');
+      expect(dest.type).toBe('channel');
+      expect((dest as any).channelId).toBe('flashbots');
+    });
+
+    it('should parse #channel with uppercase', () => {
+      const dest = parseDestination('#FlashBots');
+      expect(dest.type).toBe('channel');
+      expect((dest as any).channelId).toBe('flashbots');
     });
 
     it('should treat bare handles as handles', () => {
@@ -581,5 +601,532 @@ describe('MemoryStorage getRepliesTo', () => {
 
     const replies = await storage.getRepliesTo(parent.id, 5);
     expect(replies).toHaveLength(5);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// NEW: Unified Privacy Model tests
+// ═══════════════════════════════════════════════════════════════
+
+describe('normalizeEntry', () => {
+  const baseEntry: JournalEntry = {
+    id: '1',
+    pseudonym: 'Test#123',
+    client: 'code',
+    content: 'test',
+    timestamp: Date.now(),
+  };
+
+  it('should migrate channel field to #channel in to', () => {
+    const entry = { ...baseEntry, channel: 'flashbots' };
+    const normalized = normalizeEntry(entry);
+    expect(normalized.to).toContain('#flashbots');
+  });
+
+  it('should not duplicate #channel if already in to', () => {
+    const entry = { ...baseEntry, channel: 'flashbots', to: ['#flashbots', '@alice'] };
+    const normalized = normalizeEntry(entry);
+    expect(normalized.to!.filter(d => d === '#flashbots')).toHaveLength(1);
+    expect(normalized.to).toHaveLength(2);
+  });
+
+  it('should set aiOnly from visibility: ai-only', () => {
+    const entry = { ...baseEntry, visibility: 'ai-only' as const };
+    const normalized = normalizeEntry(entry);
+    expect(normalized.aiOnly).toBe(true);
+  });
+
+  it('should set aiOnly from humanVisible: false', () => {
+    const entry = { ...baseEntry, humanVisible: false };
+    const normalized = normalizeEntry(entry);
+    expect(normalized.aiOnly).toBe(true);
+  });
+
+  it('should not set aiOnly for public entries', () => {
+    const normalized = normalizeEntry(baseEntry);
+    expect(normalized.aiOnly).toBeUndefined();
+  });
+
+  it('should not override explicit aiOnly', () => {
+    const entry = { ...baseEntry, aiOnly: false, humanVisible: false };
+    const normalized = normalizeEntry(entry);
+    expect(normalized.aiOnly).toBe(false);
+  });
+
+  it('should not mutate the original entry', () => {
+    const entry = { ...baseEntry, channel: 'flashbots' };
+    normalizeEntry(entry);
+    expect(entry.to).toBeUndefined();
+  });
+
+  it('should merge channel into existing to array', () => {
+    const entry = { ...baseEntry, channel: 'flashbots', to: ['@alice'] };
+    const normalized = normalizeEntry(entry);
+    expect(normalized.to).toEqual(['@alice', '#flashbots']);
+  });
+});
+
+describe('isDefaultAiOnly', () => {
+  it('should return false by default', () => {
+    const user = { handle: 'test', secretKeyHash: 'x', createdAt: 0 } as User;
+    expect(isDefaultAiOnly(user)).toBe(false);
+  });
+
+  it('should read defaultAiOnly when set', () => {
+    const user = { handle: 'test', secretKeyHash: 'x', createdAt: 0, defaultAiOnly: true } as any;
+    expect(isDefaultAiOnly(user)).toBe(true);
+  });
+
+  it('should fall back to !defaultHumanVisible', () => {
+    const user = { handle: 'test', secretKeyHash: 'x', createdAt: 0, defaultHumanVisible: false } as User;
+    expect(isDefaultAiOnly(user)).toBe(true);
+  });
+
+  it('should prefer defaultAiOnly over defaultHumanVisible', () => {
+    const user = { handle: 'test', secretKeyHash: 'x', createdAt: 0, defaultAiOnly: false, defaultHumanVisible: false } as any;
+    expect(isDefaultAiOnly(user)).toBe(false);
+  });
+});
+
+describe('isEntryAiOnly', () => {
+  const base: JournalEntry = { id: '1', pseudonym: 'T#1', client: 'code', content: 'x', timestamp: 0 };
+
+  it('should return false by default', () => {
+    expect(isEntryAiOnly(base)).toBe(false);
+  });
+
+  it('should read aiOnly when set', () => {
+    expect(isEntryAiOnly({ ...base, aiOnly: true })).toBe(true);
+  });
+
+  it('should fall back to !humanVisible', () => {
+    expect(isEntryAiOnly({ ...base, humanVisible: false })).toBe(true);
+    expect(isEntryAiOnly({ ...base, humanVisible: true })).toBe(false);
+  });
+
+  it('should prefer aiOnly over humanVisible', () => {
+    expect(isEntryAiOnly({ ...base, aiOnly: false, humanVisible: false })).toBe(false);
+  });
+});
+
+describe('canView (async, unified model)', () => {
+  let storage: MemoryStorage;
+
+  const baseEntry: JournalEntry = {
+    id: '1',
+    pseudonym: 'Test#123',
+    client: 'code',
+    content: 'test',
+    timestamp: Date.now(),
+  };
+
+  beforeEach(async () => {
+    storage = new MemoryStorage();
+    await storage.createUser({ handle: 'alice', secretKeyHash: hashSecretKey('alice-key-12345') });
+    await storage.createUser({ handle: 'bob', secretKeyHash: hashSecretKey('bob-key-123456') });
+  });
+
+  it('should allow author to view their own entry', async () => {
+    const entry = { ...baseEntry, to: ['@alice'] };
+    expect(await canView(entry, 'bob', undefined, true, storage)).toBe(true);
+  });
+
+  it('should allow everyone to view public entries (no to)', async () => {
+    expect(await canView(baseEntry, undefined, undefined, false, storage)).toBe(true);
+    expect(await canView(baseEntry, 'alice', undefined, false, storage)).toBe(true);
+  });
+
+  it('should allow everyone to view entries with empty to', async () => {
+    const entry = { ...baseEntry, to: [] };
+    expect(await canView(entry, undefined, undefined, false, storage)).toBe(true);
+  });
+
+  it('should restrict DMs to recipients', async () => {
+    const entry = { ...baseEntry, to: ['@alice'] };
+    expect(await canView(entry, 'alice', undefined, false, storage)).toBe(true);
+    expect(await canView(entry, 'bob', undefined, false, storage)).toBe(false);
+    expect(await canView(entry, undefined, undefined, false, storage)).toBe(false);
+  });
+
+  it('should allow email recipients', async () => {
+    const entry = { ...baseEntry, to: ['alice@example.com'] };
+    expect(await canView(entry, undefined, 'alice@example.com', false, storage)).toBe(true);
+    expect(await canView(entry, undefined, 'bob@example.com', false, storage)).toBe(false);
+  });
+
+  it('should allow channel subscribers (live lookup)', async () => {
+    await storage.createChannel({
+      id: 'test-ch',
+      name: 'Test',
+      visibility: 'public',
+      createdBy: 'alice',
+      createdAt: Date.now(),
+      skills: [],
+      subscribers: [{ handle: 'alice', role: 'admin', joinedAt: Date.now() }],
+    });
+
+    const entry = { ...baseEntry, to: ['#test-ch'] };
+    expect(await canView(entry, 'alice', undefined, false, storage)).toBe(true);
+    expect(await canView(entry, 'bob', undefined, false, storage)).toBe(false);
+
+    // Now bob joins — should see old entries (live resolution)
+    await storage.addSubscriber('test-ch', 'bob', 'member');
+    expect(await canView(entry, 'bob', undefined, false, storage)).toBe(true);
+  });
+
+  it('should allow access if ANY destination matches', async () => {
+    const entry = { ...baseEntry, to: ['@alice', '@charlie'] };
+    expect(await canView(entry, 'alice', undefined, false, storage)).toBe(true);
+  });
+
+  it('should handle mixed destinations (@handle + #channel)', async () => {
+    await storage.createChannel({
+      id: 'mixed-ch',
+      name: 'Mixed',
+      visibility: 'public',
+      createdBy: 'alice',
+      createdAt: Date.now(),
+      skills: [],
+      subscribers: [
+        { handle: 'alice', role: 'admin', joinedAt: Date.now() },
+        { handle: 'bob', role: 'member', joinedAt: Date.now() },
+      ],
+    });
+
+    const entry = { ...baseEntry, to: ['@alice', '#mixed-ch'] };
+    // bob is channel member, should have access
+    expect(await canView(entry, 'bob', undefined, false, storage)).toBe(true);
+  });
+
+  it('should deny webhook-only entries to non-authors', async () => {
+    const entry = { ...baseEntry, to: ['https://webhook.example.com'] };
+    expect(await canView(entry, 'alice', undefined, false, storage)).toBe(false);
+  });
+
+  it('should handle non-existent channel gracefully', async () => {
+    const entry = { ...baseEntry, to: ['#nonexistent'] };
+    expect(await canView(entry, 'alice', undefined, false, storage)).toBe(false);
+  });
+
+  it('should be case-insensitive for handles', async () => {
+    const entry = { ...baseEntry, to: ['@Alice'] };
+    expect(await canView(entry, 'alice', undefined, false, storage)).toBe(true);
+  });
+
+  it('should be case-insensitive for emails', async () => {
+    const entry = { ...baseEntry, to: ['Alice@Example.com'] };
+    expect(await canView(entry, undefined, 'alice@example.com', false, storage)).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Group Email Batching tests
+// ═══════════════════════════════════════════════════════════════
+
+function createMockEmailClient(): EmailClient & { calls: any[] } {
+  const calls: any[] = [];
+  return {
+    calls,
+    async send(params) {
+      calls.push(params);
+    },
+  };
+}
+
+function createMockNotificationService(): NotificationService {
+  return {
+    async sendDailyDigests() { return { sent: 0, failed: 0 }; },
+    async sendTestDigest() { return null; },
+    async sendVerificationEmail() { return false; },
+  };
+}
+
+describe('deliverEntry group email batching', () => {
+  let storage: MemoryStorage;
+  let emailClient: ReturnType<typeof createMockEmailClient>;
+  let notificationService: NotificationService;
+
+  beforeEach(async () => {
+    storage = new MemoryStorage();
+    emailClient = createMockEmailClient();
+    notificationService = createMockNotificationService();
+
+    // Create test users
+    await storage.createUser({
+      handle: 'author',
+      secretKeyHash: hashSecretKey('author-key-1234567890123'),
+      email: 'author@example.com',
+      emailVerified: true,
+    });
+    await storage.createUser({
+      handle: 'alice',
+      secretKeyHash: hashSecretKey('alice-secret-key-1234567890'),
+      email: 'alice@example.com',
+      emailVerified: true,
+    });
+    await storage.createUser({
+      handle: 'bob',
+      secretKeyHash: hashSecretKey('bob-secret-key-1234567890'),
+      email: 'bob@example.com',
+      emailVerified: true,
+    });
+  });
+
+  function makeConfig(): DeliveryConfig {
+    return {
+      storage,
+      notificationService,
+      emailClient,
+      fromEmail: 'notify@hermes.test',
+      baseUrl: 'https://hermes.test',
+    };
+  }
+
+  it('should send one group email for multiple @handle recipients', async () => {
+    const entry: JournalEntry = {
+      id: 'entry1',
+      pseudonym: 'Test#123',
+      handle: 'author',
+      client: 'desktop',
+      content: 'Hello everyone',
+      timestamp: Date.now(),
+      to: ['@alice', '@bob'],
+    };
+
+    const results = await deliverEntry(entry, makeConfig());
+
+    // Both destinations should succeed
+    expect(results).toHaveLength(2);
+    expect(results.every(r => r.success)).toBe(true);
+
+    // Only ONE email should be sent (group email)
+    expect(emailClient.calls).toHaveLength(1);
+
+    // The email should have both recipients in `to`
+    const call = emailClient.calls[0];
+    expect(call.to).toEqual(['alice@example.com', 'bob@example.com']);
+
+    // Author should be CC'd (since they're not a recipient)
+    expect(call.cc).toBe('author@example.com');
+    expect(call.replyTo).toBe('author@example.com');
+  });
+
+  it('should send one email for single @handle recipient', async () => {
+    const entry: JournalEntry = {
+      id: 'entry1',
+      pseudonym: 'Test#123',
+      handle: 'author',
+      client: 'desktop',
+      content: 'Just for alice',
+      timestamp: Date.now(),
+      to: ['@alice'],
+    };
+
+    const results = await deliverEntry(entry, makeConfig());
+
+    expect(results).toHaveLength(1);
+    expect(results[0].success).toBe(true);
+
+    expect(emailClient.calls).toHaveLength(1);
+    expect(emailClient.calls[0].to).toEqual(['alice@example.com']);
+    expect(emailClient.calls[0].cc).toBe('author@example.com');
+  });
+
+  it('should batch @handles and bare emails into one group email', async () => {
+    const entry: JournalEntry = {
+      id: 'entry1',
+      pseudonym: 'Test#123',
+      handle: 'author',
+      client: 'desktop',
+      content: 'Mixed recipients',
+      timestamp: Date.now(),
+      to: ['@alice', 'external@example.com'],
+    };
+
+    const results = await deliverEntry(entry, makeConfig());
+
+    expect(results).toHaveLength(2);
+    expect(results.every(r => r.success)).toBe(true);
+
+    // One group email with both
+    expect(emailClient.calls).toHaveLength(1);
+    expect(emailClient.calls[0].to).toEqual(['alice@example.com', 'external@example.com']);
+  });
+
+  it('should skip #channels and deliver webhooks separately', async () => {
+    const entry: JournalEntry = {
+      id: 'entry1',
+      pseudonym: 'Test#123',
+      handle: 'author',
+      client: 'desktop',
+      content: 'Mixed everything',
+      timestamp: Date.now(),
+      to: ['@alice', '#flashbots'],
+    };
+
+    const results = await deliverEntry(entry, makeConfig());
+
+    expect(results).toHaveLength(2);
+    // Channel should succeed (no active delivery needed)
+    expect(results.find(r => r.type === 'channel')?.success).toBe(true);
+
+    // Only one email to alice
+    expect(emailClient.calls).toHaveLength(1);
+    expect(emailClient.calls[0].to).toEqual(['alice@example.com']);
+  });
+
+  it('should not put author in both to and cc', async () => {
+    // Author is also a recipient
+    const entry: JournalEntry = {
+      id: 'entry1',
+      pseudonym: 'Test#123',
+      handle: 'author',
+      client: 'desktop',
+      content: 'Including myself',
+      timestamp: Date.now(),
+      to: ['@alice', '@author'],
+    };
+
+    const results = await deliverEntry(entry, makeConfig());
+
+    expect(results).toHaveLength(2);
+
+    expect(emailClient.calls).toHaveLength(1);
+    const call = emailClient.calls[0];
+    // Author is in to, so should NOT be in cc
+    expect(call.to).toContain('author@example.com');
+    expect(call.cc).toBeUndefined();
+    // But replyTo should still be set
+    expect(call.replyTo).toBe('author@example.com');
+  });
+
+  it('should send no email when all handles lack verified email', async () => {
+    await storage.createUser({
+      handle: 'noemail',
+      secretKeyHash: hashSecretKey('noemail-key-12345678901234'),
+      // No email at all
+    });
+
+    const entry: JournalEntry = {
+      id: 'entry1',
+      pseudonym: 'Test#123',
+      handle: 'author',
+      client: 'desktop',
+      content: 'Nobody to email',
+      timestamp: Date.now(),
+      to: ['@noemail'],
+    };
+
+    const results = await deliverEntry(entry, makeConfig());
+
+    expect(results).toHaveLength(1);
+    expect(results[0].success).toBe(true); // Handle resolved OK
+
+    // No email should be sent
+    expect(emailClient.calls).toHaveLength(0);
+  });
+
+  it('should skip recipients who disabled notifications', async () => {
+    await storage.createUser({
+      handle: 'muted',
+      secretKeyHash: hashSecretKey('muted-key-12345678901234'),
+      email: 'muted@example.com',
+      emailVerified: true,
+      emailPrefs: { comments: false, digest: true },
+    });
+
+    const entry: JournalEntry = {
+      id: 'entry1',
+      pseudonym: 'Test#123',
+      handle: 'author',
+      client: 'desktop',
+      content: 'Muted user',
+      timestamp: Date.now(),
+      to: ['@alice', '@muted'],
+    };
+
+    const results = await deliverEntry(entry, makeConfig());
+
+    expect(results).toHaveLength(2);
+
+    // Only alice should get the email, muted should be excluded
+    expect(emailClient.calls).toHaveLength(1);
+    expect(emailClient.calls[0].to).toEqual(['alice@example.com']);
+  });
+
+  it('should report unknown handle as failure', async () => {
+    const entry: JournalEntry = {
+      id: 'entry1',
+      pseudonym: 'Test#123',
+      handle: 'author',
+      client: 'desktop',
+      content: 'Unknown user',
+      timestamp: Date.now(),
+      to: ['@nonexistent'],
+    };
+
+    const results = await deliverEntry(entry, makeConfig());
+
+    expect(results).toHaveLength(1);
+    expect(results[0].success).toBe(false);
+    expect(results[0].error).toBe('User not found');
+
+    // No email sent
+    expect(emailClient.calls).toHaveLength(0);
+  });
+
+  it('should return empty results for entries with no to field', async () => {
+    const entry: JournalEntry = {
+      id: 'entry1',
+      pseudonym: 'Test#123',
+      client: 'desktop',
+      content: 'Public post',
+      timestamp: Date.now(),
+    };
+
+    const results = await deliverEntry(entry, makeConfig());
+    expect(results).toHaveLength(0);
+    expect(emailClient.calls).toHaveLength(0);
+  });
+
+  it('should not send email when no email client configured', async () => {
+    const configNoEmail = {
+      ...makeConfig(),
+      emailClient: undefined,
+    };
+
+    const entry: JournalEntry = {
+      id: 'entry1',
+      pseudonym: 'Test#123',
+      handle: 'author',
+      client: 'desktop',
+      content: 'No email client',
+      timestamp: Date.now(),
+      to: ['external@example.com'],
+    };
+
+    const results = await deliverEntry(entry, configNoEmail);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].success).toBe(false);
+    expect(results[0].error).toBe('Email not configured');
+  });
+
+  it('should include manage notifications link in email footer', async () => {
+    const entry: JournalEntry = {
+      id: 'entry1',
+      pseudonym: 'Test#123',
+      handle: 'author',
+      client: 'desktop',
+      content: 'Check the footer',
+      timestamp: Date.now(),
+      to: ['@alice'],
+    };
+
+    await deliverEntry(entry, makeConfig());
+
+    expect(emailClient.calls).toHaveLength(1);
+    expect(emailClient.calls[0].html).toContain('manage notifications');
+    expect(emailClient.calls[0].html).toContain('https://hermes.test/settings');
   });
 });

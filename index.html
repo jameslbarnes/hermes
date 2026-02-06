@@ -262,23 +262,39 @@
             text-decoration: underline;
         }
 
-        .recipient-handle {
+        .entry-recipients {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+            align-items: center;
+            margin-top: 0.5rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--fg-muted);
+        }
+
+        .entry-recipients-label {
+            opacity: 0.7;
+        }
+
+        .recipient-tag {
+            display: inline-block;
+            padding: 0.1rem 0.45rem;
+            border-radius: 3px;
+            background: rgba(124, 92, 191, 0.1);
             color: var(--accent);
+            text-decoration: none;
+            transition: background 0.15s;
+        }
+
+        .recipient-tag:hover {
+            background: rgba(124, 92, 191, 0.2);
             text-decoration: none;
         }
 
-        .recipient-handle:hover {
-            text-decoration: underline;
-        }
-
-        .recipient-email {
-            color: #888;
-            font-style: italic;
-        }
-
-        .recipient-webhook {
-            color: #888;
-            font-size: 0.9em;
+        .recipient-tag--muted {
+            background: rgba(0, 0, 0, 0.04);
+            color: var(--fg-muted);
         }
 
         .reply-indicator {
@@ -294,6 +310,136 @@
         .reply-link:hover {
             color: var(--accent);
             text-decoration: underline;
+        }
+
+        .reply-action {
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            text-decoration: none;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            cursor: pointer;
+            background: none;
+            border: none;
+        }
+
+        .reply-action:hover {
+            opacity: 1;
+            color: var(--accent);
+        }
+
+        .reply-form {
+            margin-top: 0.75rem;
+            padding: 0.75rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            position: relative;
+        }
+
+        .reply-form textarea {
+            width: 100%;
+            padding: 0.6rem;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 0.9rem;
+            background: var(--surface);
+            color: var(--fg);
+            resize: vertical;
+            min-height: 60px;
+            line-height: 1.5;
+        }
+
+        .reply-form textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .reply-form-actions {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            margin-top: 0.5rem;
+        }
+
+        .reply-form .submit-btn {
+            padding: 0.4rem 0.9rem;
+            border-radius: 4px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            cursor: pointer;
+            background: var(--accent);
+            border: none;
+            color: white;
+            transition: opacity 0.2s;
+        }
+
+        .reply-form .submit-btn:hover {
+            opacity: 0.9;
+        }
+
+        .reply-form .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .reply-form .cancel-btn {
+            background: none;
+            border: none;
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+
+        .reply-form .cancel-btn:hover {
+            color: var(--fg);
+        }
+
+        .replies-container {
+            margin-top: 0.75rem;
+            margin-left: 1rem;
+            padding-left: 0.75rem;
+            border-left: 2px solid var(--border);
+        }
+
+        .replies-container .entry {
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--surface);
+        }
+
+        .replies-container .entry-header {
+            font-size: 0.8rem;
+        }
+
+        .replies-container .entry-content {
+            font-size: 0.95rem;
+        }
+
+        .replies-container .entry-meta {
+            font-size: 0.65rem;
+        }
+
+        .replies-toggle {
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            text-decoration: none;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            cursor: pointer;
+            background: none;
+            border: none;
+        }
+
+        .replies-toggle:hover {
+            opacity: 1;
+            color: var(--accent);
         }
 
         .avatar {
@@ -579,6 +725,179 @@
 
         .inbox-item-actions .delete-btn:hover {
             color: #e53935;
+        }
+
+        /* Channel styles */
+        .channels-sidebar {
+            margin-bottom: 1rem;
+        }
+
+        .channels-sidebar-list {
+            margin-top: 0.5rem;
+        }
+
+        .channels-sidebar-list a {
+            display: block;
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.9rem;
+            padding: 0.2rem 0;
+        }
+
+        .channels-sidebar-list a:hover {
+            opacity: 0.7;
+        }
+
+        .channel-card {
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background: var(--surface);
+        }
+
+        .channel-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.5rem;
+        }
+
+        .channel-card-name {
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--accent);
+        }
+
+        .channel-card-meta {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--fg-muted);
+        }
+
+        .channel-card-description {
+            color: var(--fg-muted);
+            font-size: 0.9rem;
+            line-height: 1.5;
+            margin-bottom: 0.75rem;
+        }
+
+        .channel-card-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .channel-btn {
+            background: var(--accent);
+            border: none;
+            border-radius: 4px;
+            padding: 0.4rem 0.75rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: white;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .channel-btn:hover {
+            opacity: 0.85;
+        }
+
+        .channel-btn.secondary {
+            background: var(--bg);
+            color: var(--fg-muted);
+            border: 1px solid var(--border);
+        }
+
+        .channel-btn.secondary:hover {
+            border-color: var(--fg-muted);
+        }
+
+        .channel-header {
+            padding-bottom: 1.5rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .channel-header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.5rem;
+        }
+
+        .channel-header-name {
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: var(--accent);
+        }
+
+        .channel-header-description {
+            color: var(--fg-muted);
+            font-size: 0.95rem;
+            line-height: 1.6;
+            margin-bottom: 0.75rem;
+        }
+
+        .channel-header-meta {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--fg-muted);
+        }
+
+        .channel-section-label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--fg-muted);
+            margin-bottom: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .channel-section-label:first-child {
+            margin-top: 0;
+        }
+
+        .channel-create-form {
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 1rem;
+            background: var(--surface);
+            margin-top: 1.5rem;
+        }
+
+        .channel-create-form h3 {
+            font-size: 0.9rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+        }
+
+        .channel-create-form input,
+        .channel-create-form textarea,
+        .channel-create-form select {
+            display: block;
+            width: 100%;
+            padding: 0.5rem;
+            margin-bottom: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+            background: var(--bg);
+        }
+
+        .channel-create-form textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .channel-create-form label {
+            display: block;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--fg-muted);
+            margin-bottom: 0.25rem;
         }
 
         /* Empty state */
@@ -894,6 +1213,27 @@
         .toolbar-btn svg {
             width: 18px;
             height: 18px;
+        }
+
+        .toolbar-btn {
+            position: relative;
+        }
+
+        .notif-badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            min-width: 16px;
+            height: 16px;
+            padding: 0 4px;
+            border-radius: 8px;
+            background: #e53935;
+            color: white;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.55rem;
+            font-weight: 500;
+            line-height: 16px;
+            text-align: center;
         }
 
         .search-container {
@@ -1309,7 +1649,7 @@
 <body>
     <div class="top-toolbar">
         <div class="search-container" id="search-container">
-            <input type="text" class="search-input" id="search-input" placeholder="Search..." />
+            <input type="search" class="search-input" id="search-input" name="hermes-search" placeholder="Search..." autocomplete="off" data-1p-ignore data-lpignore="true" />
             <button class="toolbar-btn" id="search-btn" title="Search">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1321,6 +1661,12 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
             </svg>
         </button>
+        <a href="?view=inbox" class="toolbar-btn" id="inbox-btn" title="Inbox" style="display: none; text-decoration: none;">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+            </svg>
+            <span class="notif-badge" id="inbox-badge" style="display: none;"></span>
+        </a>
     </div>
 
     <div class="container">
@@ -1342,8 +1688,15 @@
                     <div class="links" id="identity-link">
                         <a href="/join" class="sidebar-btn">Get started</a>
                     </div>
-                    <div class="links" id="inbox-link" style="display: none; margin-top: 0.5rem;">
-                        <a href="?view=inbox" class="sidebar-btn inbox-btn">Inbox</a>
+                </div>
+
+                <div class="explainer-section channels-sidebar" id="channels-section" style="display: none;">
+                    <h2>Channels</h2>
+                    <div class="channels-sidebar-list" id="channels-list">
+                        <!-- Populated by loadChannelsSidebar() -->
+                    </div>
+                    <div class="links">
+                        <a href="?view=channels">Browse all channels</a>
                     </div>
                 </div>
 
@@ -1379,7 +1732,7 @@
         // Get URL params
         const params = new URLSearchParams(window.location.search);
         const filterPseudonym = params.get('pseudonym');
-        const viewMode = params.get('view'); // 'inbox' or null
+        const viewMode = params.get('view'); // 'inbox', 'channels', 'channel', or null
         const userKey = params.get('key');
         let userPseudonym = null;
         let userHandle = null;
@@ -1447,12 +1800,16 @@
                                     <span class="identity-label">Logged in as</span>
                                     <a href="/u/${escapeHtml(data.handle)}" class="identity-handle">@${escapeHtml(data.handle)}</a>
                                     <a href="/settings" class="sidebar-btn">Settings</a>
+                                    <a href="#" onclick="signOut(); return false;" style="display:block;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--fg-muted);margin-top:0.5rem;">Sign out</a>
                                 `;
-                                // Show inbox link
-                                const inboxLink = document.getElementById('inbox-link');
-                                if (inboxLink) {
-                                    inboxLink.style.display = 'block';
+                                // Show inbox button in toolbar and check for notifications
+                                const inboxBtn = document.getElementById('inbox-btn');
+                                if (inboxBtn) {
+                                    inboxBtn.style.display = '';
+                                    updateInboxBadge();
                                 }
+                                // Load channels sidebar
+                                loadChannelsSidebar();
                             } else {
                                 // Legacy user - prompt to claim handle
                                 identityLink.innerHTML = `
@@ -1495,7 +1852,23 @@
 
                 // If viewing inbox, show entries addressed to user
                 if (viewMode === 'inbox') {
+                    markInboxSeen();
                     await loadInboxFeed(feed);
+                    isLoadingFeed = false;
+                    return;
+                }
+
+                // If viewing channel browser
+                if (viewMode === 'channels') {
+                    await loadChannelsBrowser(feed);
+                    isLoadingFeed = false;
+                    return;
+                }
+
+                // If viewing a specific channel
+                if (viewMode === 'channel') {
+                    const channelId = params.get('id');
+                    await loadChannelFeed(feed, channelId);
                     isLoadingFeed = false;
                     return;
                 }
@@ -1702,6 +2075,34 @@
             feed.innerHTML = html;
         }
 
+        async function updateInboxBadge() {
+            const key = getEffectiveKey();
+            if (!key) return;
+            try {
+                const res = await fetch(`/api/inbox?key=${encodeURIComponent(key)}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                const received = data.received || data.entries || [];
+                const lastSeen = parseInt(localStorage.getItem('hermes_inbox_seen') || '0');
+                const unseen = received.filter(e => e.timestamp > lastSeen).length;
+                const badge = document.getElementById('inbox-badge');
+                if (badge) {
+                    if (unseen > 0) {
+                        badge.textContent = unseen > 99 ? '99+' : unseen;
+                        badge.style.display = '';
+                    } else {
+                        badge.style.display = 'none';
+                    }
+                }
+            } catch (err) {}
+        }
+
+        function markInboxSeen() {
+            localStorage.setItem('hermes_inbox_seen', String(Date.now()));
+            const badge = document.getElementById('inbox-badge');
+            if (badge) badge.style.display = 'none';
+        }
+
         // Simple filtered view (when filtering by pseudonym)
         async function loadInboxFeed(feed) {
             const key = userKey || localStorage.getItem('hermes_key');
@@ -1789,7 +2190,7 @@
             }
 
             // Content preview (first ~80 chars)
-            const isAiOnly = entry.humanVisible === false;
+            const isAiOnly = entry.aiOnly === true || entry.humanVisible === false;
             let preview;
             if (isAiOnly) {
                 const topics = entry.topicHints && entry.topicHints.length > 0
@@ -1882,10 +2283,328 @@
             }).join('');
         }
 
+        // Load channels for sidebar
+        async function loadChannelsSidebar() {
+            const key = getEffectiveKey();
+            if (!key) return;
+
+            try {
+                const res = await fetch(`/api/channels?secret_key=${encodeURIComponent(key)}`);
+                if (!res.ok) return;
+
+                const data = await res.json();
+                const subscribed = data.subscribed || [];
+
+                const section = document.getElementById('channels-section');
+                const list = document.getElementById('channels-list');
+
+                if (subscribed.length > 0 || true) { // Always show section for logged-in users
+                    section.style.display = '';
+                    list.innerHTML = subscribed.map(c =>
+                        `<a href="?view=channel&id=${encodeURIComponent(c.id)}">#${escapeHtml(c.id)}</a>`
+                    ).join('');
+                    if (subscribed.length === 0) {
+                        list.innerHTML = '<span style="color: var(--fg-muted); font-size: 0.85rem;">No channels yet</span>';
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to load channels sidebar:', err);
+            }
+        }
+
+        // Load channel browser view
+        async function loadChannelsBrowser(feed) {
+            const key = getEffectiveKey();
+            const keyParam = key ? `secret_key=${encodeURIComponent(key)}` : '';
+
+            try {
+                const res = await fetch(`/api/channels${keyParam ? '?' + keyParam : ''}`);
+                const data = await res.json();
+
+                const subscribed = data.subscribed || [];
+                const discoverable = data.discoverable || [];
+
+                const header = `
+                    <div class="filter-header">
+                        <h2>Channels</h2>
+                        <a href="/">← Back to feed</a>
+                    </div>
+                `;
+
+                let html = header;
+
+                // Your channels section
+                if (subscribed.length > 0) {
+                    html += `<div class="channel-section-label">Your Channels (${subscribed.length})</div>`;
+                    html += subscribed.map(c => renderChannelCard(c, true)).join('');
+                }
+
+                // Discover section
+                if (discoverable.length > 0) {
+                    html += `<div class="channel-section-label">Discover</div>`;
+                    html += discoverable.map(c => renderChannelCard(c, false)).join('');
+                }
+
+                if (subscribed.length === 0 && discoverable.length === 0) {
+                    html += `<div class="empty-state">No channels yet. Be the first to create one!</div>`;
+                }
+
+                // Create channel form (only if logged in)
+                if (key) {
+                    html += `
+                        <div class="channel-create-form">
+                            <h3>Create a Channel</h3>
+                            <label>Channel ID (lowercase, no spaces)</label>
+                            <input type="text" id="new-channel-id" placeholder="my-channel" pattern="[a-z0-9-]+" />
+                            <label>Name</label>
+                            <input type="text" id="new-channel-name" placeholder="My Channel" />
+                            <label>Description</label>
+                            <textarea id="new-channel-description" placeholder="What's this channel about?"></textarea>
+                            <label>Join Rule</label>
+                            <select id="new-channel-join-rule">
+                                <option value="open">Open - anyone can join</option>
+                                <option value="invite">Invite Only - requires invitation</option>
+                            </select>
+                            <button class="channel-btn" onclick="createChannel()">Create Channel</button>
+                        </div>
+                    `;
+                }
+
+                feed.innerHTML = html;
+            } catch (err) {
+                feed.innerHTML = `
+                    <div class="filter-header">
+                        <h2>Channels</h2>
+                        <a href="/">← Back to feed</a>
+                    </div>
+                    <div class="empty-state">Failed to load channels.</div>
+                `;
+            }
+        }
+
+        function renderChannelCard(channel, isMember) {
+            const memberCount = channel.subscribers ? channel.subscribers.length : 0;
+            const skillCount = channel.skills ? channel.skills.length : 0;
+
+            const actionBtn = isMember
+                ? `<button class="channel-btn secondary" onclick="leaveChannel('${escapeHtml(channel.id)}')">Leave</button>`
+                : `<button class="channel-btn" onclick="joinChannel('${escapeHtml(channel.id)}')">Join</button>`;
+
+            return `
+                <div class="channel-card">
+                    <div class="channel-card-header">
+                        <a href="?view=channel&id=${encodeURIComponent(channel.id)}" class="channel-card-name">#${escapeHtml(channel.id)}</a>
+                        <span class="channel-card-meta">${memberCount} member${memberCount !== 1 ? 's' : ''}${skillCount > 0 ? ` · ${skillCount} skill${skillCount !== 1 ? 's' : ''}` : ''}</span>
+                    </div>
+                    ${channel.description ? `<div class="channel-card-description">${escapeHtml(channel.description)}</div>` : ''}
+                    <div class="channel-card-actions">
+                        <a href="?view=channel&id=${encodeURIComponent(channel.id)}" class="channel-btn secondary">View</a>
+                        ${actionBtn}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Load channel feed view
+        async function loadChannelFeed(feed, channelId) {
+            if (!channelId) {
+                feed.innerHTML = `<div class="empty-state">No channel specified.</div>`;
+                return;
+            }
+
+            const key = getEffectiveKey();
+            const keyParam = key ? `secret_key=${encodeURIComponent(key)}` : '';
+
+            try {
+                // Fetch channel info and entries in parallel
+                const [channelRes, entriesRes] = await Promise.all([
+                    fetch(`/api/channels/${encodeURIComponent(channelId)}${keyParam ? '?' + keyParam : ''}`),
+                    fetch(`/api/channels/${encodeURIComponent(channelId)}/entries${keyParam ? '?' + keyParam : ''}`)
+                ]);
+
+                if (!channelRes.ok) {
+                    const err = await channelRes.json();
+                    feed.innerHTML = `
+                        <div class="filter-header">
+                            <h2>#${escapeHtml(channelId)}</h2>
+                            <a href="?view=channels">← All channels</a>
+                        </div>
+                        <div class="empty-state">${escapeHtml(err.error || 'Channel not found')}</div>
+                    `;
+                    return;
+                }
+
+                const channel = await channelRes.json();
+                const entriesData = await entriesRes.json();
+                const entries = entriesData.entries || [];
+
+                // Check if current user is a member
+                let isMember = false;
+                if (key && channel.subscribers) {
+                    // We need the user's handle to check membership
+                    // For now, we'll check via API response or assume not member
+                    try {
+                        const identityRes = await fetch(`/api/identity/lookup?key=${encodeURIComponent(key)}`);
+                        if (identityRes.ok) {
+                            const identityData = await identityRes.json();
+                            if (identityData.handle) {
+                                isMember = channel.subscribers.some(s => s.handle === identityData.handle);
+                            }
+                        }
+                    } catch {}
+                }
+
+                const memberCount = channel.subscribers ? channel.subscribers.length : 0;
+                const skillCount = channel.skills ? channel.skills.length : 0;
+
+                const actionBtn = isMember
+                    ? `<button class="channel-btn secondary" onclick="leaveChannel('${escapeHtml(channel.id)}')">Leave</button>`
+                    : `<button class="channel-btn" onclick="joinChannel('${escapeHtml(channel.id)}')">Join</button>`;
+
+                let html = `
+                    <div class="channel-header">
+                        <div class="channel-header-top">
+                            <span class="channel-header-name">#${escapeHtml(channel.id)} — ${escapeHtml(channel.name)}</span>
+                            ${actionBtn}
+                        </div>
+                        ${channel.description ? `<div class="channel-header-description">${escapeHtml(channel.description)}</div>` : ''}
+                        <div class="channel-header-meta">
+                            ${memberCount} member${memberCount !== 1 ? 's' : ''} · ${skillCount} skill${skillCount !== 1 ? 's' : ''} · created by @${escapeHtml(channel.createdBy)}
+                        </div>
+                        <div style="margin-top: 0.5rem;">
+                            <a href="?view=channels" style="font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; color: var(--fg-muted);">← All channels</a>
+                        </div>
+                    </div>
+                `;
+
+                if (entries.length === 0) {
+                    html += `<div class="empty-state">No entries in this channel yet.</div>`;
+                } else {
+                    html += entries.map(entry => renderEntry(entry)).join('');
+                }
+
+                feed.innerHTML = html;
+            } catch (err) {
+                console.error('Failed to load channel feed:', err);
+                feed.innerHTML = `
+                    <div class="filter-header">
+                        <h2>#${escapeHtml(channelId)}</h2>
+                        <a href="?view=channels">← All channels</a>
+                    </div>
+                    <div class="empty-state">Failed to load channel.</div>
+                `;
+            }
+        }
+
+        // Channel actions
+        async function joinChannel(channelId) {
+            const key = getEffectiveKey();
+            if (!key) {
+                alert('You need to be logged in to join channels.');
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/channels/${encodeURIComponent(channelId)}/join`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ secret_key: key })
+                });
+
+                if (res.ok) {
+                    loadFeed(true);
+                    loadChannelsSidebar();
+                } else {
+                    const data = await res.json();
+                    alert(data.error || 'Failed to join channel');
+                }
+            } catch (err) {
+                alert('Failed to join channel');
+            }
+        }
+
+        async function leaveChannel(channelId) {
+            const key = getEffectiveKey();
+            if (!key) return;
+
+            if (!confirm(`Leave #${channelId}?`)) return;
+
+            try {
+                const res = await fetch(`/api/channels/${encodeURIComponent(channelId)}/leave`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ secret_key: key })
+                });
+
+                if (res.ok) {
+                    loadFeed(true);
+                    loadChannelsSidebar();
+                } else {
+                    const data = await res.json();
+                    alert(data.error || 'Failed to leave channel');
+                }
+            } catch (err) {
+                alert('Failed to leave channel');
+            }
+        }
+
+        async function createChannel() {
+            const key = getEffectiveKey();
+            if (!key) {
+                alert('You need to be logged in to create channels.');
+                return;
+            }
+
+            const id = document.getElementById('new-channel-id').value.trim().toLowerCase();
+            const name = document.getElementById('new-channel-name').value.trim();
+            const description = document.getElementById('new-channel-description').value.trim();
+            const joinRule = document.getElementById('new-channel-join-rule').value;
+
+            if (!id) {
+                alert('Channel ID is required');
+                return;
+            }
+            if (!name) {
+                alert('Channel name is required');
+                return;
+            }
+            if (!/^[a-z0-9-]+$/.test(id) || id.length < 2 || id.length > 30) {
+                alert('Channel ID must be 2-30 lowercase letters, numbers, or hyphens');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/channels', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        secret_key: key,
+                        id,
+                        name,
+                        description: description || undefined,
+                        join_rule: joinRule
+                    })
+                });
+
+                if (res.ok) {
+                    // Open Claude with a channel setup prompt
+                    const setupPrompt = `I just created a channel called #${id} ("${name}") on Hermes.${description ? ' Description: ' + description : ''}\n\nHelp me set it up. Interview me about what skills this channel should have. Skills define the types of content that get posted to the channel — for example a channel might have skills like "cool-people" for tracking interesting contacts, "papers" for documenting research, "updates" for project updates.\n\nFor each skill I want, figure out:\n- A short name (lowercase, hyphens)\n- A description (what triggers this skill / when to use it)\n- Instructions (how to format the entry)\n\nThen create each one using hermes_channels with action: "add_skill".`;
+                    window.open(`https://claude.ai/new?q=${encodeURIComponent(setupPrompt)}`, '_blank');
+                    // Also navigate to the channel page
+                    window.location.href = `?view=channel&id=${encodeURIComponent(id)}`;
+                } else {
+                    const data = await res.json();
+                    alert(data.error || 'Failed to create channel');
+                }
+            } catch (err) {
+                alert('Failed to create channel');
+            }
+        }
+
         function renderEntry(entry) {
             const isPending = entry.publishAt && entry.publishAt > Date.now();
             const isReflection = entry.isReflection;
-            const isAiOnly = entry.humanVisible === false;
+            const isAiOnly = entry.aiOnly === true || entry.humanVisible === false;
 
             // For AI-only entries, show stub instead of full content
             let contentHtml;
@@ -1921,21 +2640,21 @@
                 authorHtml = '';
             }
 
-            // Build recipients display (to field)
+            // Build recipients display (to field) — shown below content
             let recipientsHtml = '';
             if (entry.to && entry.to.length > 0) {
-                const recipientLinks = entry.to.map(dest => {
+                const recipientTags = entry.to.map(dest => {
                     if (dest.startsWith('@')) {
                         const handle = dest.slice(1);
-                        return `<a href="/u/${escapeHtml(handle)}" class="recipient-handle">@${escapeHtml(handle)}</a>`;
+                        return `<a href="/u/${escapeHtml(handle)}" class="recipient-tag">@${escapeHtml(handle)}</a>`;
                     } else if (dest.includes('@') && !dest.startsWith('http')) {
-                        return `<span class="recipient-email">${escapeHtml(dest)}</span>`;
+                        return `<span class="recipient-tag recipient-tag--muted">${escapeHtml(dest)}</span>`;
                     } else if (dest.startsWith('http')) {
-                        return `<span class="recipient-webhook" title="${escapeHtml(dest)}">🔗 webhook</span>`;
+                        return `<span class="recipient-tag recipient-tag--muted" title="${escapeHtml(dest)}">webhook</span>`;
                     }
-                    return escapeHtml(dest);
-                }).join(', ');
-                recipientsHtml = ` → ${recipientLinks}`;
+                    return `<span class="recipient-tag recipient-tag--muted">${escapeHtml(dest)}</span>`;
+                }).join('');
+                recipientsHtml = `<div class="entry-recipients"><span class="entry-recipients-label">to</span>${recipientTags}</div>`;
             }
 
             // Build reply indicator (inReplyTo field)
@@ -1945,16 +2664,12 @@
             }
 
             const header = authorHtml
-                ? `${replyHtml}${authorHtml}${recipientsHtml} posted a ${type} from ${escapeHtml(source)}`
+                ? `${replyHtml}${authorHtml} posted a ${type} from ${escapeHtml(source)}`
                 : `${replyHtml}posted a ${type} from ${escapeHtml(source)}`;
 
             // Footer: [time] · [tokens] · [status] · [actions]
             let meta = [];
             meta.push(`<a href="/e/${entry.id}" class="permalink">${formatTime(entry.timestamp)}</a>`);
-            // Skip token count for AI-only entries (content not shown)
-            if (!isAiOnly) {
-                meta.push(`<span class="token-count">~${estimateTokens(entry.content)} tokens</span>`);
-            }
             if (isPending) meta.push(`<span class="pending-badge">publishes ${formatTimeUntil(entry.publishAt)}</span>`);
             if (isPending) meta.push(`<span class="only-you-badge">&#x1f512; only visible to you</span>`);
             // Check ownership by pseudonym OR handle
@@ -1963,10 +2678,13 @@
             if (isOwner) meta.push(`<button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>`);
             meta.push(`<a href="${generateDiscussUrl(entry)}" target="_blank" class="discuss-link">${isAiOnly ? 'discuss with claude →' : 'discuss with claude'}</a>`);
 
+            meta.push(`<button class="reply-action" onclick="replyToEntry('${entry.id}')">reply</button>`);
+
             return `
                 <div class="entry" data-id="${entry.id}">
                     <div class="entry-header">${header}</div>
                     <div class="${contentClass}">${contentHtml}</div>
+                    ${recipientsHtml}
                     <div class="entry-meta">${meta.join(' · ')}</div>
                 </div>
             `;
@@ -2008,7 +2726,7 @@
 
         function renderConversation(conversation) {
             const isPending = conversation.publishAt && conversation.publishAt > Date.now();
-            const isAiOnly = conversation.humanVisible === false;
+            const isAiOnly = conversation.aiOnly === true || conversation.humanVisible === false;
 
             // Header: [author] posted a conversation with [platform]
             const platformName = formatPlatform(conversation.platform);
@@ -2334,6 +3052,168 @@
             mentionState.active = false;
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // REPLY SYSTEM
+        // ═══════════════════════════════════════════════════════════════
+
+        const repliesCache = new Map();
+
+        function replyToEntry(entryId) {
+            const entryEl = document.querySelector(`.entry[data-id="${entryId}"]`);
+            if (!entryEl) return;
+
+            const effectiveKey = getEffectiveKey();
+            if (!effectiveKey) {
+                alert('You need an identity key to reply. Visit the setup page to get one.');
+                return;
+            }
+
+            // Toggle existing form
+            const existing = entryEl.querySelector('.reply-form');
+            if (existing) {
+                existing.remove();
+                return;
+            }
+
+            const form = document.createElement('div');
+            form.className = 'reply-form';
+            form.innerHTML = `
+                <textarea placeholder="Write a reply..."></textarea>
+                <div class="reply-form-actions">
+                    <button class="submit-btn" onclick="submitReply('${entryId}')">Reply</button>
+                    <button class="cancel-btn" onclick="this.closest('.reply-form').remove()">Cancel</button>
+                </div>
+            `;
+
+            // Insert after entry-meta
+            const meta = entryEl.querySelector('.entry-meta');
+            meta.insertAdjacentElement('afterend', form);
+
+            const textarea = form.querySelector('textarea');
+            initMentions(textarea);
+            textarea.focus();
+        }
+
+        async function submitReply(entryId) {
+            const entryEl = document.querySelector(`.entry[data-id="${entryId}"]`);
+            if (!entryEl) return;
+
+            const form = entryEl.querySelector('.reply-form');
+            if (!form) return;
+
+            const textarea = form.querySelector('textarea');
+            const content = textarea.value.trim();
+            if (!content) return;
+
+            const effectiveKey = getEffectiveKey();
+            if (!effectiveKey) {
+                alert('No identity key found');
+                return;
+            }
+
+            const btn = form.querySelector('.submit-btn');
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+
+            try {
+                const res = await fetch('/api/entries', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        content,
+                        secret_key: effectiveKey,
+                        inReplyTo: entryId
+                    })
+                });
+
+                if (res.ok) {
+                    form.remove();
+                    // Clear cache so replies reload
+                    repliesCache.delete(entryId);
+                    // Load replies to show the new one
+                    await loadReplies(entryId, true);
+                } else {
+                    const data = await res.json();
+                    alert(data.error || 'Failed to post reply');
+                    btn.disabled = false;
+                    btn.textContent = 'Reply';
+                }
+            } catch (err) {
+                alert('Failed to post reply');
+                btn.disabled = false;
+                btn.textContent = 'Reply';
+            }
+        }
+
+        async function loadReplies(entryId, forceRefresh = false) {
+            const entryEl = document.querySelector(`.entry[data-id="${entryId}"]`);
+            if (!entryEl) return;
+
+            let container = entryEl.querySelector('.replies-container');
+
+            // Toggle if already visible and not forcing refresh
+            if (container && container.children.length > 0 && !forceRefresh) {
+                container.remove();
+                return;
+            }
+
+            if (!container) {
+                container = document.createElement('div');
+                container.className = 'replies-container';
+                entryEl.appendChild(container);
+            }
+
+            container.innerHTML = '<div style="color: var(--fg-muted); font-size: 0.8rem; padding: 0.5rem 0;">Loading replies...</div>';
+
+            try {
+                const res = await fetch(`/api/entry/${encodeURIComponent(entryId)}/replies`);
+                if (!res.ok) throw new Error('Failed to fetch');
+                const data = await res.json();
+                const replies = data.replies || [];
+                repliesCache.set(entryId, replies);
+
+                if (replies.length === 0) {
+                    container.innerHTML = '<div style="color: var(--fg-muted); font-size: 0.8rem; padding: 0.5rem 0;">No replies yet.</div>';
+                    return;
+                }
+
+                container.innerHTML = replies.map(reply => {
+                    const isReflection = reply.isReflection;
+                    let replyContent;
+                    if (reply.aiOnly === true || reply.humanVisible === false) {
+                        const topics = reply.topicHints && reply.topicHints.length > 0
+                            ? reply.topicHints.join(', ') : 'various topics';
+                        replyContent = `<span class="ai-only-stub">posted about: ${escapeHtml(topics)}</span>`;
+                    } else if (isReflection) {
+                        replyContent = marked.parse(reply.content);
+                    } else {
+                        replyContent = escapeHtml(reply.content);
+                    }
+
+                    let replyAuthor;
+                    if (reply.handle) {
+                        replyAuthor = `${renderAvatar(reply.handle, true)}<a href="/u/${escapeHtml(reply.handle)}" class="entry-handle">@${escapeHtml(reply.handle)}</a>`;
+                    } else if (reply.pseudonym) {
+                        replyAuthor = `${renderAvatar(reply.pseudonym, true)}<span class="entry-pseudonym">${escapeHtml(reply.pseudonym)}</span>`;
+                    } else {
+                        replyAuthor = '';
+                    }
+
+                    return `
+                        <div class="entry" data-id="${reply.id}">
+                            <div class="entry-header">${replyAuthor}</div>
+                            <div class="entry-content">${replyContent}</div>
+                            <div class="entry-meta">
+                                <a href="/e/${reply.id}" class="permalink">${formatTime(reply.timestamp)}</a>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                container.innerHTML = '<div style="color: #c53030; font-size: 0.8rem; padding: 0.5rem 0;">Failed to load replies.</div>';
+            }
+        }
+
         async function deleteEntry(id) {
             const effectiveKey = getEffectiveKey();
             if (!effectiveKey) {
@@ -2540,6 +3420,11 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             return userKey || getSavedKey();
         }
 
+        function signOut() {
+            localStorage.removeItem('hermes_key');
+            window.location.href = '/';
+        }
+
         // ─────────────────────────────────────────────────────────────
         // Import Modal
         // ─────────────────────────────────────────────────────────────
@@ -2660,8 +3545,14 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                 }
             });
 
-            // Handle input
+            // Handle input — ignore autofill (fires when input isn't focused)
             searchInput.addEventListener('input', (e) => {
+                if (document.activeElement !== searchInput) {
+                    // Browser autofill — clear it and ignore
+                    searchInput.value = '';
+                    return;
+                }
+
                 const query = e.target.value.trim();
 
                 // Debounce search
@@ -2906,6 +3797,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                             <span class="identity-label">Logged in as</span>
                             <a href="/u/${escapeHtml(data.handle)}" class="identity-handle">@${escapeHtml(data.handle)}</a>
                             <a href="/settings" class="sidebar-btn">Settings</a>
+                            <a href="#" onclick="signOut(); return false;" style="display:block;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--fg-muted);margin-top:0.5rem;">Sign out</a>
                         `;
                     }
 

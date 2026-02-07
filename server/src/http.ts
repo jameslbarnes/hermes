@@ -1159,7 +1159,7 @@ function createMCPServer(secretKey: string) {
 
   const server = new Server(
     { name: 'hermes', version: '0.1.0' },
-    { capabilities: { tools: {} } }
+    { capabilities: { tools: { listChanged: true } } }
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -2011,6 +2011,8 @@ function createMCPServer(secretKey: string) {
         const updatedSkills = [...userSkills, newSkill];
         await storage.updateUser(skillsUser.handle, { skills: updatedSkills });
 
+        server.sendToolListChanged().catch(() => {});
+
         return {
           content: [{
             type: 'text' as const,
@@ -2021,7 +2023,7 @@ function createMCPServer(secretKey: string) {
               (toDestinations ? `Destinations: ${toDestinations.join(', ')}\n` : '') +
               (triggerCondition ? `Trigger: ${triggerCondition}\n` : '') +
               (isPublic ? `Visibility: PUBLIC (in gallery)\n` : '') +
-              `\nThe skill_${skillName} tool will appear on next connection.`,
+              `\nThe skill_${skillName} tool is now available.`,
           }],
         };
       }
@@ -2160,10 +2162,12 @@ function createMCPServer(secretKey: string) {
         const updatedSkills = userSkills.filter((_, i) => i !== skillIndex);
         await storage.updateUser(skillsUser.handle, { skills: updatedSkills });
 
+        server.sendToolListChanged().catch(() => {});
+
         return {
           content: [{
             type: 'text' as const,
-            text: `Deleted skill "${deletedName}". The skill_${deletedName} tool will be removed on next connection.`,
+            text: `Deleted skill "${deletedName}". The skill_${deletedName} tool has been removed.`,
           }],
         };
       }
@@ -2502,8 +2506,10 @@ function createMCPServer(secretKey: string) {
           await storage.updateUser(currentUser.handle, { onboardedAt: Date.now() });
         }
 
+        server.sendToolListChanged().catch(() => {});
+
         return {
-          content: [{ type: 'text' as const, text: `Joined #${channelId}. You now have access to ${channel.skills.length} channel skill(s). They will appear as channel_${channelId}_* tools on next connection.` }],
+          content: [{ type: 'text' as const, text: `Joined #${channelId}. You now have access to ${channel.skills.length} channel skill(s) as channel_${channelId}_* tools.` }],
         };
       }
 
@@ -2524,8 +2530,10 @@ function createMCPServer(secretKey: string) {
 
         await storage.removeSubscriber(channelId, currentUser.handle);
 
+        server.sendToolListChanged().catch(() => {});
+
         return {
-          content: [{ type: 'text' as const, text: `Left #${channelId}. Channel tools will be removed on next connection.` }],
+          content: [{ type: 'text' as const, text: `Left #${channelId}. Channel tools have been removed.` }],
         };
       }
 
@@ -2897,6 +2905,8 @@ function createMCPServer(secretKey: string) {
           await storage.updateUser(authorHandle, { skills: updatedSourceSkills });
         }
 
+        server.sendToolListChanged().catch(() => {});
+
         return {
           content: [{
             type: 'text' as const,
@@ -2904,7 +2914,7 @@ function createMCPServer(secretKey: string) {
               `Tool name: skill_${skillName}\n` +
               `Destinations: (none — configure with hermes_skills update)\n` +
               `Gallery: private\n\n` +
-              `The skill_${skillName} tool will appear on next connection.`,
+              `The skill_${skillName} tool is now available.`,
           }],
         };
       } catch (error: any) {
@@ -3159,6 +3169,9 @@ function createMCPServer(secretKey: string) {
 
         // Mark as used FIRST to prevent double-trigger from concurrent sessions
         await storage.updateUser(currentUser.handle, { lastDailyQuestionAt: now });
+
+        // Notify client that tool list changed (daily question is now hidden)
+        server.sendToolListChanged().catch(() => {});
 
         // Gather context
         const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;

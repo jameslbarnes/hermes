@@ -1997,11 +1997,11 @@ function createMCPServer(secretKey: string) {
           description,
           instructions: instructions || '',
           handlerType: 'instructions',
-          parameters: parameters || undefined,
-          triggerCondition: triggerCondition || undefined,
-          to: toDestinations || undefined,
-          aiOnly: resolvedSkillAiOnly,
-          visibility: visibility || undefined, // backward compat
+          ...(parameters && { parameters }),
+          ...(triggerCondition && { triggerCondition }),
+          ...(toDestinations && { to: toDestinations }),
+          ...(resolvedSkillAiOnly !== undefined && { aiOnly: resolvedSkillAiOnly }),
+          ...(visibility && { visibility }), // backward compat
           public: isPublic || false,
           author: skillsUser.handle,
           cloneCount: 0,

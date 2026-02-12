@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MemoryStorage, StagedStorage, isValidChannelId } from './storage.js';
+import { MemoryStorage, StagedStorage, isValidChannelId, encodePageCursor } from './storage.js';
 import type { Channel, ChannelInvite } from './storage.js';
 import { hashSecretKey } from './identity.js';
 
@@ -287,6 +287,84 @@ describe('MemoryStorage', () => {
       const entriesA = await storage.getEntriesByPseudonym('User A#111');
       expect(entriesA).toHaveLength(1);
       expect(entriesA[0].content).toBe('Entry from A');
+    });
+
+    it('should apply offset before limit when paginating entries', async () => {
+      const now = Date.now();
+      await storage.addEntry({
+        pseudonym: 'User A#111',
+        client: 'desktop',
+        content: 'Newest',
+        timestamp: now,
+      });
+      await storage.addEntry({
+        pseudonym: 'User B#222',
+        client: 'desktop',
+        content: 'Middle',
+        timestamp: now - 1000,
+      });
+      await storage.addEntry({
+        pseudonym: 'User C#333',
+        client: 'desktop',
+        content: 'Oldest',
+        timestamp: now - 2000,
+      });
+
+      const page = await storage.getEntries(1, 1);
+      expect(page).toHaveLength(1);
+      expect(page[0].content).toBe('Middle');
+    });
+
+    it('should paginate entries with cursor', async () => {
+      const now = Date.now();
+      const first = await storage.addEntry({
+        pseudonym: 'User A#111',
+        client: 'desktop',
+        content: 'Newest',
+        timestamp: now,
+      });
+      await storage.addEntry({
+        pseudonym: 'User B#222',
+        client: 'desktop',
+        content: 'Middle',
+        timestamp: now - 1000,
+      });
+
+      const cursor = encodePageCursor({ timestamp: first.timestamp, id: first.id });
+      const page = await storage.getEntries(10, 0, cursor);
+      expect(page).toHaveLength(1);
+      expect(page[0].content).toBe('Middle');
+    });
+  });
+
+  describe('Conversation pagination', () => {
+    it('should paginate conversations with cursor', async () => {
+      const now = Date.now();
+      const newest = await storage.addConversation({
+        pseudonym: 'User A#111',
+        sourceUrl: 'https://example.com/a',
+        platform: 'claude',
+        title: 'Newest',
+        content: 'Newest conversation',
+        summary: 'Newest summary',
+        timestamp: now,
+        keywords: ['newest'],
+      });
+      await storage.addConversation({
+        pseudonym: 'User B#222',
+        sourceUrl: 'https://example.com/b',
+        platform: 'chatgpt',
+        title: 'Older',
+        content: 'Older conversation',
+        summary: 'Older summary',
+        timestamp: now - 1000,
+        keywords: ['older'],
+      });
+
+      const cursor = encodePageCursor({ timestamp: newest.timestamp, id: newest.id });
+      const page = await storage.getConversations(10, 0, cursor);
+      expect(page).toHaveLength(1);
+      expect(page[0].title).toBe('Older');
     });
   });
 

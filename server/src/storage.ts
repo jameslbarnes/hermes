@@ -208,6 +208,33 @@ export function tokenize(text: string): string[] {
     .filter((word, index, arr) => arr.indexOf(word) === index); // unique
 }
 
+interface PageCursor {
+  t: number;
+  id: string;
+}
+
+function decodePageCursorInternal(cursor?: string): PageCursor | null {
+  if (!cursor) return null;
+  try {
+    const decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as PageCursor;
+    if (typeof decoded?.t !== 'number' || typeof decoded?.id !== 'string' || !Number.isFinite(decoded.t) || decoded.id.length === 0) {
+      return null;
+    }
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+export function encodePageCursor(item: { timestamp: number; id: string }): string {
+  return Buffer.from(JSON.stringify({ t: item.timestamp, id: item.id }), 'utf8').toString('base64url');
+}
+
+function compareByFeedOrder(a: { timestamp: number; id: string }, b: { timestamp: number; id: string }): number {
+  if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
+  return b.id.localeCompare(a.id);
+}
+
 export interface Storage {
   /** Add a new entry. stagingDelayMs overrides the default staging delay (StagedStorage only). */
   addEntry(entry: Omit<JournalEntry, 'id'>, stagingDelayMs?: number): Promise<JournalEntry>;
@@ -216,7 +243,7 @@ export interface Storage {
   getEntry(id: string): Promise<JournalEntry | null>;
 
   /** Get recent entries (newest first) */
-  getEntries(limit?: number, offset?: number): Promise<JournalEntry[]>;
+  getEntries(limit?: number, offset?: number, cursor?: string): Promise<JournalEntry[]>;
 
   /** Get entries by pseudonym */
   getEntriesByPseudonym(pseudonym: string, limit?: number): Promise<JournalEntry[]>;
@@ -293,7 +320,7 @@ export interface Storage {
   getConversation(id: string): Promise<Conversation | null>;
 
   /** Get recent conversations (newest first) */
-  getConversations(limit?: number, offset?: number): Promise<Conversation[]>;
+  getConversations(limit?: number, offset?: number, cursor?: string): Promise<Conversation[]>;
 
   /** Get conversations by pseudonym */
   getConversationsByPseudonym(pseudonym: string, limit?: number): Promise<Conversation[]>;
@@ -367,7 +394,15 @@ export class MemoryStorage implements Storage {
     return this.entries.find(e => e.id === id) || null;
   }
 
-  async getEntries(limit = 50, offset = 0): Promise<JournalEntry[]> {
+  async getEntries(limit = 50, offset = 0, cursor?: string): Promise<JournalEntry[]> {
+    const parsedCursor = decodePageCursorInternal(cursor);
+    if (parsedCursor) {
+      return this.entries
+        .slice()
+        .sort(compareByFeedOrder)
+        .filter(e => compareByFeedOrder(e, { timestamp: parsedCursor.t, id: parsedCursor.id }) > 0)
+        .slice(0, limit);
+    }
     return this.entries.slice(offset, offset + limit);
   }
 
@@ -533,7 +568,15 @@ export class MemoryStorage implements Storage {
     return this.conversations.find(c => c.id === id) || null;
   }
 
-  async getConversations(limit = 50, offset = 0): Promise<Conversation[]> {
+  async getConversations(limit = 50, offset = 0, cursor?: string): Promise<Conversation[]> {
+    const parsedCursor = decodePageCursorInternal(cursor);
+    if (parsedCursor) {
+      return this.conversations
+        .slice()
+        .sort(compareByFeedOrder)
+        .filter(c => compareByFeedOrder(c, { timestamp: parsedCursor.t, id: parsedCursor.id }) > 0)
+        .slice(0, limit);
+    }
     return this.conversations.slice(offset, offset + limit);
   }
 
@@ -777,22 +820,25 @@ export class FirestoreStorage implements Storage {
     return newEntry;
   }
 
-  async getEntries(limit = 50, offset = 0): Promise<JournalEntry[]> {
-    const snapshot = await this.db
+  async getEntries(limit = 50, offset = 0, cursor?: string): Promise<JournalEntry[]> {
+    let query: FirebaseFirestore.Query = this.db
       .collection(this.collection)
       .orderBy('timestamp', 'desc')
-      .limit(limit + offset)
-      .get();
+      .orderBy('__name__', 'desc');
 
-    const entries: JournalEntry[] = [];
-    snapshot.docs.slice(offset).forEach(doc => {
-      entries.push({
-        id: doc.id,
-        ...doc.data(),
-      } as JournalEntry);
-    });
+    const parsedCursor = decodePageCursorInternal(cursor);
+    if (parsedCursor) {
+      query = query.startAfter(parsedCursor.t, parsedCursor.id);
+    } else if (offset > 0) {
+      query = query.offset(offset);
+    }
 
-    return entries;
+    const snapshot = await query.limit(limit).get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as JournalEntry));
   }
 
   async getEntriesByPseudonym(pseudonym: string, limit = 50): Promise<JournalEntry[]> {
@@ -1298,22 +1344,25 @@ export class FirestoreStorage implements Storage {
     } as Conversation;
   }
 
-  async getConversations(limit = 50, offset = 0): Promise<Conversation[]> {
-    const snapshot = await this.db
+  async getConversations(limit = 50, offset = 0, cursor?: string): Promise<Conversation[]> {
+    let query: FirebaseFirestore.Query = this.db
       .collection(this.conversationsCollection)
       .orderBy('timestamp', 'desc')
-      .limit(limit + offset)
-      .get();
+      .orderBy('__name__', 'desc');
 
-    const conversations: Conversation[] = [];
-    snapshot.docs.slice(offset).forEach(doc => {
-      conversations.push({
-        id: doc.id,
-        ...doc.data(),
-      } as Conversation);
-    });
+    const parsedCursor = decodePageCursorInternal(cursor);
+    if (parsedCursor) {
+      query = query.startAfter(parsedCursor.t, parsedCursor.id);
+    } else if (offset > 0) {
+      query = query.offset(offset);
+    }
 
-    return conversations;
+    const snapshot = await query.limit(limit).get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as Conversation));
   }
 
   async getConversationsByPseudonym(pseudonym: string, limit = 50): Promise<Conversation[]> {
@@ -1603,9 +1652,9 @@ export class StagedStorage implements Storage {
     return this.published.getEntry(id);
   }
 
-  async getEntries(limit = 50, offset = 0): Promise<JournalEntry[]> {
+  async getEntries(limit = 50, offset = 0, cursor?: string): Promise<JournalEntry[]> {
     // Only return published entries for public feed
-    return this.published.getEntries(limit, offset);
+    return this.published.getEntries(limit, offset, cursor);
   }
 
   /**
@@ -1892,9 +1941,9 @@ export class StagedStorage implements Storage {
     return this.published.getConversation(id);
   }
 
-  async getConversations(limit = 50, offset = 0): Promise<Conversation[]> {
+  async getConversations(limit = 50, offset = 0, cursor?: string): Promise<Conversation[]> {
     // Only return published conversations for public feed
-    return this.published.getConversations(limit, offset);
+    return this.published.getConversations(limit, offset, cursor);
   }
 
   /**

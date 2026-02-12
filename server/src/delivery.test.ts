@@ -798,6 +798,33 @@ describe('canView (async, unified model)', () => {
     expect(await canView(entry, 'bob', undefined, false, storage)).toBe(true);
   });
 
+  it('should reuse channel membership cache across checks', async () => {
+    await storage.createChannel({
+      id: 'cached-ch',
+      name: 'Cached',
+      visibility: 'public',
+      createdBy: 'alice',
+      createdAt: Date.now(),
+      skills: [],
+      subscribers: [{ handle: 'alice', role: 'admin', joinedAt: Date.now() }],
+    });
+
+    const entry = { ...baseEntry, to: ['#cached-ch'] };
+    const channelAccessCache = new Map<string, boolean>();
+    let channelLookupCount = 0;
+
+    const spyStorage = {
+      getChannel: async (channelId: string) => {
+        channelLookupCount += 1;
+        return storage.getChannel(channelId);
+      },
+    } as unknown as MemoryStorage;
+
+    expect(await canView(entry, 'alice', undefined, false, spyStorage, channelAccessCache)).toBe(true);
+    expect(await canView(entry, 'alice', undefined, false, spyStorage, channelAccessCache)).toBe(true);
+    expect(channelLookupCount).toBe(1);
+  });
+
   it('should deny webhook-only entries to non-authors', async () => {
     const entry = { ...baseEntry, to: ['https://webhook.example.com'] };
     expect(await canView(entry, 'alice', undefined, false, storage)).toBe(false);

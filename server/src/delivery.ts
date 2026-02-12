@@ -543,7 +543,8 @@ export async function canView(
   viewerHandle: string | undefined,
   viewerEmail: string | undefined,
   isAuthor: boolean,
-  storage: Storage
+  storage: Storage,
+  channelAccessCache?: Map<string, boolean>
 ): Promise<boolean> {
   // Authors can always see their own entries
   if (isAuthor) return true;
@@ -562,12 +563,22 @@ export async function canView(
     else if (dest.startsWith('#')) {
       if (viewerHandle) {
         const channelId = dest.slice(1);
+        if (channelAccessCache?.has(channelId)) {
+          if (channelAccessCache.get(channelId)) {
+            return true;
+          }
+          continue;
+        }
+
         try {
           const channel = await storage.getChannel(channelId);
-          if (channel && channel.subscribers.some(s => s.handle === viewerHandle)) {
+          const hasAccess = !!(channel && channel.subscribers.some(s => s.handle === viewerHandle));
+          channelAccessCache?.set(channelId, hasAccess);
+          if (hasAccess) {
             return true;
           }
         } catch {
+          channelAccessCache?.set(channelId, false);
           // Channel lookup failed — deny access for this dest
         }
       }

@@ -87,8 +87,12 @@ describe('Skills System', () => {
     it('should have ai_only param in hermes_write_entry schema', () => {
       const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_write_entry');
       const props = skill!.inputSchema?.properties;
+      const required = skill!.inputSchema?.required;
       expect(props.ai_only).toBeDefined();
       expect(props.ai_only.type).toBe('boolean');
+      expect(props.search_keywords).toBeDefined();
+      expect(props.search_keywords.type).toBe('array');
+      expect(required).toContain('search_keywords');
     });
 
     it('should have defaultAiOnly param in hermes_settings schema', () => {
@@ -174,6 +178,8 @@ describe('Skills System', () => {
       const schema = buildSkillInputSchema(skill);
       expect(schema.properties.result).toBeDefined();
       expect(schema.properties.result.type).toBe('string');
+      expect(schema.properties.search_keywords).toBeDefined();
+      expect(schema.properties.search_keywords.type).toBe('array');
     });
 
     it('should map parameters to schema properties', () => {
@@ -226,7 +232,7 @@ describe('Skills System', () => {
       };
 
       const schema = buildSkillInputSchema(skill);
-      expect(Object.keys(schema.properties)).toEqual(['result']);
+      expect(Object.keys(schema.properties)).toEqual(['result', 'search_keywords']);
       expect(schema.required).toBeUndefined();
     });
   });

@@ -21,7 +21,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { derivePseudonym, generateSecretKey, isValidSecretKey, hashSecretKey, isValidHandle, normalizeHandle } from './identity.js';
-import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary, type Conversation, type User, type Skill, type SkillParameter, type Channel, type ChannelInvite, tokenize, isValidChannelId, generateEntryId } from './storage.js';
+import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary, type Conversation, type User, type Skill, type SkillParameter, type Channel, type ChannelInvite, tokenize, isValidChannelId, generateEntryId, encodePageCursor } from './storage.js';
 import { scrapeConversation, detectPlatform, isValidShareUrl, ScrapeError } from './scraper.js';
 import { createNotificationService, createSendGridClient, verifyUnsubscribeToken, verifyEmailToken, type NotificationService } from './notifications.js';
 import { deliverEntry, getDefaultVisibility, canViewEntry, canView, normalizeEntry, isDefaultAiOnly, isEntryAiOnly, type DeliveryConfig } from './delivery.js';
@@ -258,6 +258,11 @@ export const SYSTEM_SKILLS: Skill[] = [
           items: { type: 'string' },
           description: 'For AI-only entries: brief topic keywords (e.g., ["authentication", "TEE"]). Shown to humans as "posted about: x, y, z". Optional.',
         },
+        search_keywords: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional search phrases (3-8 works best) used to find related entries right after writing. Example: ["porto", "quiet neighborhoods", "coffee shops"].',
+        },
         to: {
           type: 'array',
           items: { type: 'string' },
@@ -273,7 +278,7 @@ export const SYSTEM_SKILLS: Skill[] = [
           description: 'Deprecated: access is now determined by `to` (empty = public, non-empty = private). Kept for backward compatibility.',
         },
       },
-      required: ['sensitivity_check', 'client', 'entry'],
+      required: ['sensitivity_check', 'client', 'entry', 'search_keywords'],
     },
     createdAt: 0,
   },
@@ -1092,6 +1097,11 @@ export function buildSkillInputSchema(skill: Skill): Record<string, any> {
     type: 'string',
     description: 'If provided, creates a notebook entry with this content using the skill\'s destinations. If omitted, returns the skill instructions for Claude to follow.',
   };
+  properties['search_keywords'] = {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Optional search phrases used when result is provided to find related entries after posting.',
+  };
 
   return {
     type: 'object',
@@ -1327,6 +1337,138 @@ function createMCPServer(secretKey: string) {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+    const executeHermesSearch = async ({
+      query,
+      handleFilter,
+      limit,
+    }: {
+      query?: string;
+      handleFilter?: string;
+      limit: number;
+    }): Promise<Array<{ id: string; text: string; timestamp: number; followed: boolean }>> => {
+      let entryResults: JournalEntry[] = [];
+      let conversationResults: Conversation[] = [];
+
+      if (handleFilter && !query) {
+        // Handle only: get recent entries by this author
+        entryResults = await storage.getEntriesByHandle(handleFilter, limit * 2);
+        // Also try by pseudonym in case they haven't migrated
+        if (entryResults.length === 0) {
+          const user = await storage.getUser(handleFilter);
+          if (user?.legacyPseudonym) {
+            entryResults = await storage.getEntriesByPseudonym(user.legacyPseudonym, limit * 2);
+          }
+        }
+      } else if (handleFilter && query) {
+        // Both: search then filter by author
+        const [searchEntries, searchConvos] = await Promise.all([
+          storage.searchEntries(query, limit * 4),
+          storage.searchConversations(query, limit * 4),
+        ]);
+        entryResults = searchEntries.filter(e => e.handle === handleFilter);
+        conversationResults = searchConvos.filter(c => c.pseudonym.toLowerCase().includes(handleFilter));
+      } else if (query) {
+        // Query only: keyword search
+        const [searchEntries, searchConvos] = await Promise.all([
+          storage.searchEntries(query, limit * 2),
+          storage.searchConversations(query, limit * 2),
+        ]);
+        // Filter out own entries/conversations
+        entryResults = searchEntries.filter(e => e.pseudonym !== pseudonym);
+        conversationResults = searchConvos.filter(c => c.pseudonym !== pseudonym);
+      }
+
+      // Filter results through access control (BUG FIX: was returning private entries)
+      const searchUser = await storage.getUserByKeyHash(keyHash);
+      const viewerHandle = searchUser?.handle;
+      const viewerEmail = searchUser?.email;
+
+      const filteredEntries: JournalEntry[] = [];
+      const channelAccessCache = new Map<string, boolean>();
+      for (const e of entryResults) {
+        const normalized = normalizeEntry(e);
+        const isAuthor = e.pseudonym === pseudonym || e.handle === viewerHandle;
+        if (await canView(normalized, viewerHandle, viewerEmail, isAuthor, storage, channelAccessCache)) {
+          filteredEntries.push(e);
+        }
+      }
+      entryResults = filteredEntries;
+
+      const followedHandles = new Set((searchUser?.following || []).map(f => f.handle));
+
+      // Combine and sort by timestamp, boosting followed users
+      return [
+        ...entryResults.map(e => ({
+          id: e.id,
+          timestamp: e.timestamp,
+          text: `[${new Date(e.timestamp).toISOString().split('T')[0]}] ${e.handle ? '@' + e.handle : e.pseudonym}: ${e.content}`,
+          followed: !!(e.handle && followedHandles.has(e.handle)),
+        })),
+        ...conversationResults.map(c => ({
+          id: c.id,
+          timestamp: c.timestamp,
+          text: `[${new Date(c.timestamp).toISOString().split('T')[0]}] ${c.pseudonym} posted a conversation with ${formatPlatformName(c.platform)}: ${c.summary}`,
+          followed: false,
+        })),
+      ]
+        .sort((a, b) => {
+          if (a.followed !== b.followed) return a.followed ? -1 : 1;
+          return b.timestamp - a.timestamp;
+        })
+        .slice(0, limit);
+    };
+
+    const formatHermesSearchText = ({
+      query,
+      handleFilter,
+      results,
+    }: {
+      query?: string;
+      handleFilter?: string;
+      results: Array<{ id: string; text: string }>;
+    }): string => {
+      if (results.length === 0) {
+        const searchDesc = handleFilter
+          ? (query ? `entries by @${handleFilter} matching "${query}"` : `entries by @${handleFilter}`)
+          : `entries matching "${query}"`;
+        return `No ${searchDesc} found.`;
+      }
+
+      const resultsText = results.map(r => `[id:${r.id}] ${r.text}`).join('\n\n');
+      return `Found ${results.length} results matching "${query}":\n\n${resultsText}\n\nUse hermes_get_entry with an ID to see full details.`;
+    };
+
+    const buildRelatedResults = async ({
+      entryText,
+      searchKeywords,
+      limit = 5,
+    }: {
+      entryText: string;
+      searchKeywords?: string[];
+      limit?: number;
+    }): Promise<{ queryUsed: string; results: Array<{ id: string; text: string; timestamp: number; followed: boolean }> }> => {
+      const normalizedKeywords = Array.from(new Set((searchKeywords || [])
+        .map(k => (typeof k === 'string' ? k.trim() : ''))
+        .filter(k => k.length > 0 && k.length <= 80)))
+        .slice(0, 8);
+      const keywordQuery = normalizedKeywords.length > 0 ? normalizedKeywords.join(' ') : undefined;
+
+      const [keywordResults, entryResults] = await Promise.all([
+        keywordQuery
+          ? executeHermesSearch({ query: keywordQuery, limit })
+          : Promise.resolve([]),
+        executeHermesSearch({ query: entryText.trim(), limit }),
+      ]);
+
+      const results = [...keywordResults, ...entryResults]
+        .filter((result, index, arr) => arr.findIndex(r => r.id === result.id) === index)
+        .slice(0, limit);
+
+      return {
+        queryUsed: keywordQuery || entryText.trim(),
+        results,
+      };
+    };
 
     // Handle write tool
     if (name === 'hermes_write_entry') {
@@ -1336,6 +1478,7 @@ function createMCPServer(secretKey: string) {
       const aiOnlyOverride = (args as { ai_only?: boolean })?.ai_only;
       const humanVisibleOverride = (args as { human_visible?: boolean })?.human_visible; // legacy
       const topicHints = (args as { topic_hints?: string[] })?.topic_hints;
+      const rawSearchKeywords = (args as { search_keywords?: string[] })?.search_keywords;
       // Addressing parameters
       const toAddresses = (args as { to?: string[] })?.to;
       const inReplyTo = (args as { in_reply_to?: string })?.in_reply_to;
@@ -1351,6 +1494,16 @@ function createMCPServer(secretKey: string) {
       if (!client || !['desktop', 'mobile', 'code'].includes(client)) {
         return {
           content: [{ type: 'text' as const, text: 'Client must be desktop, mobile, or code.' }],
+          isError: true,
+        };
+      }
+      const searchKeywords = Array.from(new Set((rawSearchKeywords || [])
+        .map(k => (typeof k === 'string' ? k.trim() : ''))
+        .filter(k => k.length > 0 && k.length <= 80)))
+        .slice(0, 8);
+      if (searchKeywords.length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: 'search_keywords is required and must include at least one non-empty keyword.' }],
           isError: true,
         };
       }
@@ -1430,6 +1583,17 @@ function createMCPServer(secretKey: string) {
         responseText += `\n\nVisibility: ${visibility}`;
       }
 
+      const { queryUsed, results: relatedResults } = await buildRelatedResults({
+        entryText: entry.trim(),
+        searchKeywords: searchKeywords,
+        limit: 5,
+      });
+
+      responseText += `\n\nRelated results:\n${formatHermesSearchText({
+        query: queryUsed,
+        results: relatedResults,
+      })}`;
+
       return {
         content: [{
           type: 'text' as const,
@@ -1504,7 +1668,7 @@ function createMCPServer(secretKey: string) {
         const viewerHandle = currentUser?.handle;
         const viewerEmail = currentUser?.email;
         const isAuthor = entry.pseudonym === pseudonym || entry.handle === viewerHandle;
-        const allowed = await canView(entry, viewerHandle, viewerEmail, isAuthor, storage);
+        const allowed = await canView(entry, viewerHandle, viewerEmail, isAuthor, storage, new Map<string, boolean>());
         if (!allowed) {
           return {
             content: [{ type: 'text' as const, text: `Entry not found: ${entryId}` }],
@@ -1555,99 +1719,16 @@ function createMCPServer(secretKey: string) {
         };
       }
 
-      let entryResults: JournalEntry[] = [];
-      let conversationResults: Conversation[] = [];
-
-      if (handleFilter && !query) {
-        // Handle only: get recent entries by this author
-        entryResults = await storage.getEntriesByHandle(handleFilter, limit * 2);
-        // Also try by pseudonym in case they haven't migrated
-        if (entryResults.length === 0) {
-          const user = await storage.getUser(handleFilter);
-          if (user?.legacyPseudonym) {
-            entryResults = await storage.getEntriesByPseudonym(user.legacyPseudonym, limit * 2);
-          }
-        }
-      } else if (handleFilter && query) {
-        // Both: search then filter by author
-        const [searchEntries, searchConvos] = await Promise.all([
-          storage.searchEntries(query, limit * 4),
-          storage.searchConversations(query, limit * 4),
-        ]);
-        entryResults = searchEntries.filter(e => e.handle === handleFilter);
-        conversationResults = searchConvos.filter(c => c.pseudonym.toLowerCase().includes(handleFilter));
-      } else {
-        // Query only: keyword search
-        const [searchEntries, searchConvos] = await Promise.all([
-          storage.searchEntries(query!, limit * 2),
-          storage.searchConversations(query!, limit * 2),
-        ]);
-        // Filter out own entries/conversations
-        entryResults = searchEntries.filter(e => e.pseudonym !== pseudonym);
-        conversationResults = searchConvos.filter(c => c.pseudonym !== pseudonym);
-      }
-
-      // Filter results through access control (BUG FIX: was returning private entries)
-      const searchUser = await storage.getUserByKeyHash(keyHash);
-      const viewerHandle = searchUser?.handle;
-      const viewerEmail = searchUser?.email;
-
-      const filteredEntries: JournalEntry[] = [];
-      for (const e of entryResults) {
-        const normalized = normalizeEntry(e);
-        const isAuthor = e.pseudonym === pseudonym || e.handle === viewerHandle;
-        if (await canView(normalized, viewerHandle, viewerEmail, isAuthor, storage)) {
-          filteredEntries.push(e);
-        }
-      }
-      entryResults = filteredEntries;
-
-      const followedHandles = new Set((searchUser?.following || []).map(f => f.handle));
-
-      // Combine and sort by timestamp, boosting followed users
-      const combined: Array<{ type: 'entry' | 'conversation'; id: string; timestamp: number; text: string; followed: boolean }> = [
-        ...entryResults.map(e => ({
-          type: 'entry' as const,
-          id: e.id,
-          timestamp: e.timestamp,
-          text: `[${new Date(e.timestamp).toISOString().split('T')[0]}] ${e.handle ? '@' + e.handle : e.pseudonym}: ${e.content}`,
-          followed: !!(e.handle && followedHandles.has(e.handle)),
-        })),
-        ...conversationResults.map(c => ({
-          type: 'conversation' as const,
-          id: c.id,
-          timestamp: c.timestamp,
-          text: `[${new Date(c.timestamp).toISOString().split('T')[0]}] ${c.pseudonym} posted a conversation with ${formatPlatformName(c.platform)}: ${c.summary}`,
-          followed: false,
-        })),
-      ];
-
-      // Sort: followed users first, then by timestamp (newest first)
-      const results = combined
-        .sort((a, b) => {
-          if (a.followed !== b.followed) return a.followed ? -1 : 1;
-          return b.timestamp - a.timestamp;
-        })
-        .slice(0, limit);
-
-      if (results.length === 0) {
-        const searchDesc = handleFilter
-          ? (query ? `entries by @${handleFilter} matching "${query}"` : `entries by @${handleFilter}`)
-          : `entries matching "${query}"`;
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `No ${searchDesc} found.`,
-          }],
-        };
-      }
-
-      const resultsText = results.map(r => `[id:${r.id}] ${r.text}`).join('\n\n');
+      const results = await executeHermesSearch({
+        query,
+        handleFilter,
+        limit,
+      });
 
       return {
         content: [{
           type: 'text' as const,
-          text: `Found ${results.length} results matching "${query}":\n\n${resultsText}\n\nUse hermes_get_entry with an ID to see full details.`,
+          text: formatHermesSearchText({ query, handleFilter, results }),
         }],
       };
     }
@@ -2566,8 +2647,9 @@ function createMCPServer(secretKey: string) {
 
         await storage.createInvite(invite);
 
+        const inviteUrl = `${BASE_URL}/?view=channel&id=${encodeURIComponent(channelId)}&invite=${encodeURIComponent(token)}`;
         return {
-          content: [{ type: 'text' as const, text: `Invite created for #${channelId}.\n\nToken: ${token}\n\nShare this token with users who want to join. They can use: hermes_channels with action: "join", channel_id: "${channelId}", invite_token: "${token}"` }],
+          content: [{ type: 'text' as const, text: `Invite created for #${channelId}.\n\nJoin link: ${inviteUrl}\nToken: ${token}\n\nUsers can click the link to join. They can also join manually with: hermes_channels action: "join", channel_id: "${channelId}", invite_token: "${token}"` }],
         };
       }
 
@@ -2632,7 +2714,8 @@ function createMCPServer(secretKey: string) {
         await storage.createInvite(invite);
 
         // Create an addressed entry to the target user with the invitation
-        const inviteMessage = `You've been invited to join #${channelId} by @${currentUser.handle}.\n\nChannel: ${channel.name}${channel.description ? ' — ' + channel.description : ''}\n\nTo join, use: hermes_channels with action: "join", channel_id: "${channelId}", invite_token: "${token}"`;
+        const inviteUrl = `${BASE_URL}/?view=channel&id=${encodeURIComponent(channelId)}&invite=${encodeURIComponent(token)}`;
+        const inviteMessage = `You've been invited to join #${channelId} by @${currentUser.handle}.\n\nChannel: ${channel.name}${channel.description ? ' — ' + channel.description : ''}\n\nJoin link: ${inviteUrl}\n\nManual fallback: hermes_channels action: "join", channel_id: "${channelId}", invite_token: "${token}"`;
 
         // Use short staging delay (60 seconds) so invitations arrive quickly
         const shortStagingDelay = 60 * 1000;
@@ -2976,6 +3059,7 @@ function createMCPServer(secretKey: string) {
         }
 
         const result = (args as { result?: string })?.result;
+        const rawSearchKeywords = (args as { search_keywords?: string[] })?.search_keywords;
 
         if (result) {
           // Auto-post mode: create an entry tagged with the channel
@@ -3005,6 +3089,15 @@ function createMCPServer(secretKey: string) {
 
           const delayMinutes = Math.round(userStagingDelay / 1000 / 60);
           let responseText = `Posted to #${channelId} via "${skillName}" (publishes in ${delayMinutes} minutes):\n\n"${result.trim()}"\n\nEntry ID: ${saved.id}`;
+          const { queryUsed, results: relatedResults } = await buildRelatedResults({
+            entryText: result.trim(),
+            searchKeywords: rawSearchKeywords,
+            limit: 5,
+          });
+          responseText += `\n\nRelated results:\n${formatHermesSearchText({
+            query: queryUsed,
+            results: relatedResults,
+          })}`;
 
           return {
             content: [{ type: 'text' as const, text: responseText }],
@@ -3062,6 +3155,7 @@ function createMCPServer(secretKey: string) {
         }
 
         const result = (args as { result?: string })?.result;
+        const rawSearchKeywords = (args as { search_keywords?: string[] })?.search_keywords;
 
         if (result) {
           // Auto-post mode: create an entry with the skill's destinations
@@ -3103,6 +3197,15 @@ function createMCPServer(secretKey: string) {
           if (skill.to && skill.to.length > 0) {
             responseText += `\n\nAddressed to: ${skill.to.join(', ')}`;
           }
+          const { queryUsed, results: relatedResults } = await buildRelatedResults({
+            entryText: result.trim(),
+            searchKeywords: rawSearchKeywords,
+            limit: 5,
+          });
+          responseText += `\n\nRelated results:\n${formatHermesSearchText({
+            query: queryUsed,
+            results: relatedResults,
+          })}`;
 
           return {
             content: [{ type: 'text' as const, text: responseText }],
@@ -3279,6 +3382,23 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
+const ENTRY_COUNT_CACHE_TTL_MS = 15_000;
+let cachedEntryCount: { value: number; expiresAt: number } | null = null;
+
+async function getEntryCountCached(storage: Storage): Promise<number> {
+  const now = Date.now();
+  if (cachedEntryCount && cachedEntryCount.expiresAt > now) {
+    return cachedEntryCount.value;
+  }
+
+  const value = await storage.getEntryCount();
+  cachedEntryCount = {
+    value,
+    expiresAt: now + ENTRY_COUNT_CACHE_TTL_MS,
+  };
+  return value;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // REQUEST HANDLING
 // ═══════════════════════════════════════════════════════════════
@@ -3329,7 +3449,7 @@ const server = createServer(async (req, res) => {
 
       // Check visibility permissions (async for #channel resolution)
       const normalized = normalizeEntry(entry);
-      if (!await canView(normalized, userHandle, userEmail, isAuthor, storage)) {
+      if (!await canView(normalized, userHandle, userEmail, isAuthor, storage, new Map<string, boolean>())) {
         res.writeHead(404);
         res.end(JSON.stringify({ error: 'Entry not found' }));
         return;
@@ -3373,9 +3493,10 @@ const server = createServer(async (req, res) => {
       const allReplies = await storage.getRepliesTo(entryId, limit);
       const normalizedReplies = allReplies.map(normalizeEntry);
       const visibleReplies: JournalEntry[] = [];
+      const channelAccessCache = new Map<string, boolean>();
       for (const e of normalizedReplies) {
         const isAuthor = e.pseudonym === userPseudonym || e.handle === userHandle;
-        if (await canView(e, userHandle, userEmail, isAuthor, storage)) {
+        if (await canView(e, userHandle, userEmail, isAuthor, storage, channelAccessCache)) {
           visibleReplies.push(e);
         }
       }
@@ -3397,11 +3518,16 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/entries') {
       const limit = parseInt(url.searchParams.get('limit') || '50');
       const offset = parseInt(url.searchParams.get('offset') || '0');
+      const cursor = url.searchParams.get('cursor') || undefined;
       const secretKey = url.searchParams.get('key');
       const followingOnly = url.searchParams.get('following') === 'true';
 
-      let entries = await storage.getEntries(followingOnly ? limit * 3 : limit, offset);
-      const total = await storage.getEntryCount();
+      const fetchLimit = followingOnly ? limit * 3 : limit * 2;
+      let entries = await storage.getEntries(fetchLimit, offset, cursor);
+      const total = await getEntryCountCached(storage);
+      const nextCursor = entries.length === fetchLimit
+        ? encodePageCursor({ timestamp: entries[entries.length - 1].timestamp, id: entries[entries.length - 1].id })
+        : null;
 
       // If user has a key, include their pending entries and identify user for visibility
       let authorPseudonym: string | null = null;
@@ -3427,9 +3553,10 @@ const server = createServer(async (req, res) => {
       // Filter and process entries based on visibility (async for #channel resolution)
       const normalizedEntries = entries.map(normalizeEntry);
       let visibleEntries: JournalEntry[] = [];
+      const channelAccessCache = new Map<string, boolean>();
       for (const e of normalizedEntries) {
         const isAuthor = e.pseudonym === authorPseudonym || e.handle === authorHandle;
-        if (await canView(e, authorHandle || undefined, authorEmail, isAuthor, storage)) {
+        if (await canView(e, authorHandle || undefined, authorEmail, isAuthor, storage, channelAccessCache)) {
           visibleEntries.push(e);
         }
       }
@@ -3439,6 +3566,8 @@ const server = createServer(async (req, res) => {
         visibleEntries = visibleEntries
           .filter(e => e.handle && followedHandleSet!.has(e.handle))
           .slice(0, limit);
+      } else {
+        visibleEntries = visibleEntries.slice(0, limit);
       }
 
       // Strip content from hidden entries (except for author's own entries)
@@ -3448,7 +3577,7 @@ const server = createServer(async (req, res) => {
       });
 
       res.writeHead(200);
-      res.end(JSON.stringify({ entries: strippedEntries, total, limit, offset }));
+      res.end(JSON.stringify({ entries: strippedEntries, total, limit, offset, nextCursor }));
       return;
     }
 
@@ -3954,9 +4083,14 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/conversations') {
       const limit = parseInt(url.searchParams.get('limit') || '50');
       const offset = parseInt(url.searchParams.get('offset') || '0');
+      const cursor = url.searchParams.get('cursor') || undefined;
       const secretKey = url.searchParams.get('key');
 
-      let conversations = await storage.getConversations(limit, offset);
+      const fetchLimit = limit * 2;
+      let conversations = await storage.getConversations(fetchLimit, offset, cursor);
+      const nextCursor = conversations.length === fetchLimit
+        ? encodePageCursor({ timestamp: conversations[conversations.length - 1].timestamp, id: conversations[conversations.length - 1].id })
+        : null;
 
       // If user has a key, include their pending conversations
       let authorPseudonym: string | null = null;
@@ -3973,10 +4107,10 @@ const server = createServer(async (req, res) => {
       const strippedConversations = conversations.map(c => {
         const isAuthor = c.pseudonym === authorPseudonym;
         return stripHiddenContent(c, isAuthor);
-      });
+      }).slice(0, limit);
 
       res.writeHead(200);
-      res.end(JSON.stringify({ conversations: strippedConversations, limit, offset }));
+      res.end(JSON.stringify({ conversations: strippedConversations, limit, offset, nextCursor }));
       return;
     }
 
@@ -4901,7 +5035,8 @@ const server = createServer(async (req, res) => {
 
       // Create addressed entry to target user
       const pseudonym = derivePseudonym(parsed.secret_key);
-      const inviteMessage = `You've been invited to join #${channelId} by @${user.handle}.\n\nChannel: ${channel.name}${channel.description ? ' — ' + channel.description : ''}\n\nTo join, use: hermes_channels with action: "join", channel_id: "${channelId}", invite_token: "${token}"`;
+      const inviteUrl = `${BASE_URL}/?view=channel&id=${encodeURIComponent(channelId)}&invite=${encodeURIComponent(token)}`;
+      const inviteMessage = `You've been invited to join #${channelId} by @${user.handle}.\n\nChannel: ${channel.name}${channel.description ? ' — ' + channel.description : ''}\n\nJoin link: ${inviteUrl}\n\nManual fallback: hermes_channels action: "join", channel_id: "${channelId}", invite_token: "${token}"`;
       const shortStagingDelay = 60 * 1000;
 
       await storage.addEntry({

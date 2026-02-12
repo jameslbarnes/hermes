@@ -579,8 +579,20 @@
 
     <script>
         const baseUrl = window.location.origin;
+        const nextParam = new URLSearchParams(window.location.search).get('next');
         let handleCheckTimeout = null;
         let handleValid = false;
+
+        function getSafeNextPath() {
+            if (!nextParam) return null;
+            try {
+                const url = new URL(nextParam, window.location.origin);
+                if (url.origin !== window.location.origin) return null;
+                return url.pathname + url.search + url.hash;
+            } catch {
+                return null;
+            }
+        }
 
         // Redirect existing users to settings
         document.addEventListener('DOMContentLoaded', async () => {
@@ -594,7 +606,7 @@
                     });
                     const data = await res.json();
                     if (data.hasAccount) {
-                        window.location.href = '/settings';
+                        window.location.href = getSafeNextPath() || '/settings';
                         return;
                     }
                     // Legacy user without account - let them register a new one
@@ -707,6 +719,12 @@
 
                 // Save key to localStorage
                 localStorage.setItem('hermes_key', keyData.secret_key);
+
+                const safeNext = getSafeNextPath();
+                if (safeNext) {
+                    window.location.href = safeNext;
+                    return;
+                }
 
                 // Send verification email if provided
                 if (email) {

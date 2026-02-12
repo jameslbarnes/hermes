@@ -1219,6 +1219,30 @@
             position: relative;
         }
 
+        .join-status-banner {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 1100;
+            padding: 0.6rem 0.8rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--fg);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+            max-width: 360px;
+        }
+
+        .join-status-banner.success {
+            border-color: rgba(129, 199, 132, 0.5);
+        }
+
+        .join-status-banner.error {
+            border-color: rgba(229, 115, 115, 0.6);
+        }
+
         .notif-badge {
             position: absolute;
             top: -4px;
@@ -1734,8 +1758,11 @@
         const filterPseudonym = params.get('pseudonym');
         const viewMode = params.get('view'); // 'inbox', 'channels', 'channel', or null
         const userKey = params.get('key');
+        const inviteToken = params.get('invite');
+        const channelIdFromUrl = params.get('id');
         let userPseudonym = null;
         let userHandle = null;
+        let inviteJoinAttempted = false;
 
         // Save URL key to localStorage for persistence across pages
         if (userKey) {
@@ -1750,11 +1777,12 @@
 
         // Pagination state
         const PAGE_SIZE = 30;
-        let currentOffset = 0;
+        let nextEntriesCursor = null;
         let hasMoreEntries = true;
         let isLoadingFeed = false;
         let allLoadedEntries = [];
         let allLoadedSummaries = [];
+        let allLoadedDailySummaries = [];
         let allLoadedConversations = [];
 
         // Search state
@@ -1826,8 +1854,65 @@
                     console.error('Failed to lookup pseudonym:', err);
                 }
             }
+            await tryAutoJoinInvite();
             loadFeed();
             setInterval(loadFeed, 60000);
+        }
+
+        async function tryAutoJoinInvite() {
+            if (inviteJoinAttempted) return;
+            inviteJoinAttempted = true;
+
+            if (viewMode !== 'channel' || !channelIdFromUrl || !inviteToken) return;
+
+            const key = getEffectiveKey();
+            if (!key) {
+                const next = encodeURIComponent(window.location.pathname + window.location.search);
+                window.location.href = `/join?next=${next}`;
+                return;
+            }
+
+            try {
+                showJoinStatus(`Joining #${channelIdFromUrl}...`, 'info');
+                const res = await fetch(`/api/channels/${encodeURIComponent(channelIdFromUrl)}/join`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ secret_key: key, invite_token: inviteToken })
+                });
+
+                if (res.ok) {
+                    const cleanUrl = new URL(window.location.href);
+                    cleanUrl.searchParams.delete('invite');
+                    history.replaceState({}, '', cleanUrl.pathname + cleanUrl.search);
+                    loadChannelsSidebar();
+                    showJoinStatus(`Joined #${channelIdFromUrl}.`, 'success', 2500);
+                } else {
+                    const data = await res.json();
+                    showJoinStatus(data.error || 'Failed to join channel', 'error', 4000);
+                    alert(data.error || 'Failed to join channel');
+                }
+            } catch (err) {
+                showJoinStatus('Failed to join channel', 'error', 4000);
+                alert('Failed to join channel');
+            }
+        }
+
+        function showJoinStatus(message, kind = 'info', autoHideMs = 0) {
+            const existing = document.getElementById('join-status-banner');
+            if (existing) existing.remove();
+
+            const banner = document.createElement('div');
+            banner.id = 'join-status-banner';
+            banner.className = `join-status-banner ${kind}`;
+            banner.textContent = message;
+            document.body.appendChild(banner);
+
+            if (autoHideMs > 0) {
+                setTimeout(() => {
+                    const current = document.getElementById('join-status-banner');
+                    if (current) current.remove();
+                }, autoHideMs);
+            }
         }
 
         async function loadFeed(force = false, loadMore = false) {
@@ -1881,9 +1966,10 @@
 
                 // Reset pagination on fresh load (not loadMore)
                 if (!loadMore) {
-                    currentOffset = 0;
+                    nextEntriesCursor = null;
                     allLoadedEntries = [];
                     allLoadedSummaries = [];
+                    allLoadedDailySummaries = [];
                     allLoadedConversations = [];
                     hasMoreEntries = true;
                 }
@@ -1891,30 +1977,47 @@
                 // Build URLs with pagination
                 const effectiveKey = getEffectiveKey();
                 const keyParam = effectiveKey ? `key=${encodeURIComponent(effectiveKey)}` : '';
-                const entriesUrl = `/api/entries?limit=${PAGE_SIZE}&offset=${currentOffset}${keyParam ? '&' + keyParam : ''}`;
-                const conversationsUrl = `/api/conversations${keyParam ? '?' + keyParam : ''}`;
+                const cursorParam = nextEntriesCursor ? `cursor=${encodeURIComponent(nextEntriesCursor)}` : '';
+                const entriesUrl = `/api/entries?limit=${PAGE_SIZE}${cursorParam ? '&' + cursorParam : ''}${keyParam ? '&' + keyParam : ''}`;
+                const conversationsUrl = `/api/conversations?limit=${PAGE_SIZE}${keyParam ? '&' + keyParam : ''}`;
 
-                // Step 1: Fetch entries, summaries, daily summaries, conversations
-                const [entriesRes, summariesRes, dailyRes, conversationsRes] = await Promise.all([
-                    fetch(entriesUrl),
-                    fetch(`/api/summaries?limit=${PAGE_SIZE}`),
-                    fetch('/api/daily-summaries?limit=14'),
-                    fetch(conversationsUrl)
-                ]);
+                let entriesData = {};
+                let summaries = allLoadedSummaries;
+                let dailySummaries = allLoadedDailySummaries;
+                let conversations = allLoadedConversations;
 
-                const entriesData = await entriesRes.json();
-                const summariesData = await summariesRes.json();
-                const dailyData = await dailyRes.json();
-                const conversationsData = await conversationsRes.json();
+                if (loadMore) {
+                    const entriesRes = await fetch(entriesUrl);
+                    entriesData = await entriesRes.json();
+                } else {
+                    // Initial/fresh load: fetch everything in parallel.
+                    const [entriesRes, summariesRes, dailyRes, conversationsRes] = await Promise.all([
+                        fetch(entriesUrl),
+                        fetch(`/api/summaries?limit=${PAGE_SIZE}`),
+                        fetch('/api/daily-summaries?limit=14'),
+                        fetch(conversationsUrl)
+                    ]);
+
+                    entriesData = await entriesRes.json();
+                    const summariesData = await summariesRes.json();
+                    const dailyData = await dailyRes.json();
+                    const conversationsData = await conversationsRes.json();
+
+                    summaries = summariesData.summaries || [];
+                    dailySummaries = dailyData.dailySummaries || [];
+                    conversations = conversationsData.conversations || [];
+                }
 
                 const newEntries = entriesData.entries || [];
-                const summaries = summariesData.summaries || [];
-                const dailySummaries = dailyData.dailySummaries || [];
-                const conversations = conversationsData.conversations || [];
 
                 // Check if there are more entries to load
-                hasMoreEntries = newEntries.length === PAGE_SIZE;
-                currentOffset += newEntries.length;
+                const hasCursorField = Object.prototype.hasOwnProperty.call(entriesData, 'nextCursor');
+                if (hasCursorField) {
+                    nextEntriesCursor = entriesData.nextCursor || null;
+                    hasMoreEntries = Boolean(nextEntriesCursor);
+                } else {
+                    hasMoreEntries = newEntries.length === PAGE_SIZE;
+                }
 
                 // Merge new entries with existing (for loadMore)
                 if (loadMore) {
@@ -1929,6 +2032,7 @@
                     allLoadedEntries = newEntries;
                 }
                 allLoadedSummaries = summaries;
+                allLoadedDailySummaries = dailySummaries;
                 allLoadedConversations = conversations;
 
                 // Build pseudonym -> handle map
@@ -1939,7 +2043,7 @@
                 });
 
                 // Render the feed
-                renderFeedWithData(feed, allLoadedEntries, summaries, dailySummaries, conversations);
+                renderFeedWithData(feed, allLoadedEntries, allLoadedSummaries, allLoadedDailySummaries, allLoadedConversations);
 
             } catch (err) {
                 console.error('Feed error:', err);
@@ -2385,10 +2489,14 @@
         function renderChannelCard(channel, isMember) {
             const memberCount = channel.subscribers ? channel.subscribers.length : 0;
             const skillCount = channel.skills ? channel.skills.length : 0;
+            const isAdmin = !!(isMember && userHandle && channel.subscribers && channel.subscribers.some(s => s.handle === userHandle && s.role === 'admin'));
 
             const actionBtn = isMember
                 ? `<button class="channel-btn secondary" onclick="leaveChannel('${escapeHtml(channel.id)}')">Leave</button>`
                 : `<button class="channel-btn" onclick="joinChannel('${escapeHtml(channel.id)}')">Join</button>`;
+            const inviteBtn = isAdmin
+                ? `<button class="channel-btn secondary" onclick="copyInviteLink('${escapeHtml(channel.id)}', this)">Copy Invite Link</button>`
+                : '';
 
             return `
                 <div class="channel-card">
@@ -2399,6 +2507,7 @@
                     ${channel.description ? `<div class="channel-card-description">${escapeHtml(channel.description)}</div>` : ''}
                     <div class="channel-card-actions">
                         <a href="?view=channel&id=${encodeURIComponent(channel.id)}" class="channel-btn secondary">View</a>
+                        ${inviteBtn}
                         ${actionBtn}
                     </div>
                 </div>
@@ -2460,12 +2569,19 @@
                 const actionBtn = isMember
                     ? `<button class="channel-btn secondary" onclick="leaveChannel('${escapeHtml(channel.id)}')">Leave</button>`
                     : `<button class="channel-btn" onclick="joinChannel('${escapeHtml(channel.id)}')">Join</button>`;
+                const isAdmin = !!(isMember && userHandle && channel.subscribers && channel.subscribers.some(s => s.handle === userHandle && s.role === 'admin'));
+                const inviteBtn = isAdmin
+                    ? `<button class="channel-btn secondary" onclick="copyInviteLink('${escapeHtml(channel.id)}', this)">Copy Invite Link</button>`
+                    : '';
 
                 let html = `
                     <div class="channel-header">
                         <div class="channel-header-top">
                             <span class="channel-header-name">#${escapeHtml(channel.id)} — ${escapeHtml(channel.name)}</span>
-                            ${actionBtn}
+                            <div style="display:flex; gap:0.5rem;">
+                                ${inviteBtn}
+                                ${actionBtn}
+                            </div>
                         </div>
                         ${channel.description ? `<div class="channel-header-description">${escapeHtml(channel.description)}</div>` : ''}
                         <div class="channel-header-meta">
@@ -2497,29 +2613,81 @@
         }
 
         // Channel actions
-        async function joinChannel(channelId) {
+        async function joinChannel(channelId, inviteTokenValue = null) {
             const key = getEffectiveKey();
             if (!key) {
-                alert('You need to be logged in to join channels.');
+                const next = encodeURIComponent(window.location.pathname + window.location.search);
+                window.location.href = `/join?next=${next}`;
                 return;
             }
 
             try {
+                showJoinStatus(`Joining #${channelId}...`, 'info');
                 const res = await fetch(`/api/channels/${encodeURIComponent(channelId)}/join`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ secret_key: key })
+                    body: JSON.stringify({
+                        secret_key: key,
+                        ...(inviteTokenValue ? { invite_token: inviteTokenValue } : {})
+                    })
                 });
 
                 if (res.ok) {
                     loadFeed(true);
                     loadChannelsSidebar();
+                    showJoinStatus(`Joined #${channelId}.`, 'success', 2500);
                 } else {
                     const data = await res.json();
+                    showJoinStatus(data.error || 'Failed to join channel', 'error', 4000);
                     alert(data.error || 'Failed to join channel');
                 }
             } catch (err) {
+                showJoinStatus('Failed to join channel', 'error', 4000);
                 alert('Failed to join channel');
+            }
+        }
+
+        async function copyInviteLink(channelId, buttonEl = null) {
+            const key = getEffectiveKey();
+            if (!key) {
+                alert('You need to be logged in.');
+                return;
+            }
+
+            const originalText = buttonEl ? buttonEl.textContent : null;
+            if (buttonEl) buttonEl.textContent = 'Creating...';
+
+            try {
+                const res = await fetch(`/api/channels/${encodeURIComponent(channelId)}/invite`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ secret_key: key })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.token) {
+                    throw new Error(data.error || 'Failed to create invite link');
+                }
+
+                const inviteUrl = `${window.location.origin}/?view=channel&id=${encodeURIComponent(channelId)}&invite=${encodeURIComponent(data.token)}`;
+
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(inviteUrl);
+                    showJoinStatus(`Invite link copied for #${channelId}.`, 'success', 2500);
+                    if (buttonEl) buttonEl.textContent = 'Copied!';
+                } else {
+                    prompt('Copy this invite link:', inviteUrl);
+                    showJoinStatus(`Invite link ready for #${channelId}.`, 'success', 2500);
+                }
+            } catch (err) {
+                const message = err && err.message ? err.message : 'Failed to create invite link';
+                showJoinStatus(message, 'error', 4000);
+                alert(message);
+            } finally {
+                if (buttonEl) {
+                    setTimeout(() => {
+                        buttonEl.textContent = originalText || 'Copy Invite Link';
+                    }, 1200);
+                }
             }
         }
 

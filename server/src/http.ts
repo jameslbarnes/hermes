@@ -1501,12 +1501,6 @@ function createMCPServer(secretKey: string) {
         .map(k => (typeof k === 'string' ? k.trim() : ''))
         .filter(k => k.length > 0 && k.length <= 80)))
         .slice(0, 8);
-      if (searchKeywords.length === 0) {
-        return {
-          content: [{ type: 'text' as const, text: 'search_keywords is required and must include at least one non-empty keyword.' }],
-          isError: true,
-        };
-      }
 
       // Validate inReplyTo if provided
       if (inReplyTo) {

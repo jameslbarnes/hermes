@@ -61,11 +61,50 @@
         .entry-meta {
             display: flex;
             align-items: center;
+            flex-wrap: wrap;
             gap: 0.5rem;
             margin-bottom: 1rem;
             font-family: 'IBM Plex Mono', monospace;
             font-size: 0.75rem;
             color: var(--fg-muted);
+        }
+
+        .entry-permalink {
+            margin-top: 1rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            align-items: center;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.72rem;
+            color: var(--fg-muted);
+        }
+
+        .entry-permalink a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .entry-permalink a:hover {
+            text-decoration: underline;
+        }
+
+        .copy-link-action {
+            background: none;
+            border: none;
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.72rem;
+            cursor: pointer;
+            opacity: 0.75;
+            padding: 0;
+        }
+
+        .copy-link-action:hover {
+            opacity: 1;
+            color: var(--accent);
         }
 
         .entry-author {
@@ -194,7 +233,8 @@
 
         .reply-entry {
             background: var(--surface);
-            border: 1px solid var(--border);
+            border: 1px solid #dfd9ef;
+            border-left: 3px solid var(--accent);
             border-radius: 6px;
             padding: 1rem 1.25rem;
             margin-bottom: 0.75rem;
@@ -286,6 +326,33 @@
             });
         }
 
+        function getPermalinkUrl(id) {
+            return `${window.location.origin}/e/${encodeURIComponent(id)}`;
+        }
+
+        async function copyPermalink(id, trigger) {
+            const url = getPermalinkUrl(id);
+            try {
+                await navigator.clipboard.writeText(url);
+            } catch {
+                const textArea = document.createElement('textarea');
+                textArea.value = url;
+                textArea.style.position = 'fixed';
+                textArea.style.opacity = '0';
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            }
+            if (trigger && trigger.textContent) {
+                const original = trigger.textContent;
+                trigger.textContent = 'copied';
+                setTimeout(() => {
+                    trigger.textContent = original;
+                }, 900);
+            }
+        }
+
         function formatTime(ts) {
             const date = new Date(ts);
             const now = new Date();
@@ -302,6 +369,10 @@
             const authorLink = entry.handle
                 ? `<a href="/u/${entry.handle}" class="entry-author">@${entry.handle}</a>`
                 : `<span class="entry-author">${entry.pseudonym}</span>`;
+            const parentLink = entry.inReplyTo
+                ? `<a href="/e/${escapeHtml(entry.inReplyTo)}">in reply to ${escapeHtml(entry.inReplyTo)}</a>`
+                : '';
+            const permalink = getPermalinkUrl(entry.id);
 
             let html = `
                 <div class="entry">
@@ -311,6 +382,12 @@
                         <span>${formatDate(entry.timestamp)}</span>
                     </div>
                     <div class="entry-content">${marked.parse(entry.content)}</div>
+                    <div class="entry-permalink">
+                        <a href="/e/${entry.id}">permalink</a>
+                        <button class="copy-link-action" onclick="copyPermalink('${entry.id}', this)">copy link</button>
+                        <span>${escapeHtml(permalink)}</span>
+                        ${parentLink}
+                    </div>
                 </div>
             `;
 
@@ -485,7 +562,9 @@
                             <div class="entry-meta">
                                 ${authorLink}
                                 <span>&middot;</span>
-                                <a href="/e/${reply.id}" style="color: var(--fg-muted); text-decoration: none;">${formatTime(reply.timestamp)}</a>
+                                <a href="/e/${reply.id}" style="color: var(--fg-muted); text-decoration: none;" title="${escapeHtml(formatDate(reply.timestamp))}">permalink · ${formatTime(reply.timestamp)}</a>
+                                <span>&middot;</span>
+                                <button class="copy-link-action" onclick="copyPermalink('${reply.id}', this)">copy link</button>
                             </div>
                             <div class="entry-content">${content}</div>
                         </div>

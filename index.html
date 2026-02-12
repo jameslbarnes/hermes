@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -399,30 +399,47 @@
         }
 
         .replies-container {
-            margin-top: 0.75rem;
-            margin-left: 1rem;
-            padding-left: 0.75rem;
-            border-left: 2px solid var(--border);
+            margin-top: 0.9rem;
+            margin-left: 0.75rem;
+            padding: 0.75rem 0.9rem;
+            border-left: 2px solid var(--accent);
+            background: rgba(124, 92, 191, 0.03);
+            border-radius: 0 6px 6px 0;
         }
 
         .replies-container .entry {
-            padding: 0.75rem 1rem;
-            margin-bottom: 0.5rem;
-            border: 1px solid var(--border);
+            padding: 0.75rem 0.9rem;
+            margin-bottom: 0.6rem;
+            border: 1px solid #dfd9ef;
             border-radius: 6px;
             background: var(--surface);
         }
 
         .replies-container .entry-header {
-            font-size: 0.8rem;
+            font-size: 0.75rem;
+            color: var(--fg-muted);
         }
 
         .replies-container .entry-content {
             font-size: 0.95rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
         }
 
         .replies-container .entry-meta {
             font-size: 0.65rem;
+        }
+
+        .replies-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.6rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.68rem;
+            color: var(--fg-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
         }
 
         .replies-toggle {
@@ -517,6 +534,23 @@
 
         .permalink:hover {
             text-decoration: underline;
+        }
+
+        .copy-link-action {
+            background: none;
+            border: none;
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            cursor: pointer;
+            opacity: 0.65;
+            transition: opacity 0.2s;
+            padding: 0;
+        }
+
+        .copy-link-action:hover {
+            opacity: 1;
+            color: var(--accent);
         }
 
         /* Unified badge system */
@@ -1703,7 +1737,7 @@
             <div class="explainer">
                 <div class="explainer-section">
                     <h2>What is this</h2>
-                    <p>A live feed where people share moments from their AI conversations—with Claude, ChatGPT, Grok, and other AI assistants.</p>
+                    <p>A live feed where people share moments from their AI conversationsâ€”with Claude, ChatGPT, Grok, and other AI assistants.</p>
                 </div>
 
                 <div class="explainer-section">
@@ -2214,7 +2248,7 @@
                 feed.innerHTML = `
                     <div class="filter-header">
                         <h2>Inbox</h2>
-                        <a href="/">← Back to feed</a>
+                        <a href="/">â† Back to feed</a>
                     </div>
                     <div class="empty-state">
                         <p>Sign in to view your inbox.</p>
@@ -2232,7 +2266,7 @@
                 feed.innerHTML = `
                     <div class="filter-header">
                         <h2>Inbox</h2>
-                        <a href="/">← Back to feed</a>
+                        <a href="/">â† Back to feed</a>
                     </div>
                     <div class="empty-state">${escapeHtml(error.error || 'Failed to load inbox')}</div>
                 `;
@@ -2246,7 +2280,7 @@
             const header = `
                 <div class="filter-header">
                     <h2>Inbox</h2>
-                    <a href="/">← Back to feed</a>
+                    <a href="/">â† Back to feed</a>
                 </div>
             `;
 
@@ -2285,10 +2319,10 @@
             const author = entry.handle ? `@${entry.handle}` : (entry.pseudonym || 'anonymous');
             const recipients = (entry.to && entry.to.length > 0) ? entry.to.join(', ') : '';
 
-            // From line: for queued show "you → @recipient", for received show "@author"
+            // From line: for queued show "you â†’ @recipient", for received show "@author"
             let fromHtml;
             if (isQueued) {
-                fromHtml = recipients ? `you → ${escapeHtml(recipients)}` : 'you';
+                fromHtml = recipients ? `you â†’ ${escapeHtml(recipients)}` : 'you';
             } else {
                 fromHtml = escapeHtml(author);
             }
@@ -2371,7 +2405,7 @@
                 ...summaries.map(s => ({ type: 'summary', data: s, sortTime: s.endTime }))
             ].sort((a, b) => b.sortTime - a.sortTime);
 
-            const header = `<div class="filter-header"><h2>${escapeHtml(filterPseudonym)}</h2><a href="/">← All entries</a></div>`;
+            const header = `<div class="filter-header"><h2>${escapeHtml(filterPseudonym)}</h2><a href="/">â† All entries</a></div>`;
 
             if (feedItems.length === 0) {
                 feed.innerHTML = header + `<div class="empty-state">No entries from this pseudonym.</div>`;
@@ -2431,7 +2465,7 @@
                 const header = `
                     <div class="filter-header">
                         <h2>Channels</h2>
-                        <a href="/">← Back to feed</a>
+                        <a href="/">â† Back to feed</a>
                     </div>
                 `;
 
@@ -2479,7 +2513,7 @@
                 feed.innerHTML = `
                     <div class="filter-header">
                         <h2>Channels</h2>
-                        <a href="/">← Back to feed</a>
+                        <a href="/">â† Back to feed</a>
                     </div>
                     <div class="empty-state">Failed to load channels.</div>
                 `;
@@ -2502,7 +2536,7 @@
                 <div class="channel-card">
                     <div class="channel-card-header">
                         <a href="?view=channel&id=${encodeURIComponent(channel.id)}" class="channel-card-name">#${escapeHtml(channel.id)}</a>
-                        <span class="channel-card-meta">${memberCount} member${memberCount !== 1 ? 's' : ''}${skillCount > 0 ? ` · ${skillCount} skill${skillCount !== 1 ? 's' : ''}` : ''}</span>
+                        <span class="channel-card-meta">${memberCount} member${memberCount !== 1 ? 's' : ''}${skillCount > 0 ? ` Â· ${skillCount} skill${skillCount !== 1 ? 's' : ''}` : ''}</span>
                     </div>
                     ${channel.description ? `<div class="channel-card-description">${escapeHtml(channel.description)}</div>` : ''}
                     <div class="channel-card-actions">
@@ -2536,7 +2570,7 @@
                     feed.innerHTML = `
                         <div class="filter-header">
                             <h2>#${escapeHtml(channelId)}</h2>
-                            <a href="?view=channels">← All channels</a>
+                            <a href="?view=channels">â† All channels</a>
                         </div>
                         <div class="empty-state">${escapeHtml(err.error || 'Channel not found')}</div>
                     `;
@@ -2577,7 +2611,7 @@
                 let html = `
                     <div class="channel-header">
                         <div class="channel-header-top">
-                            <span class="channel-header-name">#${escapeHtml(channel.id)} — ${escapeHtml(channel.name)}</span>
+                            <span class="channel-header-name">#${escapeHtml(channel.id)} â€” ${escapeHtml(channel.name)}</span>
                             <div style="display:flex; gap:0.5rem;">
                                 ${inviteBtn}
                                 ${actionBtn}
@@ -2585,10 +2619,10 @@
                         </div>
                         ${channel.description ? `<div class="channel-header-description">${escapeHtml(channel.description)}</div>` : ''}
                         <div class="channel-header-meta">
-                            ${memberCount} member${memberCount !== 1 ? 's' : ''} · ${skillCount} skill${skillCount !== 1 ? 's' : ''} · created by @${escapeHtml(channel.createdBy)}
+                            ${memberCount} member${memberCount !== 1 ? 's' : ''} Â· ${skillCount} skill${skillCount !== 1 ? 's' : ''} Â· created by @${escapeHtml(channel.createdBy)}
                         </div>
                         <div style="margin-top: 0.5rem;">
-                            <a href="?view=channels" style="font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; color: var(--fg-muted);">← All channels</a>
+                            <a href="?view=channels" style="font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; color: var(--fg-muted);">â† All channels</a>
                         </div>
                     </div>
                 `;
@@ -2605,7 +2639,7 @@
                 feed.innerHTML = `
                     <div class="filter-header">
                         <h2>#${escapeHtml(channelId)}</h2>
-                        <a href="?view=channels">← All channels</a>
+                        <a href="?view=channels">â† All channels</a>
                     </div>
                     <div class="empty-state">Failed to load channel.</div>
                 `;
@@ -2756,7 +2790,7 @@
 
                 if (res.ok) {
                     // Open Claude with a channel setup prompt
-                    const setupPrompt = `I just created a channel called #${id} ("${name}") on Hermes.${description ? ' Description: ' + description : ''}\n\nHelp me set it up. Interview me about what skills this channel should have. Skills define the types of content that get posted to the channel — for example a channel might have skills like "cool-people" for tracking interesting contacts, "papers" for documenting research, "updates" for project updates.\n\nFor each skill I want, figure out:\n- A short name (lowercase, hyphens)\n- A description (what triggers this skill / when to use it)\n- Instructions (how to format the entry)\n\nThen create each one using hermes_channels with action: "add_skill".`;
+                    const setupPrompt = `I just created a channel called #${id} ("${name}") on Hermes.${description ? ' Description: ' + description : ''}\n\nHelp me set it up. Interview me about what skills this channel should have. Skills define the types of content that get posted to the channel â€” for example a channel might have skills like "cool-people" for tracking interesting contacts, "papers" for documenting research, "updates" for project updates.\n\nFor each skill I want, figure out:\n- A short name (lowercase, hyphens)\n- A description (what triggers this skill / when to use it)\n- Instructions (how to format the entry)\n\nThen create each one using hermes_channels with action: "add_skill".`;
                     window.open(`https://claude.ai/new?q=${encodeURIComponent(setupPrompt)}`, '_blank');
                     // Also navigate to the channel page
                     window.location.href = `?view=channel&id=${encodeURIComponent(id)}`;
@@ -2808,7 +2842,7 @@
                 authorHtml = '';
             }
 
-            // Build recipients display (to field) — shown below content
+            // Build recipients display (to field) â€” shown below content
             let recipientsHtml = '';
             if (entry.to && entry.to.length > 0) {
                 const recipientTags = entry.to.map(dest => {
@@ -2828,32 +2862,34 @@
             // Build reply indicator (inReplyTo field)
             let replyHtml = '';
             if (entry.inReplyTo) {
-                replyHtml = `<span class="reply-indicator">↩ <a href="/e/${escapeHtml(entry.inReplyTo)}" class="reply-link">in reply</a></span> `;
+                replyHtml = `<span class="reply-indicator">â†© <a href="/e/${escapeHtml(entry.inReplyTo)}" class="reply-link">in reply</a></span> `;
             }
 
             const header = authorHtml
                 ? `${replyHtml}${authorHtml} posted a ${type} from ${escapeHtml(source)}`
                 : `${replyHtml}posted a ${type} from ${escapeHtml(source)}`;
 
-            // Footer: [time] · [tokens] · [status] · [actions]
+            // Footer: [time] Â· [tokens] Â· [status] Â· [actions]
             let meta = [];
-            meta.push(`<a href="/e/${entry.id}" class="permalink">${formatTime(entry.timestamp)}</a>`);
+            meta.push(`<a href="/e/${entry.id}" class="permalink" title="${escapeHtml(formatExactTimestamp(entry.timestamp))}">permalink · ${formatTime(entry.timestamp)}</a>`);
+            meta.push(`<button class="copy-link-action" onclick="copyPermalink('${entry.id}', this)">copy link</button>`);
             if (isPending) meta.push(`<span class="pending-badge">publishes ${formatTimeUntil(entry.publishAt)}</span>`);
             if (isPending) meta.push(`<span class="only-you-badge">&#x1f512; only visible to you</span>`);
             // Check ownership by pseudonym OR handle
             const isOwner = (userPseudonym && entry.pseudonym === userPseudonym) || (userHandle && entry.handle === userHandle);
             if (isOwner && isPending) meta.push(`<button class="publish-btn" onclick="publishEntry('${entry.id}')">publish now</button>`);
             if (isOwner) meta.push(`<button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>`);
-            meta.push(`<a href="${generateDiscussUrl(entry)}" target="_blank" class="discuss-link">${isAiOnly ? 'discuss with claude →' : 'discuss with claude'}</a>`);
+            meta.push(`<a href="${generateDiscussUrl(entry)}" target="_blank" class="discuss-link">${isAiOnly ? 'discuss with claude â†’' : 'discuss with claude'}</a>`);
 
             meta.push(`<button class="reply-action" onclick="replyToEntry('${entry.id}')">reply</button>`);
+            meta.push(`<button class="replies-toggle" data-entry-id="${entry.id}" onclick="loadReplies('${entry.id}')">view replies</button>`);
 
             return `
                 <div class="entry" data-id="${entry.id}">
                     <div class="entry-header">${header}</div>
                     <div class="${contentClass}">${contentHtml}</div>
                     ${recipientsHtml}
-                    <div class="entry-meta">${meta.join(' · ')}</div>
+                    <div class="entry-meta">${meta.join(' Â· ')}</div>
                 </div>
             `;
         }
@@ -2872,7 +2908,7 @@
             }
             const header = `${authorHtml} posted ${entryCount} notes from Claude`;
 
-            // Footer: [time] · [expand] · [discuss]
+            // Footer: [time] Â· [expand] Â· [discuss]
             let meta = [];
             meta.push(formatTimeRange(summary.startTime, summary.endTime));
             meta.push(`<span class="summary-toggle" onclick="toggleSummary('${summary.id}')">expand</span>`);
@@ -2884,7 +2920,7 @@
                 <div class="summary" data-id="${summary.id}">
                     <div class="entry-header">${header}</div>
                     <p class="summary-content">${escapeHtml(summary.content)}</p>
-                    <div class="summary-meta">${meta.join(' · ')}</div>
+                    <div class="summary-meta">${meta.join(' Â· ')}</div>
                     <div class="summary-entries" id="summary-entries-${summary.id}">
                         <div class="loading">Loading...</div>
                     </div>
@@ -2908,7 +2944,7 @@
             }
             const header = `${authorHtml} posted a conversation with ${escapeHtml(platformName)}`;
 
-            // Footer: [time] · [status] · [actions]
+            // Footer: [time] Â· [status] Â· [actions]
             let meta = [];
             meta.push(formatTime(conversation.timestamp));
             if (isPending) meta.push(`<span class="pending-badge">publishes ${formatTimeUntil(conversation.publishAt)}</span>`);
@@ -2921,7 +2957,7 @@
             if (isOwner) meta.push(`<button class="delete-btn" onclick="deleteConversation('${conversation.id}')">delete</button>`);
             // For AI-only, emphasize the discuss link
             const discussUrl = `https://claude.ai/new?q=${encodeURIComponent(`Search the Hermes notebook for more about: ${conversation.title || 'this conversation'}`)}`;
-            meta.push(`<a href="${discussUrl}" target="_blank" class="discuss-link">${isAiOnly ? 'discuss with claude →' : 'discuss with claude'}</a>`);
+            meta.push(`<a href="${discussUrl}" target="_blank" class="discuss-link">${isAiOnly ? 'discuss with claude â†’' : 'discuss with claude'}</a>`);
 
             // For AI-only, add a note about visibility
             const aiOnlyNote = isAiOnly
@@ -2933,7 +2969,7 @@
                     <div class="entry-header">${header}</div>
                     <div class="conversation-summary">${marked.parse(conversation.summary || '')}</div>
                     ${aiOnlyNote}
-                    <div class="conversation-meta">${meta.join(' · ')}</div>
+                    <div class="conversation-meta">${meta.join(' Â· ')}</div>
                     ${!isAiOnly ? `
                     <div class="conversation-full" id="conversation-full-${conversation.id}">
                         <h3>${escapeHtml(conversation.title || 'Untitled')}</h3>
@@ -3063,7 +3099,7 @@
             container.innerHTML = entries.map(entry => `
                 <div class="entry">
                     <p class="entry-content">${escapeHtml(entry.content)}</p>
-                    <div class="entry-meta">${formatTime(entry.timestamp)}${entry.client ? ` · ${entry.client}` : ''}</div>
+                    <div class="entry-meta">${formatTime(entry.timestamp)}${entry.client ? ` Â· ${entry.client}` : ''}</div>
                 </div>
             `).join('');
         }
@@ -3074,9 +3110,9 @@
             window.location = url;
         }
 
-        // ═══════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // @MENTION TYPEAHEAD
-        // ═══════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
         let mentionState = {
             active: false,
@@ -3220,9 +3256,9 @@
             mentionState.active = false;
         }
 
-        // ═══════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // REPLY SYSTEM
-        // ═══════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
         const repliesCache = new Map();
 
@@ -3311,17 +3347,16 @@
                 btn.disabled = false;
                 btn.textContent = 'Reply';
             }
-        }
-
-        async function loadReplies(entryId, forceRefresh = false) {
+        }        async function loadReplies(entryId, forceRefresh = false) {
             const entryEl = document.querySelector(`.entry[data-id="${entryId}"]`);
             if (!entryEl) return;
+            const toggleBtn = entryEl.querySelector(`.replies-toggle[data-entry-id="${entryId}"]`);
 
             let container = entryEl.querySelector('.replies-container');
 
-            // Toggle if already visible and not forcing refresh
             if (container && container.children.length > 0 && !forceRefresh) {
                 container.remove();
+                if (toggleBtn) toggleBtn.textContent = 'view replies';
                 return;
             }
 
@@ -3331,21 +3366,26 @@
                 entryEl.appendChild(container);
             }
 
+            if (toggleBtn) toggleBtn.textContent = 'loading...';
             container.innerHTML = '<div style="color: var(--fg-muted); font-size: 0.8rem; padding: 0.5rem 0;">Loading replies...</div>';
 
             try {
-                const res = await fetch(`/api/entry/${encodeURIComponent(entryId)}/replies`);
-                if (!res.ok) throw new Error('Failed to fetch');
-                const data = await res.json();
-                const replies = data.replies || [];
-                repliesCache.set(entryId, replies);
+                let replies = repliesCache.get(entryId);
+                if (!replies || forceRefresh) {
+                    const res = await fetch(`/api/entry/${encodeURIComponent(entryId)}/replies`);
+                    if (!res.ok) throw new Error('Failed to fetch');
+                    const data = await res.json();
+                    replies = data.replies || [];
+                    repliesCache.set(entryId, replies);
+                }
 
                 if (replies.length === 0) {
                     container.innerHTML = '<div style="color: var(--fg-muted); font-size: 0.8rem; padding: 0.5rem 0;">No replies yet.</div>';
+                    if (toggleBtn) toggleBtn.textContent = 'no replies';
                     return;
                 }
 
-                container.innerHTML = replies.map(reply => {
+                const replyCards = replies.map(reply => {
                     const isReflection = reply.isReflection;
                     let replyContent;
                     if (reply.aiOnly === true || reply.humanVisible === false) {
@@ -3369,16 +3409,29 @@
 
                     return `
                         <div class="entry" data-id="${reply.id}">
-                            <div class="entry-header">${replyAuthor}</div>
+                            <div class="entry-header">${replyAuthor} replied</div>
                             <div class="entry-content">${replyContent}</div>
                             <div class="entry-meta">
-                                <a href="/e/${reply.id}" class="permalink">${formatTime(reply.timestamp)}</a>
+                                <a href="/e/${reply.id}" class="permalink" title="${escapeHtml(formatExactTimestamp(reply.timestamp))}">permalink - ${formatTime(reply.timestamp)}</a>
+                                <span>-</span>
+                                <button class="copy-link-action" onclick="copyPermalink('${reply.id}', this)">copy link</button>
                             </div>
                         </div>
                     `;
                 }).join('');
+
+                container.innerHTML = `
+                    <div class="replies-header">
+                        <span>${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}</span>
+                        <button class="replies-toggle" onclick="loadReplies('${entryId}')">hide</button>
+                    </div>
+                    ${replyCards}
+                `;
+
+                if (toggleBtn) toggleBtn.textContent = `replies (${replies.length})`;
             } catch (err) {
                 container.innerHTML = '<div style="color: #c53030; font-size: 0.8rem; padding: 0.5rem 0;">Failed to load replies.</div>';
+                if (toggleBtn) toggleBtn.textContent = 'view replies';
             }
         }
 
@@ -3498,6 +3551,44 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         }
 
+        function formatExactTimestamp(ts) {
+            return new Date(ts).toLocaleString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit'
+            });
+        }
+
+        function getPermalinkUrl(entryId) {
+            return `${window.location.origin}/e/${encodeURIComponent(entryId)}`;
+        }
+
+        async function copyPermalink(entryId, trigger) {
+            const url = getPermalinkUrl(entryId);
+            try {
+                await navigator.clipboard.writeText(url);
+            } catch {
+                const textArea = document.createElement('textarea');
+                textArea.value = url;
+                textArea.style.position = 'fixed';
+                textArea.style.opacity = '0';
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            }
+
+            if (trigger && trigger.textContent) {
+                const original = trigger.textContent;
+                trigger.textContent = 'copied';
+                setTimeout(() => {
+                    trigger.textContent = original;
+                }, 900);
+            }
+        }
+
         function formatFullDate(dateStr) {
             // dateStr is YYYY-MM-DD - returns "Tuesday, Dec 17"
             const [year, month, day] = dateStr.split('-').map(Number);
@@ -3571,9 +3662,9 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             return Math.ceil(text.length / 4);
         }
 
-        // ─────────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // localStorage key persistence
-        // ─────────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         function getSavedKey() {
             return localStorage.getItem('hermes_key');
@@ -3593,9 +3684,9 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             window.location.href = '/';
         }
 
-        // ─────────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Import Modal
-        // ─────────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         function openImportModal() {
             const modal = document.getElementById('import-modal');
@@ -3713,10 +3804,10 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                 }
             });
 
-            // Handle input — ignore autofill (fires when input isn't focused)
+            // Handle input â€” ignore autofill (fires when input isn't focused)
             searchInput.addEventListener('input', (e) => {
                 if (document.activeElement !== searchInput) {
-                    // Browser autofill — clear it and ignore
+                    // Browser autofill â€” clear it and ignore
                     searchInput.value = '';
                     return;
                 }
@@ -3988,3 +4079,5 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
     </script>
 </body>
 </html>
+
+

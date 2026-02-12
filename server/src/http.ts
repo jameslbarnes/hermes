@@ -6126,16 +6126,16 @@ Keep it conversational. Don't dump everything at once. Follow their lead.`;
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/stats') {
       try {
-        const [entryCount, userCount, recentEntries] = await Promise.all([
+        const [entryCount, userCount, allEntries] = await Promise.all([
           storage.getEntryCount(),
           storage.getUserCount(),
-          storage.getEntries(100),
+          storage.getEntries(10000),
         ]);
 
         // Calculate entries per day for the last 30 days
         const now = Date.now();
         const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
-        const entriesLast30Days = recentEntries.filter(e => e.timestamp >= thirtyDaysAgo);
+        const entriesLast30Days = allEntries.filter(e => e.timestamp >= thirtyDaysAgo);
 
         // Group by date
         const entriesByDate: Record<string, number> = {};
@@ -6149,7 +6149,7 @@ Keep it conversational. Don't dump everything at once. Follow their lead.`;
 
         // Calculate entries per author (top 10)
         const authorCounts: Record<string, number> = {};
-        for (const entry of recentEntries) {
+        for (const entry of entriesLast30Days) {
           const author = entry.handle || entry.pseudonym;
           authorCounts[author] = (authorCounts[author] || 0) + 1;
         }

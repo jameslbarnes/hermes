@@ -2587,7 +2587,11 @@
                     // We need the user's handle to check membership
                     // For now, we'll check via API response or assume not member
                     try {
-                        const identityRes = await fetch(`/api/identity/lookup?key=${encodeURIComponent(key)}`);
+                        const identityRes = await fetch('/api/identity/lookup', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ secret_key: key })
+                        });
                         if (identityRes.ok) {
                             const identityData = await identityRes.json();
                             if (identityData.handle) {

@@ -13,6 +13,17 @@ COPY server/src/ ./src/
 COPY server/tsconfig.json ./
 RUN npm run build
 
+# Build Astro frontend (index route migration)
+FROM node:20-alpine AS web-builder
+
+WORKDIR /app/web
+
+COPY web/package.json ./
+RUN npm install --no-audit --no-fund
+
+COPY web/ ./
+RUN npm run build
+
 # Production image
 FROM node:20-alpine
 
@@ -25,8 +36,13 @@ RUN npm ci --only=production
 # Copy built files
 COPY --from=builder /app/server/dist ./dist
 
-# Copy static files to parent dir (where http.ts expects them)
-COPY index.html prompt.html setup.html profile.html entry.html dashboard.html join.html settings.html connect.html release.html RELEASE_NOTES.md /app/
+# Copy legacy static files (except index, now built by Astro)
+COPY prompt.html setup.html profile.html entry.html dashboard.html join.html settings.html connect.html release.html RELEASE_NOTES.md /app/
+
+# Copy Astro-built index + static assets
+COPY --from=web-builder /app/web/dist/index.html /app/index.html
+COPY --from=web-builder /app/web/dist/styles /app/styles
+COPY --from=web-builder /app/web/dist/scripts /app/scripts
 
 EXPOSE 3000
 

@@ -1,0 +1,26 @@
+---
+import { readFileSync } from 'node:fs';
+
+const bodyHtml = readFileSync(new URL('./index-body.partial.html', import.meta.url), 'utf8');
+---
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hermes - A shared notebook from AI conversations</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles/index.css" />
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" defer></script>
+    <script src="/scripts/index-main.js" defer></script>
+    <script src="/scripts/index-claim.js" defer></script>
+  </head>
+  <body>
+    <Fragment set:html={bodyHtml} />
+  </body>
+</html>

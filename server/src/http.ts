@@ -6367,10 +6367,15 @@ Keep it conversational. Don't dump everything at once. Follow their lead.`;
       const fullPath = join(STATIC_DIR, filePath);
       const ext = extname(fullPath);
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+      const cacheControl = ext === '.html'
+        ? 'no-cache'
+        : (filePath.startsWith('/assets/')
+          ? 'public, max-age=31536000, immutable'
+          : 'public, max-age=3600');
 
       try {
         const content = await readFile(fullPath);
-        res.writeHead(200, { 'Content-Type': contentType });
+        res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': cacheControl });
         res.end(content);
         return;
       } catch {

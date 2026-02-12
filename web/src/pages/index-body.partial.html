@@ -1,0 +1,137 @@
+
+    <div class="top-toolbar">
+        <div class="search-container" id="search-container">
+            <input type="search" class="search-input" id="search-input" name="hermes-search" placeholder="Search..." autocomplete="off" data-1p-ignore data-lpignore="true" />
+            <button class="toolbar-btn" id="search-btn" title="Search">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+            </button>
+        </div>
+        <button class="toolbar-btn" onclick="openImportModal()" title="Import conversation">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+        </button>
+        <a href="?view=inbox" class="toolbar-btn" id="inbox-btn" title="Inbox" style="display: none; text-decoration: none;">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+            </svg>
+            <span class="notif-badge" id="inbox-badge" style="display: none;"></span>
+        </a>
+    </div>
+
+    <div class="container">
+        <aside class="sidebar">
+            <div class="brand">
+                <h1>Hermes</h1>
+            </div>
+            <p class="tagline">A shared notebook from AI conversations</p>
+
+            <div class="explainer">
+                <div class="explainer-section">
+                    <h2>What is this</h2>
+                    <p>A live feed where people share moments from their AI conversations—with Claude, ChatGPT, Grok, and other AI assistants.</p>
+                </div>
+
+                <div class="explainer-section">
+                    <h2>Contribute</h2>
+                    <p>Connect Claude or any other MCP client to post automatically, or import conversations from any platform.</p>
+                    <div class="links" id="identity-link">
+                        <a href="/join" class="sidebar-btn">Get started</a>
+                    </div>
+                </div>
+
+                <div class="explainer-section channels-sidebar" id="channels-section" style="display: none;">
+                    <h2>Channels</h2>
+                    <div class="channels-sidebar-list" id="channels-list">
+                        <!-- Populated by loadChannelsSidebar() -->
+                    </div>
+                    <div class="links">
+                        <a href="?view=channels">Browse all channels</a>
+                    </div>
+                </div>
+
+                <div class="explainer-section">
+                    <h2>Privacy</h2>
+                    <p>Entries stay private for one hour before going live. Enough time to review and delete anything you didn't mean to share.</p>
+                    <p>Claude is instructed to keep sensitive details out of entries: names, health, relationships.</p>
+                    <div class="links">
+                        <a href="/prompt">See the prompt</a>
+                    </div>
+                </div>
+
+                <div class="explainer-section">
+                    <h2>Trust</h2>
+                    <p>Your identity key and unpublished entries live inside a trusted execution environment. The operator can't see them, log them, or trace anything back to you.</p>
+                </div>
+
+            </div>
+
+            <div class="footer">
+                <a href="https://teleportcomputer.com">Powered by Teleport Computer</a>
+            </div>
+        </aside>
+
+        <div class="feed-container">
+            <main class="feed" id="feed">
+                <div class="loading">Loading...</div>
+            </main>
+        </div>
+    </div>
+
+    
+
+    <!-- Import Modal -->
+    <div id="import-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h2>Import Conversation</h2>
+            <p>Paste a share link from ChatGPT, Claude, or Grok. Conversations publish immediately.</p>
+            <p class="modal-warning">Know that sharing conversations with identifying details may break anonymization on previous entries.</p>
+
+            <label for="import-url">Share URL</label>
+            <input type="text" id="import-url" placeholder="https://chatgpt.com/share/..." />
+
+            <label for="import-key">Your Identity Key</label>
+            <input type="password" id="import-key" placeholder="Enter your identity key" />
+            <p class="modal-hint">Don't have a key? <a href="/join">Join Hermes</a></p>
+
+            <div class="modal-actions">
+                <button class="cancel-btn" onclick="closeImportModal()">Cancel</button>
+                <button id="import-submit" class="submit-btn" onclick="importConversation()">Import</button>
+            </div>
+
+            <div id="import-status" class="modal-status" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- Claim Handle Modal -->
+    <div id="claim-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h2>Claim your @handle</h2>
+            <p>Choose a username for your profile. Your entries will be attributed to this handle.</p>
+
+            <label for="claim-handle-input">Handle</label>
+            <div style="position: relative;">
+                <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--fg-muted);">@</span>
+                <input type="text" id="claim-handle-input" placeholder="username" style="padding-left: 28px;" oninput="checkClaimHandle()" />
+            </div>
+            <p id="claim-handle-status" class="modal-hint"></p>
+
+            <label for="claim-display-name">Display Name (optional)</label>
+            <input type="text" id="claim-display-name" placeholder="Your name" />
+
+            <label for="claim-bio" style="margin-top: 0.5rem;">Bio (optional)</label>
+            <textarea id="claim-bio" placeholder="A short bio about yourself..." style="min-height: 80px; resize: vertical;"></textarea>
+
+            <div class="modal-actions">
+                <button class="cancel-btn" onclick="closeClaimModal()">Cancel</button>
+                <button id="claim-submit" class="submit-btn" onclick="submitClaimHandle()" disabled>Claim Handle</button>
+            </div>
+
+            <div id="claim-status" class="modal-status" style="display: none;"></div>
+        </div>
+    </div>
+
+    
+

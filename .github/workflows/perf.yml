@@ -1,0 +1,40 @@
+name: Production Perf Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Base URL to benchmark'
+        required: false
+        default: 'https://hermes.teleport.computer'
+  schedule:
+    - cron: '0 */6 * * *'
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Run perf budget checks
+        working-directory: server
+        env:
+          PERF_BASE_URL: ${{ github.event.inputs.base_url || 'https://hermes.teleport.computer' }}
+          PERF_RUNS: '7'
+          BUDGET_HOME_P50_MS: '120'
+          BUDGET_API_P50_MS: '320'
+          BUDGET_DEEP_CURSOR_P50_MS: '320'
+        run: npm run test:perf

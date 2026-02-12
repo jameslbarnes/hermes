@@ -12,7 +12,8 @@
     "dev:http": "tsx src/http.ts",
     "dev:tunnel": "start ngrok http 3000 && tsx src/http.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:perf": "node scripts/perf-check.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

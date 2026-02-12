@@ -3384,6 +3384,8 @@ const corsHeaders = {
 
 const ENTRY_COUNT_CACHE_TTL_MS = 15_000;
 let cachedEntryCount: { value: number; expiresAt: number } | null = null;
+const ANON_ENTRIES_CACHE_TTL_MS = 5_000;
+let cachedAnonEntriesPage: { key: string; body: string; expiresAt: number } | null = null;
 
 async function getEntryCountCached(storage: Storage): Promise<number> {
   const now = Date.now();
@@ -3397,6 +3399,10 @@ async function getEntryCountCached(storage: Storage): Promise<number> {
     expiresAt: now + ENTRY_COUNT_CACHE_TTL_MS,
   };
   return value;
+}
+
+function buildAnonEntriesCacheKey(limit: number, offset: number, cursor?: string): string {
+  return `${limit}|${offset}|${cursor || ''}`;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3521,11 +3527,22 @@ const server = createServer(async (req, res) => {
       const cursor = url.searchParams.get('cursor') || undefined;
       const secretKey = url.searchParams.get('key');
       const followingOnly = url.searchParams.get('following') === 'true';
+      const isAnonymous = !secretKey;
 
-      const fetchLimit = followingOnly ? limit * 3 : limit * 2;
+      // Hot path optimization: cache anonymous feed responses briefly.
+      if (isAnonymous && !followingOnly) {
+        const cacheKey = buildAnonEntriesCacheKey(limit, offset, cursor);
+        const now = Date.now();
+        if (cachedAnonEntriesPage && cachedAnonEntriesPage.key === cacheKey && cachedAnonEntriesPage.expiresAt > now) {
+          res.writeHead(200);
+          res.end(cachedAnonEntriesPage.body);
+          return;
+        }
+      }
+      const fetchLimit = followingOnly ? Math.max(limit * 3, 60) : limit + 1;
       let entries = await storage.getEntries(fetchLimit, offset, cursor);
       const total = await getEntryCountCached(storage);
-      const nextCursor = entries.length === fetchLimit
+      let nextCursor = entries.length === fetchLimit
         ? encodePageCursor({ timestamp: entries[entries.length - 1].timestamp, id: entries[entries.length - 1].id })
         : null;
 
@@ -3576,8 +3593,16 @@ const server = createServer(async (req, res) => {
         return stripHiddenContent(e, isAuthor);
       });
 
+      const body = JSON.stringify({ entries: strippedEntries, total, limit, offset, nextCursor });
+      if (isAnonymous && !followingOnly) {
+        cachedAnonEntriesPage = {
+          key: buildAnonEntriesCacheKey(limit, offset, cursor),
+          body,
+          expiresAt: Date.now() + ANON_ENTRIES_CACHE_TTL_MS,
+        };
+      }
       res.writeHead(200);
-      res.end(JSON.stringify({ entries: strippedEntries, total, limit, offset, nextCursor }));
+      res.end(body);
       return;
     }
 

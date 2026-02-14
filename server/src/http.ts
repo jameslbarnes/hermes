@@ -303,6 +303,10 @@ export const SYSTEM_SKILLS: Skill[] = [
           type: 'number',
           description: 'Maximum number of results to return (default 10)',
         },
+        since: {
+          type: 'string',
+          description: 'Only return entries after this date/time. Accepts ISO 8601 (e.g. "2026-02-14") or relative durations (e.g. "24h", "7d", "1w"). Useful for daily digests or catching up on recent activity.',
+        },
       },
       required: [],
     },
@@ -1341,41 +1345,49 @@ function createMCPServer(secretKey: string) {
       query,
       handleFilter,
       limit,
+      since,
     }: {
       query?: string;
       handleFilter?: string;
       limit: number;
+      since?: number;
     }): Promise<Array<{ id: string; text: string; timestamp: number; followed: boolean }>> => {
       let entryResults: JournalEntry[] = [];
       let conversationResults: Conversation[] = [];
 
       if (handleFilter && !query) {
         // Handle only: get recent entries by this author
-        entryResults = await storage.getEntriesByHandle(handleFilter, limit * 2);
+        entryResults = await storage.getEntriesByHandle(handleFilter, limit * 2, since);
         // Also try by pseudonym in case they haven't migrated
         if (entryResults.length === 0) {
           const user = await storage.getUser(handleFilter);
           if (user?.legacyPseudonym) {
             entryResults = await storage.getEntriesByPseudonym(user.legacyPseudonym, limit * 2);
+            if (since) {
+              entryResults = entryResults.filter(e => e.timestamp >= since);
+            }
           }
         }
       } else if (handleFilter && query) {
         // Both: search then filter by author
         const [searchEntries, searchConvos] = await Promise.all([
-          storage.searchEntries(query, limit * 4),
-          storage.searchConversations(query, limit * 4),
+          storage.searchEntries(query, limit * 4, since),
+          storage.searchConversations(query, limit * 4, since),
         ]);
         entryResults = searchEntries.filter(e => e.handle === handleFilter);
         conversationResults = searchConvos.filter(c => c.pseudonym.toLowerCase().includes(handleFilter));
       } else if (query) {
         // Query only: keyword search
         const [searchEntries, searchConvos] = await Promise.all([
-          storage.searchEntries(query, limit * 2),
-          storage.searchConversations(query, limit * 2),
+          storage.searchEntries(query, limit * 2, since),
+          storage.searchConversations(query, limit * 2, since),
         ]);
         // Filter out own entries/conversations
         entryResults = searchEntries.filter(e => e.pseudonym !== pseudonym);
         conversationResults = searchConvos.filter(c => c.pseudonym !== pseudonym);
+      } else if (since) {
+        // Since only (no query, no handle): get all recent entries
+        entryResults = await storage.getEntriesSince(since, limit * 2);
       }
 
       // Filter results through access control (BUG FIX: was returning private entries)
@@ -1705,10 +1717,28 @@ function createMCPServer(secretKey: string) {
       const query = (args as { query?: string })?.query?.trim();
       const handleFilter = (args as { handle?: string })?.handle?.replace(/^@/, '').toLowerCase();
       const limit = (args as { limit?: number })?.limit || 10;
+      const sinceRaw = (args as { since?: string })?.since?.trim();
 
-      if (!query && !handleFilter) {
+      // Parse since: supports ISO dates ("2026-02-14") and relative durations ("24h", "7d", "1w")
+      let since: number | undefined;
+      if (sinceRaw) {
+        const relativeMatch = sinceRaw.match(/^(\d+)\s*(h|d|w)$/i);
+        if (relativeMatch) {
+          const amount = parseInt(relativeMatch[1]);
+          const unit = relativeMatch[2].toLowerCase();
+          const ms = unit === 'h' ? amount * 3600000 : unit === 'd' ? amount * 86400000 : amount * 604800000;
+          since = Date.now() - ms;
+        } else {
+          const parsed = Date.parse(sinceRaw);
+          if (!isNaN(parsed)) {
+            since = parsed;
+          }
+        }
+      }
+
+      if (!query && !handleFilter && !since) {
         return {
-          content: [{ type: 'text' as const, text: 'Provide either a search query or a handle to filter by.' }],
+          content: [{ type: 'text' as const, text: 'Provide a search query, a handle to filter by, or a since parameter.' }],
           isError: true,
         };
       }
@@ -1717,6 +1747,7 @@ function createMCPServer(secretKey: string) {
         query,
         handleFilter,
         limit,
+        since,
       });
 
       return {

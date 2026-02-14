@@ -249,10 +249,13 @@ export interface Storage {
   getEntriesByPseudonym(pseudonym: string, limit?: number): Promise<JournalEntry[]>;
 
   /** Get entries by handle */
-  getEntriesByHandle(handle: string, limit?: number): Promise<JournalEntry[]>;
+  getEntriesByHandle(handle: string, limit?: number, since?: number): Promise<JournalEntry[]>;
 
   /** Search entries by keywords */
-  searchEntries(query: string, limit?: number): Promise<JournalEntry[]>;
+  searchEntries(query: string, limit?: number, since?: number): Promise<JournalEntry[]>;
+
+  /** Get all entries since a timestamp */
+  getEntriesSince(since: number, limit?: number): Promise<JournalEntry[]>;
 
   /** Get total entry count */
   getEntryCount(): Promise<number>;
@@ -326,7 +329,7 @@ export interface Storage {
   getConversationsByPseudonym(pseudonym: string, limit?: number): Promise<Conversation[]>;
 
   /** Search conversations by keywords */
-  searchConversations(query: string, limit?: number): Promise<Conversation[]>;
+  searchConversations(query: string, limit?: number, since?: number): Promise<Conversation[]>;
 
   /** Delete a conversation by ID */
   deleteConversation(id: string): Promise<void>;
@@ -412,9 +415,9 @@ export class MemoryStorage implements Storage {
       .slice(0, limit);
   }
 
-  async getEntriesByHandle(handle: string, limit = 50): Promise<JournalEntry[]> {
+  async getEntriesByHandle(handle: string, limit = 50, since?: number): Promise<JournalEntry[]> {
     return this.entries
-      .filter(e => e.handle === handle)
+      .filter(e => e.handle === handle && (!since || e.timestamp >= since))
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, limit);
   }
@@ -423,12 +426,20 @@ export class MemoryStorage implements Storage {
     return this.entries.length;
   }
 
-  async searchEntries(query: string, limit = 50): Promise<JournalEntry[]> {
+  async getEntriesSince(since: number, limit = 50): Promise<JournalEntry[]> {
+    return this.entries
+      .filter(e => e.timestamp >= since)
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
+  }
+
+  async searchEntries(query: string, limit = 50, since?: number): Promise<JournalEntry[]> {
     const queryKeywords = tokenize(query);
     if (queryKeywords.length === 0) return [];
 
     return this.entries
       .filter(e => {
+        if (since && e.timestamp < since) return false;
         const entryKeywords = e.keywords || tokenize(e.content);
         return queryKeywords.some(qk => entryKeywords.includes(qk));
       })
@@ -586,12 +597,13 @@ export class MemoryStorage implements Storage {
       .slice(0, limit);
   }
 
-  async searchConversations(query: string, limit = 50): Promise<Conversation[]> {
+  async searchConversations(query: string, limit = 50, since?: number): Promise<Conversation[]> {
     const queryKeywords = tokenize(query);
     if (queryKeywords.length === 0) return [];
 
     return this.conversations
       .filter(c => {
+        if (since && c.timestamp < since) return false;
         return queryKeywords.some(qk => c.keywords.includes(qk));
       })
       .slice(0, limit);
@@ -855,10 +867,14 @@ export class FirestoreStorage implements Storage {
     } as JournalEntry));
   }
 
-  async getEntriesByHandle(handle: string, limit = 50): Promise<JournalEntry[]> {
-    const snapshot = await this.db
+  async getEntriesByHandle(handle: string, limit = 50, since?: number): Promise<JournalEntry[]> {
+    let query = this.db
       .collection(this.collection)
-      .where('handle', '==', handle)
+      .where('handle', '==', handle);
+    if (since) {
+      query = query.where('timestamp', '>=', since);
+    }
+    const snapshot = await query
       .orderBy('timestamp', 'desc')
       .limit(limit)
       .get();
@@ -874,6 +890,20 @@ export class FirestoreStorage implements Storage {
     return snapshot.data().count;
   }
 
+  async getEntriesSince(since: number, limit = 50): Promise<JournalEntry[]> {
+    const snapshot = await this.db
+      .collection(this.collection)
+      .where('timestamp', '>=', since)
+      .orderBy('timestamp', 'desc')
+      .limit(limit)
+      .get();
+
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as JournalEntry));
+  }
+
   async getEntry(id: string): Promise<JournalEntry | null> {
     const doc = await this.db.collection(this.collection).doc(id).get();
     if (!doc.exists) return null;
@@ -887,16 +917,20 @@ export class FirestoreStorage implements Storage {
     await this.db.collection(this.collection).doc(id).delete();
   }
 
-  async searchEntries(query: string, limit = 50): Promise<JournalEntry[]> {
+  async searchEntries(query: string, limit = 50, since?: number): Promise<JournalEntry[]> {
     const queryKeywords = tokenize(query);
     if (queryKeywords.length === 0) return [];
 
     // Firestore array-contains-any supports up to 30 values
     const searchKeywords = queryKeywords.slice(0, 30);
 
-    const snapshot = await this.db
+    let firestoreQuery = this.db
       .collection(this.collection)
-      .where('keywords', 'array-contains-any', searchKeywords)
+      .where('keywords', 'array-contains-any', searchKeywords);
+    if (since) {
+      firestoreQuery = firestoreQuery.where('timestamp', '>=', since);
+    }
+    const snapshot = await firestoreQuery
       .orderBy('timestamp', 'desc')
       .limit(limit)
       .get();
@@ -1379,16 +1413,20 @@ export class FirestoreStorage implements Storage {
     } as Conversation));
   }
 
-  async searchConversations(query: string, limit = 50): Promise<Conversation[]> {
+  async searchConversations(query: string, limit = 50, since?: number): Promise<Conversation[]> {
     const queryKeywords = tokenize(query);
     if (queryKeywords.length === 0) return [];
 
     // Firestore array-contains-any supports up to 30 values
     const searchKeywords = queryKeywords.slice(0, 30);
 
-    const snapshot = await this.db
+    let firestoreQuery = this.db
       .collection(this.conversationsCollection)
-      .where('keywords', 'array-contains-any', searchKeywords)
+      .where('keywords', 'array-contains-any', searchKeywords);
+    if (since) {
+      firestoreQuery = firestoreQuery.where('timestamp', '>=', since);
+    }
+    const snapshot = await firestoreQuery
       .orderBy('timestamp', 'desc')
       .limit(limit)
       .get();
@@ -1694,8 +1732,12 @@ export class StagedStorage implements Storage {
     return entries.sort((a, b) => b.timestamp - a.timestamp);
   }
 
-  async getEntriesByHandle(handle: string, limit = 50): Promise<JournalEntry[]> {
-    return this.published.getEntriesByHandle(handle, limit);
+  async getEntriesByHandle(handle: string, limit = 50, since?: number): Promise<JournalEntry[]> {
+    return this.published.getEntriesByHandle(handle, limit, since);
+  }
+
+  async getEntriesSince(since: number, limit = 50): Promise<JournalEntry[]> {
+    return this.published.getEntriesSince(since, limit);
   }
 
   async getEntryCount(): Promise<number> {
@@ -1745,9 +1787,9 @@ export class StagedStorage implements Storage {
     return saved;
   }
 
-  async searchEntries(query: string, limit = 50): Promise<JournalEntry[]> {
+  async searchEntries(query: string, limit = 50, since?: number): Promise<JournalEntry[]> {
     // Search only published entries (pending entries are private)
-    return this.published.searchEntries(query, limit);
+    return this.published.searchEntries(query, limit, since);
   }
 
   /**
@@ -1983,9 +2025,9 @@ export class StagedStorage implements Storage {
     return conversations.sort((a, b) => b.timestamp - a.timestamp);
   }
 
-  async searchConversations(query: string, limit = 50): Promise<Conversation[]> {
+  async searchConversations(query: string, limit = 50, since?: number): Promise<Conversation[]> {
     // Search only published conversations (pending are private)
-    return this.published.searchConversations(query, limit);
+    return this.published.searchConversations(query, limit, since);
   }
 
   async deleteConversation(id: string): Promise<void> {

@@ -12,6 +12,8 @@ services:
       - FIREBASE_SERVICE_ACCOUNT_BASE64=${FIREBASE_SERVICE_ACCOUNT_BASE64}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+      - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL}
     volumes:
       - hermes-data:/data
     restart: unless-stopped

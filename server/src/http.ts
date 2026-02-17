@@ -6311,80 +6311,6 @@ Keep it conversational. Don't dump everything at once. Follow their lead.`;
       return;
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // Debug: Set Namecheap DNS records (fixes CNAME underscore issue)
-    // ─────────────────────────────────────────────────────────────
-    if (req.method === 'POST' && url.pathname === '/api/debug/dns/fix') {
-      const apiKey = process.env.NAMECHEAP_API_KEY;
-      const clientIp = process.env.NAMECHEAP_CLIENT_IP;
-
-      if (!apiKey || !clientIp) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: 'Namecheap credentials not configured' }));
-        return;
-      }
-
-      try {
-        // Set all DNS records - this OVERWRITES everything, so include all records
-        const params = new URLSearchParams({
-          ApiUser: 'sxysun9',
-          ApiKey: apiKey,
-          UserName: 'sxysun9',
-          ClientIp: clientIp,
-          Command: 'namecheap.domains.dns.setHosts',
-          SLD: 'teleport',
-          TLD: 'computer',
-          // Record 1: Keep existing tee A record
-          HostName1: 'tee',
-          RecordType1: 'A',
-          Address1: '98.89.30.212',
-          TTL1: '1799',
-          // Record 2: CNAME without underscore (the fix!)
-          HostName2: 'hermes',
-          RecordType2: 'CNAME',
-          Address2: 'db82f581256a3c9244c4d7129a67336990d08cdf-3000.dstack-pha-prod9.phala.network',
-          TTL2: '60',
-          // Record 3: Keep existing TXT for dstack routing
-          HostName3: '_dstack-app-address.hermes',
-          RecordType3: 'TXT',
-          Address3: 'db82f581256a3c9244c4d7129a67336990d08cdf:443',
-          TTL3: '60',
-          // Record 4: Add the other TXT prefix that dstack-ingress expects
-          HostName4: '_tapp-address.hermes',
-          RecordType4: 'TXT',
-          Address4: 'db82f581256a3c9244c4d7129a67336990d08cdf:443',
-          TTL4: '60',
-          // Resend email records for teleport.computer (simpler subdomain)
-          HostName5: 'resend._domainkey',
-          RecordType5: 'TXT',
-          Address5: 'p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDaoLYiKKzDJzXMgKk4CNNCGnUr4WO2OWxtwfcX/K3XMpfXthOtlWw2tQtW+JX0/Zj2utoczaTJbQoqbAEj2ZN/oauRteQR9GC1leQ4i0LW3hGWbS/36mAYnyA1GmaoeYKA1yTOHGwhh1Y+wU5xCSC3bzacyE9sBiAnn/z1ZAUeCQIDAQAB',
-          TTL5: '1799',
-          HostName6: 'send',
-          RecordType6: 'MX',
-          Address6: 'feedback-smtp.us-east-1.amazonses.com',
-          MXPref6: '10',
-          TTL6: '1799',
-          HostName7: 'send',
-          RecordType7: 'TXT',
-          Address7: 'v=spf1 include:amazonses.com ~all',
-          TTL7: '1799',
-          HostName8: '_dmarc',
-          RecordType8: 'TXT',
-          Address8: 'v=DMARC1; p=none;',
-          TTL8: '1799',
-        });
-
-        const apiUrl = `https://api.namecheap.com/xml.response?${params.toString()}`;
-        const response = await fetch(apiUrl);
-        const xml = await response.text();
-        res.writeHead(200, { 'Content-Type': 'text/xml' });
-        res.end(xml);
-      } catch (err) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: 'Failed to set Namecheap DNS', details: String(err) }));
-      }
-      return;
-    }
 
     // ─────────────────────────────────────────────────────────────
     // Static file serving
@@ -6463,99 +6389,6 @@ function readBody(req: import('http').IncomingMessage): Promise<string> {
 // START
 // ═══════════════════════════════════════════════════════════════
 
-// Fix DNS records on startup (dstack-ingress may have overwritten them)
-async function fixDnsOnStartup() {
-  console.log('DNS fix: Starting DNS fix on startup...');
-  const apiKey = process.env.NAMECHEAP_API_KEY;
-  const clientIp = process.env.NAMECHEAP_CLIENT_IP;
-
-  console.log(`DNS fix: API key present: ${!!apiKey}, Client IP: ${clientIp || 'not set'}`);
-
-  if (!apiKey || !clientIp) {
-    console.log('DNS fix: Namecheap credentials not configured, skipping');
-    return;
-  }
-
-  // Wait for dstack-ingress to finish its DNS setup
-  console.log('DNS fix: Waiting 30s for dstack-ingress to settle...');
-  await new Promise(resolve => setTimeout(resolve, 30000));
-
-  console.log('DNS fix: Setting DNS records for teleport.computer...');
-  console.log('DNS fix: Records to set:');
-  console.log('  1. tee -> A 98.89.30.212');
-  console.log('  2. hermes -> CNAME dstack');
-  console.log('  3. _dstack-app-address.hermes -> TXT');
-  console.log('  4. _tapp-address.hermes -> TXT');
-  console.log('  5. resend._domainkey -> TXT (DKIM)');
-  console.log('  6. send -> MX feedback-smtp.us-east-1.amazonses.com (priority 10)');
-  console.log('  7. send -> TXT v=spf1 include:amazonses.com ~all');
-  console.log('  8. _dmarc -> TXT v=DMARC1; p=none;');
-
-  try {
-    const params = new URLSearchParams({
-      ApiUser: 'sxysun9',
-      ApiKey: apiKey,
-      UserName: 'sxysun9',
-      ClientIp: clientIp,
-      Command: 'namecheap.domains.dns.setHosts',
-      SLD: 'teleport',
-      TLD: 'computer',
-      HostName1: 'tee',
-      RecordType1: 'A',
-      Address1: '98.89.30.212',
-      TTL1: '1799',
-      HostName2: 'hermes',
-      RecordType2: 'CNAME',
-      Address2: 'db82f581256a3c9244c4d7129a67336990d08cdf-3000.dstack-pha-prod9.phala.network',
-      TTL2: '60',
-      HostName3: '_dstack-app-address.hermes',
-      RecordType3: 'TXT',
-      Address3: 'db82f581256a3c9244c4d7129a67336990d08cdf:443',
-      TTL3: '60',
-      HostName4: '_tapp-address.hermes',
-      RecordType4: 'TXT',
-      Address4: 'db82f581256a3c9244c4d7129a67336990d08cdf:443',
-      TTL4: '60',
-      // Resend email records for teleport.computer (simpler subdomain)
-      HostName5: 'resend._domainkey',
-      RecordType5: 'TXT',
-      Address5: 'p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDaoLYiKKzDJzXMgKk4CNNCGnUr4WO2OWxtwfcX/K3XMpfXthOtlWw2tQtW+JX0/Zj2utoczaTJbQoqbAEj2ZN/oauRteQR9GC1leQ4i0LW3hGWbS/36mAYnyA1GmaoeYKA1yTOHGwhh1Y+wU5xCSC3bzacyE9sBiAnn/z1ZAUeCQIDAQAB',
-      TTL5: '1799',
-      HostName6: 'send',
-      RecordType6: 'MX',
-      Address6: 'feedback-smtp.us-east-1.amazonses.com',
-      MXPref6: '10',
-      TTL6: '1799',
-      HostName7: 'send',
-      RecordType7: 'TXT',
-      Address7: 'v=spf1 include:amazonses.com ~all',
-      TTL7: '1799',
-      HostName8: '_dmarc',
-      RecordType8: 'TXT',
-      Address8: 'v=DMARC1; p=none;',
-      TTL8: '1799',
-    });
-
-    console.log('DNS fix: Calling Namecheap API...');
-    const response = await fetch(`https://api.namecheap.com/xml.response?${params.toString()}`);
-    const xml = await response.text();
-    console.log(`DNS fix: API response status: ${response.status}`);
-
-    if (xml.includes('IsSuccess="true"')) {
-      console.log('DNS fix: SUCCESS - All DNS records set correctly');
-      console.log('DNS fix: MX record for send.hermes should now be live');
-      console.log('DNS fix: Run domain.verify() in Resend to confirm SPF');
-    } else if (xml.includes('IP is not associated')) {
-      console.error('DNS fix: FAILED - Client IP not whitelisted in Namecheap');
-      console.error(`DNS fix: Tried to use IP: ${clientIp}`);
-    } else {
-      console.error('DNS fix: FAILED - API returned error');
-      console.error('DNS fix: Response:', xml.slice(0, 800));
-    }
-  } catch (err) {
-    console.error('DNS fix: EXCEPTION - Failed to set DNS records:', err);
-  }
-}
 
 // ═══════════════════════════════════════════════════════════════
 // DEFAULT CHANNELS (seeded on startup)
@@ -6600,7 +6433,6 @@ async function seedDefaultChannels() {
 
 server.listen(PORT, () => {
   console.log(`Hermes server running on port ${PORT}`);
-  fixDnsOnStartup();
   seedDefaultChannels();
 });
 

@@ -6433,6 +6433,10 @@ async function seedDefaultChannels() {
 
 server.listen(PORT, () => {
   console.log(`Hermes server running on port ${PORT}`);
+  console.log(`[DNS] Hermes does NOT manage DNS — dstack-ingress is the sole DNS writer`);
+  if (process.env.NAMECHEAP_API_KEY || process.env.NAMECHEAP_CLIENT_IP) {
+    console.warn(`[DNS] WARNING: NAMECHEAP env vars are set but unused — remove them from compose to avoid confusion`);
+  }
   seedDefaultChannels();
 });
 

@@ -6475,7 +6475,7 @@ async function fixDnsOnStartup() {
     const getResp = await fetch(getUrl);
     const getXml = await getResp.text();
 
-    if (!getXml.includes('IsSuccess') || getXml.includes('Error')) {
+    if (!getXml.includes('Status="OK"')) {
       console.error('[DNS] Failed to read records:', getXml.slice(0, 500));
       return;
     }
@@ -6483,6 +6483,11 @@ async function fixDnsOnStartup() {
     const existing = parseHostRecords(getXml);
     console.log(`[DNS] Found ${existing.length} existing records:`);
     existing.forEach(r => console.log(`  ${r.HostName} ${r.RecordType} → ${r.Address.slice(0, 60)}`));
+
+    if (existing.length === 0) {
+      console.error('[DNS] ABORTING — read 0 records, refusing to write (would nuke everything)');
+      return;
+    }
 
     // Step 2: Merge — replace matching hostname+type, keep everything else
     const merged = mergeRecords(existing, DESIRED_DNS_RECORDS);

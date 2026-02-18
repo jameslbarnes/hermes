@@ -6389,6 +6389,132 @@ function readBody(req: import('http').IncomingMessage): Promise<string> {
 // START
 // ═══════════════════════════════════════════════════════════════
 
+// ─────────────────────────────────────────────────────────────
+// DNS: Read-modify-write to fix records without nuking others
+// ─────────────────────────────────────────────────────────────
+interface DnsRecord {
+  HostName: string;
+  RecordType: string;
+  Address: string;
+  TTL: string;
+  MXPref?: string;
+}
+
+function parseHostRecords(xml: string): DnsRecord[] {
+  const records: DnsRecord[] = [];
+  const hostRegex = /<host [^>]*\/>/g;
+  let match;
+  while ((match = hostRegex.exec(xml)) !== null) {
+    const tag = match[0];
+    const get = (attr: string) => {
+      const m = tag.match(new RegExp(`${attr}="([^"]*)"`));
+      return m ? m[1] : '';
+    };
+    records.push({
+      HostName: get('Name'),
+      RecordType: get('Type'),
+      Address: get('Address'),
+      TTL: get('TTL') || '1799',
+      ...(get('MXPref') && get('Type') === 'MX' ? { MXPref: get('MXPref') } : {}),
+    });
+  }
+  return records;
+}
+
+function mergeRecords(existing: DnsRecord[], desired: DnsRecord[]): DnsRecord[] {
+  // Start with existing records, replacing any that match hostname+type from desired
+  const merged = existing.filter(e =>
+    !desired.some(d => d.HostName === e.HostName && d.RecordType === e.RecordType)
+  );
+  // Add all desired records
+  merged.push(...desired);
+  return merged;
+}
+
+function buildSetHostsParams(records: DnsRecord[]): URLSearchParams {
+  const params: Record<string, string> = {};
+  records.forEach((r, i) => {
+    const n = i + 1;
+    params[`HostName${n}`] = r.HostName;
+    params[`RecordType${n}`] = r.RecordType;
+    params[`Address${n}`] = r.Address;
+    params[`TTL${n}`] = r.TTL;
+    if (r.MXPref) params[`MXPref${n}`] = r.MXPref;
+  });
+  return new URLSearchParams(params);
+}
+
+const DESIRED_DNS_RECORDS: DnsRecord[] = [
+  { HostName: 'tee', RecordType: 'A', Address: '98.89.30.212', TTL: '1799' },
+  { HostName: 'hermes', RecordType: 'CNAME', Address: 'db82f581256a3c9244c4d7129a67336990d08cdf-3000.dstack-pha-prod9.phala.network', TTL: '60' },
+  { HostName: '_dstack-app-address.hermes', RecordType: 'TXT', Address: 'db82f581256a3c9244c4d7129a67336990d08cdf:443', TTL: '60' },
+  { HostName: '_tapp-address.hermes', RecordType: 'TXT', Address: 'db82f581256a3c9244c4d7129a67336990d08cdf:443', TTL: '60' },
+  { HostName: 'resend._domainkey', RecordType: 'TXT', Address: 'p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDaoLYiKKzDJzXMgKk4CNNCGnUr4WO2OWxtwfcX/K3XMpfXthOtlWw2tQtW+JX0/Zj2utoczaTJbQoqbAEj2ZN/oauRteQR9GC1leQ4i0LW3hGWbS/36mAYnyA1GmaoeYKA1yTOHGwhh1Y+wU5xCSC3bzacyE9sBiAnn/z1ZAUeCQIDAQAB', TTL: '1799' },
+  { HostName: 'send', RecordType: 'MX', Address: 'feedback-smtp.us-east-1.amazonses.com', TTL: '1799', MXPref: '10' },
+  { HostName: 'send', RecordType: 'TXT', Address: 'v=spf1 include:amazonses.com ~all', TTL: '1799' },
+  { HostName: '_dmarc', RecordType: 'TXT', Address: 'v=DMARC1; p=none;', TTL: '1799' },
+];
+
+async function fixDnsOnStartup() {
+  const apiKey = process.env.NAMECHEAP_API_KEY;
+  const clientIp = process.env.NAMECHEAP_CLIENT_IP;
+
+  if (!apiKey || !clientIp) {
+    console.log('[DNS] No Namecheap credentials, skipping DNS fix');
+    return;
+  }
+
+  // Wait for dstack-ingress to finish its initial DNS setup
+  console.log('[DNS] Waiting 30s for dstack-ingress to settle...');
+  await new Promise(resolve => setTimeout(resolve, 30000));
+
+  try {
+    // Step 1: Read existing records
+    console.log('[DNS] Reading existing DNS records...');
+    const getUrl = `https://api.namecheap.com/xml.response?ApiUser=sxysun9&ApiKey=${apiKey}&UserName=sxysun9&ClientIp=${clientIp}&Command=namecheap.domains.dns.getHosts&SLD=teleport&TLD=computer`;
+    const getResp = await fetch(getUrl);
+    const getXml = await getResp.text();
+
+    if (!getXml.includes('IsSuccess') || getXml.includes('Error')) {
+      console.error('[DNS] Failed to read records:', getXml.slice(0, 500));
+      return;
+    }
+
+    const existing = parseHostRecords(getXml);
+    console.log(`[DNS] Found ${existing.length} existing records:`);
+    existing.forEach(r => console.log(`  ${r.HostName} ${r.RecordType} → ${r.Address.slice(0, 60)}`));
+
+    // Step 2: Merge — replace matching hostname+type, keep everything else
+    const merged = mergeRecords(existing, DESIRED_DNS_RECORDS);
+    console.log(`[DNS] Merged to ${merged.length} records (${existing.length} existing + ${DESIRED_DNS_RECORDS.length} desired, ${existing.length - (merged.length - DESIRED_DNS_RECORDS.length)} replaced)`);
+
+    // Step 3: Write merged records
+    const baseParams = new URLSearchParams({
+      ApiUser: 'sxysun9',
+      ApiKey: apiKey,
+      UserName: 'sxysun9',
+      ClientIp: clientIp,
+      Command: 'namecheap.domains.dns.setHosts',
+      SLD: 'teleport',
+      TLD: 'computer',
+    });
+    const recordParams = buildSetHostsParams(merged);
+    const allParams = new URLSearchParams([...baseParams.entries(), ...recordParams.entries()]);
+
+    console.log('[DNS] Writing merged records...');
+    const setResp = await fetch(`https://api.namecheap.com/xml.response?${allParams.toString()}`);
+    const setXml = await setResp.text();
+
+    if (setXml.includes('IsSuccess="true"')) {
+      console.log('[DNS] SUCCESS — all records set via read-modify-write');
+      merged.forEach(r => console.log(`  ✓ ${r.HostName} ${r.RecordType} → ${r.Address.slice(0, 60)}`));
+    } else {
+      console.error('[DNS] FAILED:', setXml.slice(0, 500));
+    }
+  } catch (err) {
+    console.error('[DNS] Exception:', err);
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // DEFAULT CHANNELS (seeded on startup)
@@ -6433,10 +6559,7 @@ async function seedDefaultChannels() {
 
 server.listen(PORT, () => {
   console.log(`Hermes server running on port ${PORT}`);
-  console.log(`[DNS] Hermes does NOT manage DNS — dstack-ingress is the sole DNS writer`);
-  if (process.env.NAMECHEAP_API_KEY || process.env.NAMECHEAP_CLIENT_IP) {
-    console.warn(`[DNS] WARNING: NAMECHEAP env vars are set but unused — remove them from compose to avoid confusion`);
-  }
+  fixDnsOnStartup();
   seedDefaultChannels();
 });
 

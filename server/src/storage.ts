@@ -1578,10 +1578,10 @@ export class FirestoreStorage implements Storage {
     const channelDest = `#${channelId}`;
 
     const [byChannel, byTo] = await Promise.all([
+      // Legacy channel field — no orderBy to avoid needing a composite index
       this.db
         .collection(this.collection)
         .where('channel', '==', channelId)
-        .orderBy('timestamp', 'desc')
         .limit(limit)
         .get(),
       this.db

@@ -4100,12 +4100,16 @@ const server = createServer(async (req, res) => {
       const user = await storage.getUserByKeyHash(keyHash);
       const handle = user?.handle || undefined;
 
+      // Auto-detect reflections by content length (500+ chars = essay/reflection)
+      const isReflection = content.trim().length >= 500;
+
       const entryData: Omit<JournalEntry, 'id'> = {
         pseudonym,
         handle,
         client: 'desktop', // Default for REST API
         content: content.trim(),
         timestamp: Date.now(),
+        isReflection: isReflection || undefined,
       };
 
       if (parentEntry) {

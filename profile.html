@@ -235,6 +235,23 @@
             opacity: 1;
         }
 
+        .copy-link-action {
+            background: none;
+            border: none;
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            cursor: pointer;
+            opacity: 0.65;
+            transition: opacity 0.2s;
+            padding: 0;
+        }
+
+        .copy-link-action:hover {
+            opacity: 1;
+            color: var(--accent);
+        }
+
         .avatar {
             display: inline-flex;
             align-items: center;
@@ -739,6 +756,34 @@
             return div.innerHTML;
         }
 
+        function getPermalinkUrl(entryId) {
+            return `${window.location.origin}/e/${encodeURIComponent(entryId)}`;
+        }
+
+        async function copyPermalink(entryId, trigger) {
+            const url = getPermalinkUrl(entryId);
+            try {
+                await navigator.clipboard.writeText(url);
+            } catch {
+                const textArea = document.createElement('textarea');
+                textArea.value = url;
+                textArea.style.position = 'fixed';
+                textArea.style.opacity = '0';
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            }
+
+            if (trigger && trigger.textContent) {
+                const original = trigger.textContent;
+                trigger.textContent = 'copied';
+                setTimeout(() => {
+                    trigger.textContent = original;
+                }, 900);
+            }
+        }
+
         // Get date string from timestamp (YYYY-MM-DD in local timezone)
         function getDateFromTimestamp(ts) {
             const d = new Date(ts);
@@ -992,6 +1037,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                 meta.push(`<button class="delete-btn" onclick="deleteEntry('${entry.id}')">delete</button>`);
             }
             meta.push(`<a href="${generateDiscussUrl(entry)}" target="_blank" class="discuss-link">discuss with claude</a>`);
+            meta.push(`<button class="copy-link-action" onclick="copyPermalink('${entry.id}', this)">copy link</button>`);
 
             return `
                 <div class="entry" id="entry-${entry.id}">

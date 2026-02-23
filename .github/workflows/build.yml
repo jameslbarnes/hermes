@@ -135,7 +135,9 @@ jobs:
       - name: Deploy to Phala Cloud
         run: |
           # Only update compose file, preserve existing env vars in Phala
-          phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml --kms base
+          # NOTE: Switching to Base on-chain KMS requires recreating the CVM via the Phala dashboard.
+          # See https://github.com/jameslbarnes/hermes/issues/4
+          phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_API_KEY }}
 
@@ -190,5 +192,5 @@ jobs:
           echo "✅ Deployed to Phala Cloud CVM" >> $GITHUB_STEP_SUMMARY
           echo "**App ID:** \`${{ secrets.PHALA_APP_ID }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Image Digest:** \`${{ needs.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**KMS:** Base (on-chain)" >> $GITHUB_STEP_SUMMARY
+          echo "**KMS:** Pha (cloud) — Base on-chain KMS pending CVM recreation" >> $GITHUB_STEP_SUMMARY
           echo "**Evidences:** Archived to \`evidences/$(date -u +%Y-%m-%d)/\`" >> $GITHUB_STEP_SUMMARY

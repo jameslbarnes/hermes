@@ -10,7 +10,7 @@
 | Production URL | https://hermes.teleport.computer |
 | Source Code | https://github.com/jameslbarnes/hermes |
 | Docker Image | `docker.io/generalsemantics/hermes` |
-| KMS | Base (on-chain transparency log) |
+| KMS | Pha (cloud) — migration to Base on-chain KMS pending ([#4](https://github.com/jameslbarnes/hermes/issues/4)) |
 
 ## Verification Steps
 
@@ -60,9 +60,11 @@ Each deploy records a full chain:
 | Compose hash | Attested by TDX hardware via port 8090 |
 | On-chain record | Base KMS emits events for each `compose_hash` update |
 
-### 5. Check On-Chain Deployment History
+### 5. Check Deployment History
 
-With Base KMS, every `phala cvms upgrade` emits an on-chain event. Query the Base blockchain to see the full history of compose hashes deployed to this App ID, answering "what code was running at time X?"
+**Current:** Pha KMS (cloud) — no public upgrade log. Deployment history is tracked via `evidences/` snapshots committed to this repo.
+
+**Target:** Base on-chain KMS, where every upgrade emits an on-chain event. This requires recreating the CVM with on-chain KMS via the Phala dashboard. See [issue #4](https://github.com/jameslbarnes/hermes/issues/4).
 
 ### 6. Inspect Archived Evidences
 
@@ -102,6 +104,7 @@ evidences/
 
 | Gap | Status | Mitigation |
 |-----|--------|------------|
+| Pha KMS (no public upgrade log) | Open | Requires CVM recreation with on-chain KMS ([#4](https://github.com/jameslbarnes/hermes/issues/4)). Evidences archived to git as interim measure. |
 | Non-reproducible builds | Open | Base images pinned by digest; full reproducibility requires Nix or apko |
 | Docker Hub hosting | Open | Consider migrating to GHCR for Sigstore signatures and SLSA provenance |
 | No rate limiting on API | Open | Tracked separately from TEE concerns |

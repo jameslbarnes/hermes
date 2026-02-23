@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   hermes:
-    image: docker.io/generalsemantics/hermes:${GIT_SHA}
+    image: docker.io/generalsemantics/hermes:${GIT_SHA}@${IMAGE_DIGEST}
     ports:
       - "3000:3000"
     environment:

@@ -88,6 +88,8 @@ jobs:
     # Trigger via: Actions -> Build and Push -> Run workflow -> check "Deploy to Phala"
     if: github.event_name == 'workflow_dispatch' && inputs.deploy == true
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -107,9 +109,10 @@ jobs:
           NAMECHEAP_IP: ${{ secrets.NAMECHEAP_CLIENT_IP }}
           NAMECHEAP_USER: ${{ secrets.NAMECHEAP_USERNAME }}
         run: |
-          # Generate compose file with image tag (no secrets - just reference vars)
+          # Generate compose file with image tag + digest (no secrets - just reference vars)
           export GIT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-          sed "s/\${GIT_SHA}/$GIT_SHA/g" docker-compose.template.yml > docker-compose.deploy.yml
+          export IMAGE_DIGEST="${{ needs.build.outputs.digest }}"
+          sed -e "s/\${GIT_SHA}/$GIT_SHA/g" -e "s/\${IMAGE_DIGEST}/$IMAGE_DIGEST/g" docker-compose.template.yml > docker-compose.deploy.yml
           cat docker-compose.deploy.yml
 
           # Create env file - strip any newlines from base64 (it may have line wrapping)
@@ -132,7 +135,7 @@ jobs:
       - name: Deploy to Phala Cloud
         run: |
           # Only update compose file, preserve existing env vars in Phala
-          phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml
+          phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml --kms base
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_API_KEY }}
 
@@ -140,9 +143,52 @@ jobs:
         if: always()
         run: rm -f .env.deploy
 
+      - name: Wait for TEE to restart
+        run: sleep 30
+
+      - name: Archive evidences
+        run: |
+          TEE_HOST="${{ secrets.PHALA_APP_ID }}-8090.dstack-pha-prod9.phala.network"
+          DATE=$(date -u +%Y-%m-%d)
+          DIR="evidences/$DATE"
+          mkdir -p "$DIR"
+
+          # Fetch attestation artifacts from TEE metadata endpoint
+          curl -sf "https://$TEE_HOST/" -o "$DIR/metadata.json" || echo "Warning: could not fetch metadata"
+          curl -sf "https://$TEE_HOST/quote" -o "$DIR/quote.json" || echo "Warning: could not fetch quote"
+
+          # Record deployment context
+          cat > "$DIR/deploy-info.json" <<EOF
+          {
+          "git_sha": "${{ github.sha }}",
+          "git_sha_short": "$(echo ${{ github.sha }} | cut -c1-7)",
+          "image_digest": "${{ needs.build.outputs.digest }}",
+          "app_id": "${{ secrets.PHALA_APP_ID }}",
+          "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "workflow_run": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          EOF
+
+          ls -la "$DIR"
+
+      - name: Commit evidences to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add evidences/
+          if git diff --cached --quiet; then
+            echo "No new evidences to commit"
+          else
+            git commit -m "chore: archive TEE evidences for $(date -u +%Y-%m-%d) deploy"
+            git push
+          fi
+
       - name: Deployment summary
         run: |
           echo "## Phala TEE Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ Deployed to Phala Cloud CVM" >> $GITHUB_STEP_SUMMARY
           echo "**App ID:** \`${{ secrets.PHALA_APP_ID }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Digest:** \`${{ needs.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**KMS:** Base (on-chain)" >> $GITHUB_STEP_SUMMARY
+          echo "**Evidences:** Archived to \`evidences/$(date -u +%Y-%m-%d)/\`" >> $GITHUB_STEP_SUMMARY

@@ -1,4 +1,4 @@
-FROM node:20-alpine AS builder
+FROM node:20-alpine@sha256:09e2b3d9726018aecf269bd35325f46bf75046a643a66d28360ec71132750ec8 AS builder
 
 WORKDIR /app/server
 
@@ -14,7 +14,7 @@ COPY server/tsconfig.json ./
 RUN npm run build
 
 # Build Astro frontend (index route migration)
-FROM node:20-alpine AS web-builder
+FROM node:20-alpine@sha256:09e2b3d9726018aecf269bd35325f46bf75046a643a66d28360ec71132750ec8 AS web-builder
 
 WORKDIR /app/web
 
@@ -25,7 +25,7 @@ COPY web/ ./
 RUN npm run build
 
 # Production image
-FROM node:20-alpine
+FROM node:20-alpine@sha256:09e2b3d9726018aecf269bd35325f46bf75046a643a66d28360ec71132750ec8
 
 WORKDIR /app/server
 
@@ -44,6 +44,10 @@ COPY --from=web-builder /app/web/dist/index.html /app/index.html
 COPY --from=web-builder /app/web/dist/styles /app/styles
 COPY --from=web-builder /app/web/dist/scripts /app/scripts
 
+# Ensure data volume mount point is writable by node user
+RUN mkdir -p /data && chown node:node /data
+
+USER node
 EXPOSE 3000
 
 CMD ["node", "dist/http.js"]

@@ -5958,6 +5958,7 @@ const server = createServer(async (req, res) => {
 
       // Create MCP server and transport - let transport handle headers
       const mcpServer = createMCPServer(secretKey);
+      res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx proxy buffering for SSE
       const transport = new SSEServerTransport('/mcp/messages', res as any);
 
       // Store session by transport's generated sessionId
@@ -6157,10 +6158,11 @@ Keep it conversational. Don't dump everything at once. Follow their lead.`;
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/stats') {
       try {
-        const [entryCount, userCount, allEntries] = await Promise.all([
+        const [entryCount, userCount, allEntries, allUsers] = await Promise.all([
           storage.getEntryCount(),
           storage.getUserCount(),
           storage.getEntries(10000),
+          storage.getAllUsers(),
         ]);
 
         // Calculate entries per day for the last 30 days
@@ -6189,6 +6191,20 @@ Keep it conversational. Don't dump everything at once. Follow their lead.`;
           .slice(0, 10)
           .map(([author, count]) => ({ author, count }));
 
+        // New users in last 30 days and user growth by date
+        const newUsersLast30Days = allUsers.filter(u => u.createdAt >= thirtyDaysAgo);
+        const usersByDate: Record<string, number> = {};
+        for (const user of allUsers) {
+          const date = new Date(user.createdAt).toISOString().split('T')[0];
+          usersByDate[date] = (usersByDate[date] || 0) + 1;
+        }
+
+        // Recent new users (last 30 days, most recent first)
+        const recentUsers = newUsersLast30Days
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .slice(0, 20)
+          .map(u => ({ handle: u.handle, createdAt: u.createdAt }));
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           totals: {
@@ -6199,8 +6215,11 @@ Keep it conversational. Don't dump everything at once. Follow their lead.`;
             entries: entriesLast30Days.length,
             activeAuthors: activeAuthors.size,
             entriesByDate,
+            newUsers: newUsersLast30Days.length,
+            usersByDate,
           },
           topAuthors,
+          recentUsers,
         }));
       } catch (err) {
         console.error('Stats error:', err);

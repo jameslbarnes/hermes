@@ -98,43 +98,32 @@ jobs:
       - name: Install Phala CLI
         run: npm install -g phala
 
-      - name: Generate compose and env files
+      - name: Generate compose file
         env:
-          FIREBASE_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
+          GIT_SHA_FULL: ${{ github.sha }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          FIREBASE_SERVICE_ACCOUNT_BASE64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
           BASE_URL: ${{ secrets.BASE_URL }}
-          ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SENDGRID_KEY: ${{ secrets.SENDGRID_API_KEY }}
-          FIRECRAWL_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
-          NAMECHEAP_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
-          NAMECHEAP_IP: ${{ secrets.NAMECHEAP_CLIENT_IP }}
-          NAMECHEAP_USER: ${{ secrets.NAMECHEAP_USERNAME }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
+          FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+          NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
+          NAMECHEAP_CLIENT_IP: ${{ secrets.NAMECHEAP_CLIENT_IP }}
+          NAMECHEAP_USERNAME: ${{ secrets.NAMECHEAP_USERNAME }}
         run: |
-          # Generate compose file with image tag + digest (no secrets - just reference vars)
-          export GIT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-          export IMAGE_DIGEST="${{ needs.build.outputs.digest }}"
-          sed -e "s/\${GIT_SHA}/$GIT_SHA/g" -e "s/\${IMAGE_DIGEST}/$IMAGE_DIGEST/g" docker-compose.template.yml > docker-compose.deploy.yml
+          # Substitute all variables into compose template
+          export GIT_SHA=$(echo "$GIT_SHA_FULL" | cut -c1-7)
+          # Strip newlines from base64 Firebase creds
+          export FIREBASE_SERVICE_ACCOUNT_BASE64=$(echo "$FIREBASE_SERVICE_ACCOUNT_BASE64" | tr -d '\n\r ')
+          envsubst < docker-compose.template.yml > docker-compose.deploy.yml
+
+          # Debug: show compose (secrets will be masked by GitHub)
           cat docker-compose.deploy.yml
-
-          # Create env file - strip any newlines from base64 (it may have line wrapping)
-          FIREBASE_CLEAN=$(echo "$FIREBASE_B64" | tr -d '\n\r ')
-          echo "FIREBASE_SERVICE_ACCOUNT_BASE64=$FIREBASE_CLEAN" > .env.deploy
-          echo "BASE_URL=$BASE_URL" >> .env.deploy
-          echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY" >> .env.deploy
-          echo "SENDGRID_API_KEY=$SENDGRID_KEY" >> .env.deploy
-          echo "FIRECRAWL_API_KEY=$FIRECRAWL_KEY" >> .env.deploy
-          echo "NAMECHEAP_API_KEY=$NAMECHEAP_KEY" >> .env.deploy
-          echo "NAMECHEAP_CLIENT_IP=$NAMECHEAP_IP" >> .env.deploy
-          echo "NAMECHEAP_USERNAME=$NAMECHEAP_USER" >> .env.deploy
-
-          # Debug: show env file structure (lengths only, not values)
-          echo "Env file created with $(wc -l < .env.deploy) lines"
-          while IFS='=' read -r key value; do
-            echo "  $key: ${#value} chars"
-          done < .env.deploy
 
       - name: Deploy to Phala Cloud
         run: |
-          # Only update compose file, preserve existing env vars in Phala
+          # Compose file has all env vars baked in — no separate env file needed
           # NOTE: Switching to Base on-chain KMS requires recreating the CVM via the Phala dashboard.
           # See https://github.com/jameslbarnes/hermes/issues/4
           phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml
@@ -143,7 +132,7 @@ jobs:
 
       - name: Cleanup secrets
         if: always()
-        run: rm -f .env.deploy
+        run: rm -f docker-compose.deploy.yml
 
       - name: Wait for TEE to restart
         run: sleep 30

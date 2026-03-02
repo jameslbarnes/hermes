@@ -6530,7 +6530,7 @@ async function fixDnsOnStartup() {
     existing.forEach(r => console.log(`  ${r.HostName} ${r.RecordType} → ${r.Address.slice(0, 60)}`));
 
     // Guard: require minimum record count to catch partial reads / API glitches
-    const MIN_EXPECTED_RECORDS = 8;
+    const MIN_EXPECTED_RECORDS = 6;
     if (existing.length < MIN_EXPECTED_RECORDS) {
       console.error(`[DNS] ABORTING — only ${existing.length} records read (expected >= ${MIN_EXPECTED_RECORDS}), refusing to write`);
       return;

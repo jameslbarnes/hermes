@@ -141,7 +141,8 @@ export function startTelegramBot(
       if (!text) return;
 
       const chatType = ctx.chat?.type;
-      console.log(`[Telegram] Message received in ${chatType}: "${text.slice(0, 100)}"`);
+      const chatId = ctx.chat?.id;
+      console.log(`[Telegram] Message received in ${chatType} (chat_id: ${chatId}): "${text.slice(0, 100)}"`);
 
       // Check if the bot is mentioned
       const botInfo = await bot!.telegram.getMe();

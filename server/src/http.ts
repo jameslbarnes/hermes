@@ -6529,14 +6529,34 @@ async function fixDnsOnStartup() {
     console.log(`[DNS] Found ${existing.length} existing records:`);
     existing.forEach(r => console.log(`  ${r.HostName} ${r.RecordType} → ${r.Address.slice(0, 60)}`));
 
-    if (existing.length === 0) {
-      console.error('[DNS] ABORTING — read 0 records, refusing to write (would nuke everything)');
+    // Guard: require minimum record count to catch partial reads / API glitches
+    const MIN_EXPECTED_RECORDS = 8;
+    if (existing.length < MIN_EXPECTED_RECORDS) {
+      console.error(`[DNS] ABORTING — only ${existing.length} records read (expected >= ${MIN_EXPECTED_RECORDS}), refusing to write`);
+      return;
+    }
+
+    // Guard: verify critical records exist in the read before overwriting
+    const CRITICAL_RECORDS = [
+      { HostName: 'hermes', RecordType: 'CNAME' },
+    ];
+    const missingCritical = CRITICAL_RECORDS.filter(c =>
+      !existing.some(e => e.HostName === c.HostName && e.RecordType === c.RecordType)
+    );
+    if (missingCritical.length > 0) {
+      console.error('[DNS] ABORTING — critical records missing from read:', missingCritical.map(r => `${r.HostName} ${r.RecordType}`).join(', '));
       return;
     }
 
     // Step 2: Merge — replace matching hostname+type, keep everything else
     const merged = mergeRecords(existing, DESIRED_DNS_RECORDS);
     console.log(`[DNS] Merged to ${merged.length} records (${existing.length} existing + ${DESIRED_DNS_RECORDS.length} desired, ${existing.length - (merged.length - DESIRED_DNS_RECORDS.length)} replaced)`);
+
+    // Guard: merged set should never be smaller than existing (we only add/replace, never remove)
+    if (merged.length < existing.length) {
+      console.error(`[DNS] ABORTING — merged set (${merged.length}) smaller than existing (${existing.length}), something is wrong`);
+      return;
+    }
 
     // Step 3: Write merged records
     const baseParams = new URLSearchParams({

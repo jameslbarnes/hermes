@@ -78,9 +78,13 @@ let postToChannel: ((entry: JournalEntry) => Promise<void>) | null = null;
  * Called from the onPublish callback.
  */
 export async function postToTelegram(entry: JournalEntry): Promise<void> {
-  if (postToChannel) {
-    await postToChannel(entry);
+  const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
+  console.log(`[Telegram] postToTelegram called for entry ${entry.id} by ${author}`);
+  if (!postToChannel) {
+    console.log('[Telegram] No postToChannel function set — bot not initialized?');
+    return;
   }
+  await postToChannel(entry);
 }
 
 /**
@@ -94,17 +98,37 @@ export function startTelegramBot(
 
   // Set up the channel posting function
   postToChannel = async (entry: JournalEntry) => {
-    if (!shouldPostToTelegram(entry)) return;
-    if (!bot) return;
+    const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
+    if (!shouldPostToTelegram(entry)) {
+      console.log(`[Telegram] Skipping entry ${entry.id} by ${author} (filtered: to=${JSON.stringify(entry.to)}, visibility=${entry.visibility})`);
+      return;
+    }
+    if (!bot) {
+      console.log('[Telegram] Bot not initialized, skipping');
+      return;
+    }
 
     const message = formatEntryForTelegram(entry, config.baseUrl);
+    console.log(`[Telegram] Posting entry ${entry.id} by ${author} to channel ${config.channelId} (${message.length} chars)`);
     try {
-      await bot.telegram.sendMessage(config.channelId, message, {
+      const result = await bot.telegram.sendMessage(config.channelId, message, {
         parse_mode: 'MarkdownV2',
         link_preview_options: { is_disabled: true },
       });
+      console.log(`[Telegram] Posted successfully, message_id=${result.message_id}`);
     } catch (err) {
       console.error('[Telegram] Failed to post entry:', err);
+      // Retry without MarkdownV2 in case of parse errors
+      try {
+        const plainAuthor = author;
+        const plainContent = entry.content.slice(0, 3500);
+        const plainMessage = `${plainAuthor}\n\n${plainContent}`;
+        console.log('[Telegram] Retrying as plain text...');
+        await bot.telegram.sendMessage(config.channelId, plainMessage);
+        console.log('[Telegram] Plain text fallback succeeded');
+      } catch (retryErr) {
+        console.error('[Telegram] Plain text fallback also failed:', retryErr);
+      }
     }
   };
 
@@ -116,6 +140,9 @@ export function startTelegramBot(
       const text = 'text' in ctx.message ? ctx.message.text : null;
       if (!text) return;
 
+      const chatType = ctx.chat?.type;
+      console.log(`[Telegram] Message received in ${chatType}: "${text.slice(0, 100)}"`);
+
       // Check if the bot is mentioned
       const botInfo = await bot!.telegram.getMe();
       const botUsername = botInfo.username;
@@ -125,10 +152,12 @@ export function startTelegramBot(
         // Also handle replies to the bot
         (msg.reply_to_message?.from?.id === botInfo.id);
 
+      console.log(`[Telegram] Bot username: @${botUsername}, mentioned: ${isMentioned}`);
       if (!isMentioned) return;
 
       // Extract the query (remove the @mention)
       const query = text.replace(`@${botUsername}`, '').trim();
+      console.log(`[Telegram] Query extracted: "${query}"`);
       if (!query) {
         await ctx.reply('Ask me anything about the notebook! Just @mention me with your question.');
         return;
@@ -183,7 +212,9 @@ When answering:
           for (const block of assistantContent) {
             if (block.type === 'tool_use' && block.name === 'search_hermes') {
               const input = block.input as { query: string };
+              console.log(`[Telegram] Searching notebook for: "${input.query}"`);
               const results = await storage.searchEntries(input.query, 10);
+              console.log(`[Telegram] Search returned ${results.length} results`);
               const formatted = results.map(e => {
                 const author = e.handle ? `@${e.handle}` : e.pseudonym;
                 const date = new Date(e.timestamp).toISOString().split('T')[0];
@@ -208,6 +239,7 @@ When answering:
         const textBlock = currentResponse.content.find(b => b.type === 'text');
         const answer = textBlock ? (textBlock as Anthropic.TextBlock).text : 'I couldn\'t find anything relevant.';
 
+        console.log(`[Telegram] Replying (${answer.length} chars): "${answer.slice(0, 100)}..."`);
         await ctx.reply(answer);
       } catch (err) {
         console.error('[Telegram] Failed to handle query:', err);
@@ -221,7 +253,7 @@ When answering:
     console.error('[Telegram] Bot failed to start:', err);
   });
 
-  console.log('[Telegram] Bot started');
+  console.log(`[Telegram] Bot started (channel: ${config.channelId}, anthropic: ${config.anthropicApiKey ? 'yes' : 'no'})`);
 
   // Return cleanup function
   return () => {

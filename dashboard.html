@@ -185,13 +185,19 @@
         .user-item {
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            padding: 0.5rem 0;
+            align-items: flex-start;
+            padding: 0.6rem 0;
             border-bottom: 1px solid var(--border);
+            gap: 1rem;
         }
 
         .user-item:last-child {
             border-bottom: none;
+        }
+
+        .user-info {
+            flex: 1;
+            min-width: 0;
         }
 
         .user-handle {
@@ -208,9 +214,37 @@
             color: var(--accent);
         }
 
-        .user-date {
+        .user-preview {
+            display: block;
+            font-size: 0.8rem;
+            color: var(--fg-muted);
+            margin-top: 0.2rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .user-meta {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            flex-shrink: 0;
+            gap: 0.15rem;
+        }
+
+        .user-entries {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 0.75rem;
+            color: var(--accent);
+        }
+
+        .user-entries.zero {
+            color: var(--fg-muted);
+        }
+
+        .user-date {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
             color: var(--fg-muted);
         }
 
@@ -352,12 +386,24 @@
                 return;
             }
 
-            list.innerHTML = recentUsers.map(({ handle, createdAt }) => {
+            list.innerHTML = recentUsers.map(({ handle, createdAt, entryCount, latestEntry }) => {
                 const date = new Date(createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                const countLabel = entryCount === 0
+                    ? '<span class="user-entries zero">0 entries</span>'
+                    : `<span class="user-entries">${entryCount} ${entryCount === 1 ? 'entry' : 'entries'}</span>`;
+                const preview = latestEntry
+                    ? `<span class="user-preview">${latestEntry.aiOnly ? '(ai-only)' : latestEntry.content}${latestEntry.content && latestEntry.content.length >= 120 ? '…' : ''}</span>`
+                    : '';
                 return `
                     <li class="user-item">
-                        <span class="user-handle"><a href="/u/${handle}">@${handle}</a></span>
-                        <span class="user-date">${date}</span>
+                        <div class="user-info">
+                            <span class="user-handle"><a href="/u/${handle}">@${handle}</a></span>
+                            ${preview}
+                        </div>
+                        <div class="user-meta">
+                            ${countLabel}
+                            <span class="user-date">${date}</span>
+                        </div>
                     </li>
                 `;
             }).join('');

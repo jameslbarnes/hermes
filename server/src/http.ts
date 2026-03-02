@@ -4034,10 +4034,10 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // GET /api/entries/:pseudonym - Get entries by pseudonym
+    // GET /api/entries/:identifier - Get entries by pseudonym or handle
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname.startsWith('/api/entries/')) {
-      const pseudonym = decodeURIComponent(url.pathname.slice('/api/entries/'.length));
+      const identifier = decodeURIComponent(url.pathname.slice('/api/entries/'.length));
       const limit = parseInt(url.searchParams.get('limit') || '50');
       const secretKey = url.searchParams.get('key');
 
@@ -4050,13 +4050,16 @@ const server = createServer(async (req, res) => {
         const keyHash = hashSecretKey(secretKey);
         const user = await storage.getUserByKeyHash(keyHash);
         authorHandle = user?.handle || null;
-        includePending = authorPseudonym === pseudonym;
+        includePending = authorPseudonym === identifier || authorHandle === identifier;
       }
 
-      // Use StagedStorage's extended method if available
-      const entries = storage instanceof StagedStorage
-        ? await storage.getEntriesByPseudonym(pseudonym, limit, includePending)
-        : await storage.getEntriesByPseudonym(pseudonym, limit);
+      // Try as handle first, fall back to pseudonym
+      let entries = await storage.getEntriesByHandle(identifier, limit);
+      if (entries.length === 0) {
+        entries = storage instanceof StagedStorage
+          ? await storage.getEntriesByPseudonym(identifier, limit, includePending)
+          : await storage.getEntriesByPseudonym(identifier, limit);
+      }
 
       // Strip content from hidden entries (except for author's own entries)
       const strippedEntries = entries.map(e => {
@@ -4065,7 +4068,7 @@ const server = createServer(async (req, res) => {
       });
 
       res.writeHead(200);
-      res.end(JSON.stringify({ pseudonym, entries: strippedEntries }));
+      res.end(JSON.stringify({ pseudonym: identifier, entries: strippedEntries }));
       return;
     }
 
@@ -6208,11 +6211,25 @@ Keep it conversational. Don't dump everything at once. Follow their lead.`;
           usersByDate[date] = (usersByDate[date] || 0) + 1;
         }
 
-        // Recent new users (last 30 days, most recent first)
-        const recentUsers = newUsersLast30Days
+        // Recent new users (last 30 days, most recent first) with their latest entry
+        const recentUsersList = newUsersLast30Days
           .sort((a, b) => b.createdAt - a.createdAt)
-          .slice(0, 20)
-          .map(u => ({ handle: u.handle, createdAt: u.createdAt }));
+          .slice(0, 20);
+        const recentUsers = await Promise.all(recentUsersList.map(async u => {
+          // Get all entries to count + pick most recent
+          const entries = await storage.getEntriesByHandle(u.handle, 500);
+          const latest = entries[0];
+          return {
+            handle: u.handle,
+            createdAt: u.createdAt,
+            entryCount: entries.length,
+            latestEntry: latest ? {
+              content: latest.content.slice(0, 120),
+              timestamp: latest.timestamp,
+              aiOnly: latest.aiOnly || latest.humanVisible === false,
+            } : null,
+          };
+        }));
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({

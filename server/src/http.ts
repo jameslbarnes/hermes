@@ -25,6 +25,7 @@ import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Sum
 import { scrapeConversation, detectPlatform, isValidShareUrl, ScrapeError } from './scraper.js';
 import { createNotificationService, createSendGridClient, verifyUnsubscribeToken, verifyEmailToken, type NotificationService } from './notifications.js';
 import { deliverEntry, getDefaultVisibility, canViewEntry, canView, normalizeEntry, isDefaultAiOnly, isEntryAiOnly, type DeliveryConfig } from './delivery.js';
+import { startTelegramBot, postToTelegram } from './telegram.js';
 
 // Security: Check if a URL points to internal/private IP ranges
 function isInternalUrl(urlString: string): boolean {
@@ -840,6 +841,9 @@ if (storage instanceof StagedStorage) {
         console.error(`[Delivery] Failed to deliver entry ${entry.id}:`, err);
       }
     }
+
+    // Post to Telegram channel
+    await postToTelegram(entry);
 
     // Check for session summary (30 min gap)
     await checkAndGenerateSummary(entry);
@@ -6589,6 +6593,16 @@ server.listen(PORT, () => {
   console.log(`Hermes server running on port ${PORT}`);
   fixDnsOnStartup();
   seedDefaultChannels();
+
+  // Start Telegram bot if configured
+  if (process.env.TELEGRAM_BOT_TOKEN) {
+    startTelegramBot(storage, {
+      botToken: process.env.TELEGRAM_BOT_TOKEN,
+      channelId: process.env.TELEGRAM_CHANNEL_ID || '',
+      anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+      baseUrl: BASE_URL,
+    });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════

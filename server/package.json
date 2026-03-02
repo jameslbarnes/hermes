@@ -24,7 +24,8 @@
     "dotenv": "^17.2.3",
     "firebase-admin": "^13.6.0",
     "jsonwebtoken": "^9.0.3",
-    "resend": "^6.7.0"
+    "resend": "^6.7.0",
+    "telegraf": "^4.16.3"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",

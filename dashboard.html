@@ -178,6 +178,42 @@
             color: var(--fg-muted);
         }
 
+        .user-list {
+            list-style: none;
+        }
+
+        .user-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .user-item:last-child {
+            border-bottom: none;
+        }
+
+        .user-handle {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.85rem;
+        }
+
+        .user-handle a {
+            color: var(--fg);
+            text-decoration: none;
+        }
+
+        .user-handle a:hover {
+            color: var(--accent);
+        }
+
+        .user-date {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--fg-muted);
+        }
+
         .loading {
             text-align: center;
             color: var(--fg-muted);
@@ -238,6 +274,10 @@
                             <div class="stat-value">${stats.totals.users.toLocaleString()}</div>
                         </div>
                         <div class="stat-card">
+                            <div class="stat-label">New Users (30d)</div>
+                            <div class="stat-value">${stats.last30Days.newUsers.toLocaleString()}</div>
+                        </div>
+                        <div class="stat-card">
                             <div class="stat-label">Active Authors (30d)</div>
                             <div class="stat-value">${stats.last30Days.activeAuthors.toLocaleString()}</div>
                         </div>
@@ -249,13 +289,27 @@
                     </div>
 
                     <div class="section">
+                        <h2>New Users (Last 30 Days)</h2>
+                        <div class="chart-container" id="user-chart"></div>
+                    </div>
+
+                    <div class="section">
+                        <h2>Recent Signups</h2>
+                        <ul class="user-list" id="recent-users"></ul>
+                    </div>
+
+                    <div class="section">
                         <h2>Top Authors (Last 30 Days)</h2>
                         <ul class="author-list" id="authors"></ul>
                     </div>
                 `;
 
-                // Render chart
-                renderChart(stats.last30Days.entriesByDate);
+                // Render charts
+                renderChart(stats.last30Days.entriesByDate, 'chart');
+                renderChart(stats.last30Days.usersByDate, 'user-chart');
+
+                // Render recent users
+                renderRecentUsers(stats.recentUsers);
 
                 // Render authors
                 renderAuthors(stats.topAuthors);
@@ -265,8 +319,8 @@
             }
         }
 
-        function renderChart(entriesByDate) {
-            const chart = document.getElementById('chart');
+        function renderChart(dataByDate, elementId) {
+            const chart = document.getElementById(elementId);
 
             // Generate last 30 days
             const days = [];
@@ -278,15 +332,34 @@
             }
 
             // Find max value for scaling
-            const values = days.map(d => entriesByDate[d] || 0);
+            const values = days.map(d => dataByDate[d] || 0);
             const maxValue = Math.max(...values, 1);
 
             // Create bars
             chart.innerHTML = days.map((date, i) => {
-                const count = entriesByDate[date] || 0;
+                const count = dataByDate[date] || 0;
                 const height = (count / maxValue) * 100;
                 const shortDate = new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                 return `<div class="chart-bar" style="height: ${height}%" data-tooltip="${shortDate}: ${count}"></div>`;
+            }).join('');
+        }
+
+        function renderRecentUsers(recentUsers) {
+            const list = document.getElementById('recent-users');
+
+            if (recentUsers.length === 0) {
+                list.innerHTML = '<li class="user-item"><span class="user-handle">No new users</span></li>';
+                return;
+            }
+
+            list.innerHTML = recentUsers.map(({ handle, createdAt }) => {
+                const date = new Date(createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                return `
+                    <li class="user-item">
+                        <span class="user-handle"><a href="/u/${handle}">@${handle}</a></span>
+                        <span class="user-date">${date}</span>
+                    </li>
+                `;
             }).join('');
         }
 

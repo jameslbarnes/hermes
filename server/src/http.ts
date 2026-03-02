@@ -6200,9 +6200,10 @@ Keep it conversational. Don't dump everything at once. Follow their lead.`;
           .map(([author, count]) => ({ author, count }));
 
         // New users in last 30 days and user growth by date
-        const newUsersLast30Days = allUsers.filter(u => u.createdAt >= thirtyDaysAgo);
+        const usersWithDate = allUsers.filter(u => u.createdAt);
+        const newUsersLast30Days = usersWithDate.filter(u => u.createdAt >= thirtyDaysAgo);
         const usersByDate: Record<string, number> = {};
-        for (const user of allUsers) {
+        for (const user of usersWithDate) {
           const date = new Date(user.createdAt).toISOString().split('T')[0];
           usersByDate[date] = (usersByDate[date] || 0) + 1;
         }

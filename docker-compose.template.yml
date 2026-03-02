@@ -16,6 +16,8 @@ services:
       - NAMECHEAP_CLIENT_IP=${NAMECHEAP_CLIENT_IP}
       - SENDGRID_API_KEY=${SENDGRID_API_KEY}
       - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
     volumes:
       - hermes-data:/data
     restart: unless-stopped

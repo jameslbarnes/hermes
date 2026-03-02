@@ -111,6 +111,8 @@ jobs:
           NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
           NAMECHEAP_CLIENT_IP: ${{ secrets.NAMECHEAP_CLIENT_IP }}
           NAMECHEAP_USERNAME: ${{ secrets.NAMECHEAP_USERNAME }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
         run: |
           # Substitute all variables into compose template
           export GIT_SHA=$(echo "$GIT_SHA_FULL" | cut -c1-7)

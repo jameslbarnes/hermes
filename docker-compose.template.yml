@@ -34,11 +34,11 @@ services:
       - TARGET_ENDPOINT=http://hermes:3000
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
-      - cert-data:/etc/letsencrypt
+      - cert-data-cf:/etc/letsencrypt
     depends_on:
       - hermes
     restart: unless-stopped
 
 volumes:
   hermes-data:
-  cert-data:
+  cert-data-cf:

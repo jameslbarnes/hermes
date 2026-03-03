@@ -1,0 +1,105 @@
+/**
+ * Handle @mentions of the bot in Telegram chats.
+ * Extracted from the original telegram.ts — behavior unchanged.
+ */
+
+import Anthropic from '@anthropic-ai/sdk';
+import type { Storage } from '../storage.js';
+import { MENTION_SYSTEM_PROMPT } from './prompts.js';
+
+export interface MentionContext {
+  query: string;
+  reply: (text: string) => Promise<void>;
+}
+
+/**
+ * Handle an @mention query: search Hermes via Claude tool use, reply with synthesis.
+ */
+export async function handleMention(
+  ctx: MentionContext,
+  storage: Storage,
+  anthropic: Anthropic,
+): Promise<void> {
+  const { query, reply } = ctx;
+
+  if (!query) {
+    await reply('Ask me anything about the notebook! Just @mention me with your question.');
+    return;
+  }
+
+  try {
+    const searchTool = {
+      name: 'search_hermes',
+      description: 'Search the Hermes shared notebook for entries matching a query.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Search query keywords',
+          },
+        },
+        required: ['query'],
+      },
+    };
+
+    const apiParams = {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      system: MENTION_SYSTEM_PROMPT,
+      tools: [searchTool],
+    };
+
+    let messages: Anthropic.MessageParam[] = [{ role: 'user', content: query }];
+    let currentResponse = await anthropic.messages.create({
+      ...apiParams,
+      messages,
+    });
+
+    while (currentResponse.stop_reason === 'tool_use') {
+      const assistantContent = currentResponse.content;
+      messages.push({ role: 'assistant', content: assistantContent });
+
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      for (const block of assistantContent) {
+        if (block.type === 'tool_use' && block.name === 'search_hermes') {
+          const input = block.input as { query: string };
+          console.log(`[Telegram/Mention] Searching notebook for: "${input.query}"`);
+          const results = await storage.searchEntries(input.query, 10);
+          console.log(`[Telegram/Mention] Search returned ${results.length} results`);
+          const formatted = results
+            .map((e) => {
+              const author = e.handle ? `@${e.handle}` : e.pseudonym;
+              const date = new Date(e.timestamp).toISOString().split('T')[0];
+              return `[${author}, ${date}] ${e.content.slice(0, 500)}`;
+            })
+            .join('\n\n');
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: formatted || 'No results found.',
+          });
+        }
+      }
+
+      messages.push({ role: 'user', content: toolResults });
+      currentResponse = await anthropic.messages.create({
+        ...apiParams,
+        messages,
+      });
+    }
+
+    const textBlock = currentResponse.content.find((b) => b.type === 'text');
+    const answer = textBlock
+      ? (textBlock as Anthropic.TextBlock).text
+      : "I couldn't find anything relevant.";
+
+    console.log(
+      `[Telegram/Mention] Replying (${answer.length} chars): "${answer.slice(0, 100)}..."`,
+    );
+    await reply(answer);
+  } catch (err) {
+    console.error('[Telegram/Mention] Failed to handle query:', err);
+    await reply('Sorry, something went wrong while searching the notebook.');
+  }
+}

@@ -12,8 +12,6 @@ services:
       - FIREBASE_SERVICE_ACCOUNT_BASE64=${FIREBASE_SERVICE_ACCOUNT_BASE64}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
-      - NAMECHEAP_API_KEY=${NAMECHEAP_API_KEY}
-      - NAMECHEAP_CLIENT_IP=${NAMECHEAP_CLIENT_IP}
       - SENDGRID_API_KEY=${SENDGRID_API_KEY}
       - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
@@ -23,18 +21,16 @@ services:
     restart: unless-stopped
 
   dstack-ingress:
-    image: socrates1024/dstack-ingress:20251231-namecheap-fix@sha256:a11cdeaa58efc75f83d294bbfd54f599ddf29ae6926152389bce2f3710d4cfe6
+    image: dstacktee/dstack-ingress:20250929@sha256:2b47b3e538df0b3e7724255b89369194c8c83a7cfba64d2faf0115ad0a586458
     ports:
       - "443:443"
     environment:
       - DOMAIN=hermes.teleport.computer
-      - DNS_PROVIDER=namecheap
-      - NAMECHEAP_USERNAME=${NAMECHEAP_USERNAME}
-      - NAMECHEAP_API_KEY=${NAMECHEAP_API_KEY}
-      - NAMECHEAP_CLIENT_IP=${NAMECHEAP_CLIENT_IP}
+      - DNS_PROVIDER=cloudflare
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
       - GATEWAY_DOMAIN=_.dstack-pha-prod9.phala.network
       - CERTBOT_EMAIL=james@generalsemantics.nyc
-      - SET_CAA=false
+      - SET_CAA=true
       - TARGET_ENDPOINT=http://hermes:3000
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock

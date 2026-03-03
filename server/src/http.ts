@@ -6331,33 +6331,6 @@ Keep it conversational. Don't dump everything at once. Follow their lead.`;
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Debug: Query Namecheap DNS records (uses whitelisted Phala IP)
-    // ─────────────────────────────────────────────────────────────
-    if (req.method === 'GET' && url.pathname === '/api/debug/dns') {
-      const apiKey = process.env.NAMECHEAP_API_KEY;
-      const clientIp = process.env.NAMECHEAP_CLIENT_IP;
-
-      if (!apiKey || !clientIp) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: 'Namecheap credentials not configured' }));
-        return;
-      }
-
-      try {
-        const apiUrl = `https://api.namecheap.com/xml.response?ApiUser=sxysun9&ApiKey=${apiKey}&UserName=sxysun9&ClientIp=${clientIp}&Command=namecheap.domains.dns.getHosts&SLD=teleport&TLD=computer`;
-        const response = await fetch(apiUrl);
-        const xml = await response.text();
-        res.writeHead(200, { 'Content-Type': 'text/xml' });
-        res.end(xml);
-      } catch (err) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: 'Failed to query Namecheap API', details: String(err) }));
-      }
-      return;
-    }
-
-
-    // ─────────────────────────────────────────────────────────────
     // Static file serving
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET') {
@@ -6434,157 +6407,7 @@ function readBody(req: import('http').IncomingMessage): Promise<string> {
 // START
 // ═══════════════════════════════════════════════════════════════
 
-// ─────────────────────────────────────────────────────────────
-// DNS: Read-modify-write to fix records without nuking others
-// ─────────────────────────────────────────────────────────────
-interface DnsRecord {
-  HostName: string;
-  RecordType: string;
-  Address: string;
-  TTL: string;
-  MXPref?: string;
-}
 
-function parseHostRecords(xml: string): DnsRecord[] {
-  const records: DnsRecord[] = [];
-  const hostRegex = /<host [^>]*\/>/g;
-  let match;
-  while ((match = hostRegex.exec(xml)) !== null) {
-    const tag = match[0];
-    const get = (attr: string) => {
-      const m = tag.match(new RegExp(`${attr}="([^"]*)"`));
-      return m ? m[1] : '';
-    };
-    records.push({
-      HostName: get('Name'),
-      RecordType: get('Type'),
-      Address: get('Address'),
-      TTL: get('TTL') || '1799',
-      ...(get('MXPref') && get('Type') === 'MX' ? { MXPref: get('MXPref') } : {}),
-    });
-  }
-  return records;
-}
-
-function mergeRecords(existing: DnsRecord[], desired: DnsRecord[]): DnsRecord[] {
-  // Start with existing records, replacing any that match hostname+type from desired
-  const merged = existing.filter(e =>
-    !desired.some(d => d.HostName === e.HostName && d.RecordType === e.RecordType)
-  );
-  // Add all desired records
-  merged.push(...desired);
-  return merged;
-}
-
-function buildSetHostsParams(records: DnsRecord[]): URLSearchParams {
-  const params: Record<string, string> = {};
-  records.forEach((r, i) => {
-    const n = i + 1;
-    params[`HostName${n}`] = r.HostName;
-    params[`RecordType${n}`] = r.RecordType;
-    params[`Address${n}`] = r.Address;
-    params[`TTL${n}`] = r.TTL;
-    if (r.MXPref) params[`MXPref${n}`] = r.MXPref;
-  });
-  return new URLSearchParams(params);
-}
-
-const DESIRED_DNS_RECORDS: DnsRecord[] = [
-  { HostName: 'tee', RecordType: 'A', Address: '98.89.30.212', TTL: '1799' },
-  { HostName: 'hermes', RecordType: 'CNAME', Address: 'db82f581256a3c9244c4d7129a67336990d08cdf-3000.dstack-pha-prod9.phala.network', TTL: '60' },
-  { HostName: '_dstack-app-address.hermes', RecordType: 'TXT', Address: 'db82f581256a3c9244c4d7129a67336990d08cdf:443', TTL: '60' },
-  { HostName: '_tapp-address.hermes', RecordType: 'TXT', Address: 'db82f581256a3c9244c4d7129a67336990d08cdf:443', TTL: '60' },
-  { HostName: 'resend._domainkey', RecordType: 'TXT', Address: 'p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDaoLYiKKzDJzXMgKk4CNNCGnUr4WO2OWxtwfcX/K3XMpfXthOtlWw2tQtW+JX0/Zj2utoczaTJbQoqbAEj2ZN/oauRteQR9GC1leQ4i0LW3hGWbS/36mAYnyA1GmaoeYKA1yTOHGwhh1Y+wU5xCSC3bzacyE9sBiAnn/z1ZAUeCQIDAQAB', TTL: '1799' },
-  { HostName: 'send', RecordType: 'MX', Address: 'feedback-smtp.us-east-1.amazonses.com', TTL: '1799', MXPref: '10' },
-  { HostName: 'send', RecordType: 'TXT', Address: 'v=spf1 include:amazonses.com ~all', TTL: '1799' },
-  { HostName: '_dmarc', RecordType: 'TXT', Address: 'v=DMARC1; p=none;', TTL: '1799' },
-];
-
-async function fixDnsOnStartup() {
-  const apiKey = process.env.NAMECHEAP_API_KEY;
-  const clientIp = process.env.NAMECHEAP_CLIENT_IP;
-
-  if (!apiKey || !clientIp) {
-    console.log('[DNS] No Namecheap credentials, skipping DNS fix');
-    return;
-  }
-
-  // Wait for dstack-ingress to finish its initial DNS setup
-  console.log('[DNS] Waiting 30s for dstack-ingress to settle...');
-  await new Promise(resolve => setTimeout(resolve, 30000));
-
-  try {
-    // Step 1: Read existing records
-    console.log('[DNS] Reading existing DNS records...');
-    const getUrl = `https://api.namecheap.com/xml.response?ApiUser=sxysun9&ApiKey=${apiKey}&UserName=sxysun9&ClientIp=${clientIp}&Command=namecheap.domains.dns.getHosts&SLD=teleport&TLD=computer`;
-    const getResp = await fetch(getUrl);
-    const getXml = await getResp.text();
-
-    if (!getXml.includes('Status="OK"')) {
-      console.error('[DNS] Failed to read records:', getXml.slice(0, 500));
-      return;
-    }
-
-    const existing = parseHostRecords(getXml);
-    console.log(`[DNS] Found ${existing.length} existing records:`);
-    existing.forEach(r => console.log(`  ${r.HostName} ${r.RecordType} → ${r.Address.slice(0, 60)}`));
-
-    // Guard: require minimum record count to catch partial reads / API glitches
-    const MIN_EXPECTED_RECORDS = 6;
-    if (existing.length < MIN_EXPECTED_RECORDS) {
-      console.error(`[DNS] ABORTING — only ${existing.length} records read (expected >= ${MIN_EXPECTED_RECORDS}), refusing to write`);
-      return;
-    }
-
-    // Guard: verify critical records exist in the read before overwriting
-    const CRITICAL_RECORDS = [
-      { HostName: 'hermes', RecordType: 'CNAME' },
-    ];
-    const missingCritical = CRITICAL_RECORDS.filter(c =>
-      !existing.some(e => e.HostName === c.HostName && e.RecordType === c.RecordType)
-    );
-    if (missingCritical.length > 0) {
-      console.error('[DNS] ABORTING — critical records missing from read:', missingCritical.map(r => `${r.HostName} ${r.RecordType}`).join(', '));
-      return;
-    }
-
-    // Step 2: Merge — replace matching hostname+type, keep everything else
-    const merged = mergeRecords(existing, DESIRED_DNS_RECORDS);
-    console.log(`[DNS] Merged to ${merged.length} records (${existing.length} existing + ${DESIRED_DNS_RECORDS.length} desired, ${existing.length - (merged.length - DESIRED_DNS_RECORDS.length)} replaced)`);
-
-    // Guard: merged set should never be smaller than existing (we only add/replace, never remove)
-    if (merged.length < existing.length) {
-      console.error(`[DNS] ABORTING — merged set (${merged.length}) smaller than existing (${existing.length}), something is wrong`);
-      return;
-    }
-
-    // Step 3: Write merged records
-    const baseParams = new URLSearchParams({
-      ApiUser: 'sxysun9',
-      ApiKey: apiKey,
-      UserName: 'sxysun9',
-      ClientIp: clientIp,
-      Command: 'namecheap.domains.dns.setHosts',
-      SLD: 'teleport',
-      TLD: 'computer',
-    });
-    const recordParams = buildSetHostsParams(merged);
-    const allParams = new URLSearchParams([...baseParams.entries(), ...recordParams.entries()]);
-
-    console.log('[DNS] Writing merged records...');
-    const setResp = await fetch(`https://api.namecheap.com/xml.response?${allParams.toString()}`);
-    const setXml = await setResp.text();
-
-    if (setXml.includes('IsSuccess="true"')) {
-      console.log('[DNS] SUCCESS — all records set via read-modify-write');
-      merged.forEach(r => console.log(`  ✓ ${r.HostName} ${r.RecordType} → ${r.Address.slice(0, 60)}`));
-    } else {
-      console.error('[DNS] FAILED:', setXml.slice(0, 500));
-    }
-  } catch (err) {
-    console.error('[DNS] Exception:', err);
-  }
-}
 
 // ═══════════════════════════════════════════════════════════════
 // DEFAULT CHANNELS (seeded on startup)
@@ -6629,7 +6452,6 @@ async function seedDefaultChannels() {
 
 server.listen(PORT, () => {
   console.log(`Hermes server running on port ${PORT}`);
-  fixDnsOnStartup();
   seedDefaultChannels();
 
   // Start Telegram bot if configured
@@ -6639,6 +6461,12 @@ server.listen(PORT, () => {
       channelId: process.env.TELEGRAM_CHANNEL_ID || '',
       anthropicApiKey: process.env.ANTHROPIC_API_KEY,
       baseUrl: BASE_URL,
+      groupChatId: process.env.TELEGRAM_GROUP_CHAT_ID,
+      botSecretKey: process.env.TELEGRAM_BOT_SECRET_KEY,
+      botHandle: process.env.TELEGRAM_BOT_HANDLE,
+      postMode: (process.env.TELEGRAM_POST_MODE as 'score' | 'all') || undefined,
+      maxPerHour: process.env.TELEGRAM_MAX_PER_HOUR ? parseInt(process.env.TELEGRAM_MAX_PER_HOUR, 10) : undefined,
+      cooldownMs: process.env.TELEGRAM_COOLDOWN_MS ? parseInt(process.env.TELEGRAM_COOLDOWN_MS, 10) : undefined,
     });
   }
 });

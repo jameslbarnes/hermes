@@ -14,17 +14,21 @@ import type { Storage, JournalEntry } from '../storage.js';
 import type { PostedEntry } from './types.js';
 import { ENTRY_SCORE_PROMPT, ENTRY_HOOK_PROMPT } from './prompts.js';
 
-/**
- * Strip markdown code fences from a JSON response.
- * Models sometimes wrap JSON in ```json ... ``` despite being told not to.
- */
-function stripJsonFences(text: string): string {
-  const trimmed = text.trim();
-  if (trimmed.startsWith('```')) {
-    // Remove opening fence (with optional language tag) and closing fence
-    return trimmed.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+/** Extract a JSON object from a model response, handling fences and trailing text. */
+function extractJson(text: string): string {
+  let s = text.trim();
+  if (s.startsWith('```')) {
+    s = s.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
   }
-  return trimmed;
+  const start = s.indexOf('{');
+  if (start >= 0) {
+    let depth = 0;
+    for (let i = start; i < s.length; i++) {
+      if (s[i] === '{') depth++;
+      else if (s[i] === '}') { depth--; if (depth === 0) return s.slice(start, i + 1); }
+    }
+  }
+  return s;
 }
 
 /** Minimum content length for score-mode filtering. */
@@ -148,7 +152,7 @@ export async function scoreEntry(
     });
     const text = response.content.find((b) => b.type === 'text');
     if (!text) return null;
-    const parsed = JSON.parse(stripJsonFences((text as Anthropic.TextBlock).text));
+    const parsed = JSON.parse(extractJson((text as Anthropic.TextBlock).text));
     return { score: parsed.score, keywords: parsed.keywords || [] };
   } catch (err) {
     console.error('[Telegram/Filter] Failed to score entry:', err);

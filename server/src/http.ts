@@ -11,7 +11,7 @@
 import 'dotenv/config';
 import { createServer } from 'http';
 import { readFile } from 'fs/promises';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, accessSync, constants } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, accessSync, statSync, constants } from 'fs';
 import { join, extname, dirname } from 'path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
@@ -657,6 +657,17 @@ if (storage instanceof StagedStorage) {
   const usingDataVolume = RECOVERY_FILE.startsWith('/data');
   const dataDir = dirname(RECOVERY_FILE);
 
+  // Debug: log user and /data permissions
+  try {
+    const uid = process.getuid?.() ?? 'unknown';
+    const gid = process.getgid?.() ?? 'unknown';
+    console.log(`[Recovery] Running as uid=${uid} gid=${gid}`);
+    if (existsSync('/data')) {
+      const stat = statSync('/data');
+      console.log(`[Recovery] /data owner: uid=${stat.uid} gid=${stat.gid} mode=0o${(stat.mode & 0o7777).toString(8)}`);
+    }
+  } catch {}
+
   if (usingDataVolume) {
     const testFile = join(dataDir, '.write-test');
     try {
@@ -669,7 +680,6 @@ if (storage instanceof StagedStorage) {
   } else {
     console.error(`[Recovery] WARNING: /data volume not available, falling back to ${dataDir}`);
     console.error(`[Recovery] Pending entries will be LOST on restart`);
-    // Check if /data exists but wasn't writable
     if (existsSync('/data')) {
       console.error(`[Recovery] /data exists but was not writable - check volume permissions`);
     } else {

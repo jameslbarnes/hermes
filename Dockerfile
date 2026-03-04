@@ -44,17 +44,10 @@ COPY --from=web-builder /app/web/dist/index.html /app/index.html
 COPY --from=web-builder /app/web/dist/styles /app/styles
 COPY --from=web-builder /app/web/dist/scripts /app/scripts
 
-# Ensure data volume mount point exists
-RUN mkdir -p /data
-
-# Install su-exec for dropping privileges in entrypoint
-RUN apk add --no-cache su-exec
-
-# Copy entrypoint script
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Ensure data volume mount point exists and is world-writable
+# (volume mounts override permissions; TEE provides the security boundary)
+RUN mkdir -p /data && chmod 777 /data
 
 EXPOSE 3000
 
-# Run as root initially so entrypoint can fix volume permissions, then drop to node
-ENTRYPOINT ["/entrypoint.sh"]
+CMD ["node", "dist/http.js"]

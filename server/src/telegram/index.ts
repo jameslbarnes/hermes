@@ -150,6 +150,14 @@ export function startTelegramBot(
         link_preview_options: { is_disabled: true },
       });
       console.log(`[Telegram] Posted successfully, message_id=${result.message_id}`);
+      // Buffer own message so mention/followup handlers see it in context
+      buffer.push({
+        senderName: 'Hermes',
+        text: `${author}: ${entry.content.slice(0, 500)}`,
+        timestamp: Date.now(),
+        messageId: result.message_id,
+      });
+      botMessageIds.add(result.message_id);
       const updated = trackPostedEntry(recentlyPosted, entry);
       recentlyPosted.length = 0;
       recentlyPosted.push(...updated);
@@ -159,8 +167,15 @@ export function startTelegramBot(
       try {
         const plainMessage = `${author}\n\n${entry.content.slice(0, 3500)}\n\n${config.baseUrl}/#entry-${entry.id}`;
         console.log('[Telegram] Retrying as plain text...');
-        await bot.telegram.sendMessage(target, plainMessage);
+        const fallbackResult = await bot.telegram.sendMessage(target, plainMessage);
         console.log('[Telegram] Plain text fallback succeeded');
+        buffer.push({
+          senderName: 'Hermes',
+          text: `${author}: ${entry.content.slice(0, 500)}`,
+          timestamp: Date.now(),
+          messageId: fallbackResult.message_id,
+        });
+        botMessageIds.add(fallbackResult.message_id);
         channelPostTimestamps.push(Date.now());
       } catch (retryErr) {
         console.error('[Telegram] Plain text fallback also failed:', retryErr);
@@ -342,6 +357,7 @@ export function startTelegramBot(
           query,
           reply: async (answer: string) => { await ctx.reply(answer); },
           chatContext,
+          botUsername: botUsername || undefined,
         },
         storage,
         mentionAnthropic,

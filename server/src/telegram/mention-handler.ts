@@ -12,6 +12,8 @@ export interface MentionContext {
   reply: (text: string) => Promise<void>;
   /** Recent chat context (formatted) — gives Claude awareness of the conversation. */
   chatContext?: string;
+  /** The bot's Telegram username (so Claude recognizes its own messages in context). */
+  botUsername?: string;
 }
 
 /**
@@ -55,8 +57,11 @@ export async function handleMention(
       ] as any[],
     };
 
+    const botNote = ctx.botUsername
+      ? `\n\nNote: Messages from "${ctx.botUsername}" or "Hermes" in the chat are YOUR previous messages.`
+      : '';
     const userMessage = ctx.chatContext
-      ? `Recent group chat:\n\n${ctx.chatContext}\n\n---\n\nQuestion (directed at you):\n${query}`
+      ? `Recent group chat:\n\n${ctx.chatContext}${botNote}\n\n---\n\nQuestion (directed at you):\n${query}`
       : query;
 
     let messages: Anthropic.MessageParam[] = [{ role: 'user', content: userMessage }];

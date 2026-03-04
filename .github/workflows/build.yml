@@ -111,6 +111,12 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          TELEGRAM_GROUP_CHAT_ID: ${{ secrets.TELEGRAM_GROUP_CHAT_ID }}
+          TELEGRAM_BOT_SECRET_KEY: ${{ secrets.TELEGRAM_BOT_SECRET_KEY }}
+          TELEGRAM_BOT_HANDLE: ${{ secrets.TELEGRAM_BOT_HANDLE }}
+          TELEGRAM_POST_MODE: ${{ secrets.TELEGRAM_POST_MODE }}
+          TELEGRAM_MAX_PER_HOUR: ${{ secrets.TELEGRAM_MAX_PER_HOUR }}
+          TELEGRAM_COOLDOWN_MS: ${{ secrets.TELEGRAM_COOLDOWN_MS }}
         run: |
           # Substitute all variables into compose template
           export GIT_SHA=$(echo "$GIT_SHA_FULL" | cut -c1-7)

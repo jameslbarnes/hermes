@@ -11,7 +11,7 @@
 import 'dotenv/config';
 import { createServer } from 'http';
 import { readFile } from 'fs/promises';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, accessSync, constants } from 'fs';
 import { join, extname, dirname } from 'path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
@@ -626,7 +626,18 @@ const STATIC_DIR = join(process.cwd(), '..');
 // PENDING ENTRY RECOVERY (survive restarts)
 // ═══════════════════════════════════════════════════════════════
 
-const RECOVERY_FILE = process.env.RECOVERY_FILE || '/data/pending-recovery.json';
+function resolveRecoveryPath(): string {
+  if (process.env.RECOVERY_FILE) return process.env.RECOVERY_FILE;
+  try {
+    const dir = '/data';
+    if (existsSync(dir)) {
+      accessSync(dir, constants.W_OK);
+      return '/data/pending-recovery.json';
+    }
+  } catch { /* not writable */ }
+  return '/tmp/pending-recovery.json';
+}
+const RECOVERY_FILE = resolveRecoveryPath();
 
 // On startup: restore pending entries from recovery file if it exists
 if (storage instanceof StagedStorage && existsSync(RECOVERY_FILE)) {

@@ -151,8 +151,21 @@ jobs:
           mkdir -p "$DIR"
 
           # Fetch attestation artifacts from TEE metadata endpoint
-          curl -sf "https://$TEE_HOST/" -o "$DIR/metadata.json" || echo "Warning: could not fetch metadata"
+          curl -sf "https://$TEE_HOST/" -o "$DIR/metadata-raw.json" || echo "Warning: could not fetch metadata"
           curl -sf "https://$TEE_HOST/quote" -o "$DIR/quote.json" || echo "Warning: could not fetch quote"
+
+          # Redact secrets from metadata before committing
+          if [ -f "$DIR/metadata-raw.json" ]; then
+            python3 -c "
+import json, re, sys
+with open('$DIR/metadata-raw.json') as f:
+    text = f.read()
+# Redact values that look like API keys, tokens, or base64 credentials
+text = re.sub(r'(ANTHROPIC_API_KEY|SENDGRID_API_KEY|FIREBASE_SERVICE_ACCOUNT_BASE64|FIRECRAWL_API_KEY|CLOUDFLARE_API_TOKEN|TELEGRAM_BOT_TOKEN|TELEGRAM_BOT_SECRET_KEY)(=)[^\",\\\\]+', r'\1\2[REDACTED]', text)
+with open('$DIR/metadata.json', 'w') as f:
+    f.write(text)
+" && rm "$DIR/metadata-raw.json"
+          fi
 
           # Record deployment context
           cat > "$DIR/deploy-info.json" <<EOF

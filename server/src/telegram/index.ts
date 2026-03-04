@@ -318,8 +318,50 @@ export function startTelegramBot(
               text,
               chatContext,
               reply: async (answer: string) => {
-                const sent = await ctx.reply(answer);
+                const sent = await ctx.reply(answer, {
+                  reply_parameters: { message_id: msg.message_id },
+                });
                 botMessageIds.add(sent.message_id);
+                buffer.push({
+                  senderName: 'Hermes',
+                  text: answer.slice(0, 500),
+                  timestamp: Date.now(),
+                  messageId: sent.message_id,
+                });
+              },
+            },
+            storage,
+            mentionAnthropic,
+          ).catch((err) => {
+            console.error('[Telegram/Followup] Failed:', err);
+          });
+          return;
+        }
+
+        // Implicit conversation: if the bot spoke recently (within last 5 messages),
+        // treat this as a continuation even without @mention or direct reply
+        const recentMsgs = buffer.recent(5);
+        const botSpokeRecently = recentMsgs.some(
+          (m) => m.senderName === 'Hermes' && m.timestamp > Date.now() - 10 * 60 * 1000,
+        );
+        if (botSpokeRecently) {
+          console.log(`[Telegram] Implicit conversation detected (bot spoke in last 5 messages)`);
+          const chatContext = buffer.formatForContext(50);
+          handleFollowup(
+            {
+              text,
+              chatContext,
+              reply: async (answer: string) => {
+                const sent = await ctx.reply(answer, {
+                  reply_parameters: { message_id: msg.message_id },
+                });
+                botMessageIds.add(sent.message_id);
+                buffer.push({
+                  senderName: 'Hermes',
+                  text: answer.slice(0, 500),
+                  timestamp: Date.now(),
+                  messageId: sent.message_id,
+                });
               },
             },
             storage,
@@ -355,7 +397,18 @@ export function startTelegramBot(
       await handleMention(
         {
           query,
-          reply: async (answer: string) => { await ctx.reply(answer); },
+          reply: async (answer: string) => {
+            const sent = await ctx.reply(answer, {
+              reply_parameters: { message_id: msg.message_id },
+            });
+            botMessageIds.add(sent.message_id);
+            buffer.push({
+              senderName: 'Hermes',
+              text: answer.slice(0, 500),
+              timestamp: Date.now(),
+              messageId: sent.message_id,
+            });
+          },
           chatContext,
           botUsername: botUsername || undefined,
         },

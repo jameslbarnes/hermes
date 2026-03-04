@@ -14,6 +14,15 @@ import type { MessageBuffer } from './buffer.js';
 import type { RateLimiter } from './rate-limiter.js';
 import { INTERJECTION_EVAL_PROMPT, INTERJECTION_COMPOSE_PROMPT } from './prompts.js';
 
+/** Strip markdown code fences from a JSON response. */
+function stripJsonFences(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('```')) {
+    return trimmed.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+  }
+  return trimmed;
+}
+
 /** How many recent messages to include as context. */
 const CONTEXT_MESSAGES = 20;
 /** Minimum messages between interjection checks. */
@@ -170,7 +179,7 @@ export class Interjector {
       });
       const text = response.content.find((b) => b.type === 'text');
       if (!text) return null;
-      return JSON.parse((text as Anthropic.TextBlock).text);
+      return JSON.parse(stripJsonFences((text as Anthropic.TextBlock).text));
     } catch (err) {
       console.error('[Telegram/Interjector] Eval failed:', err);
       return null;

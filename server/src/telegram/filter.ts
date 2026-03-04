@@ -14,6 +14,19 @@ import type { Storage, JournalEntry } from '../storage.js';
 import type { PostedEntry } from './types.js';
 import { ENTRY_SCORE_PROMPT, ENTRY_HOOK_PROMPT } from './prompts.js';
 
+/**
+ * Strip markdown code fences from a JSON response.
+ * Models sometimes wrap JSON in ```json ... ``` despite being told not to.
+ */
+function stripJsonFences(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('```')) {
+    // Remove opening fence (with optional language tag) and closing fence
+    return trimmed.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+  }
+  return trimmed;
+}
+
 /** Minimum content length for score-mode filtering. */
 const MIN_CONTENT_LENGTH = 50;
 /** Score threshold for posting. */
@@ -135,7 +148,7 @@ export async function scoreEntry(
     });
     const text = response.content.find((b) => b.type === 'text');
     if (!text) return null;
-    const parsed = JSON.parse((text as Anthropic.TextBlock).text);
+    const parsed = JSON.parse(stripJsonFences((text as Anthropic.TextBlock).text));
     return { score: parsed.score, keywords: parsed.keywords || [] };
   } catch (err) {
     console.error('[Telegram/Filter] Failed to score entry:', err);

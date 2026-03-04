@@ -4,11 +4,25 @@
  * to a JSON file on disk. Reads on startup, writes periodically.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, accessSync, constants } from 'fs';
 import { dirname } from 'path';
 import type { PostedEntry } from './types.js';
 
-const STATE_FILE = process.env.TELEGRAM_STATE_FILE || '/data/telegram-bot-state.json';
+/** Pick a writable path for state persistence. */
+function resolveStatePath(): string {
+  if (process.env.TELEGRAM_STATE_FILE) return process.env.TELEGRAM_STATE_FILE;
+  // Prefer /data/ (Docker volume), fall back to /tmp/
+  try {
+    const dir = '/data';
+    if (existsSync(dir)) {
+      accessSync(dir, constants.W_OK);
+      return '/data/telegram-bot-state.json';
+    }
+  } catch { /* not writable */ }
+  return '/tmp/telegram-bot-state.json';
+}
+
+const STATE_FILE = resolveStatePath();
 const SAVE_INTERVAL_MS = 5 * 60 * 1000; // Save every 5 minutes
 
 export interface BotState {

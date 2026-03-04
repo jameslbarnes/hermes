@@ -145,12 +145,14 @@ export function startTelegramBot(
       ? formatCuratedPost(entry, filterResult.hook, config.baseUrl)
       : formatEntryForTelegram(entry, config.baseUrl);
 
+    // Post to group if available, otherwise channel
+    const target = config.groupChatId || config.channelId;
     const postType = filterResult.hook ? 'curated' : 'raw';
     console.log(
-      `[Telegram] Posting ${postType} entry ${entry.id} by ${author} to channel ${config.channelId} (${message.length} chars)`,
+      `[Telegram] Posting ${postType} entry ${entry.id} by ${author} to ${target} (${message.length} chars)`,
     );
     try {
-      const result = await bot.telegram.sendMessage(config.channelId, message, {
+      const result = await bot.telegram.sendMessage(target, message, {
         parse_mode: 'MarkdownV2',
         link_preview_options: { is_disabled: true },
       });
@@ -168,7 +170,7 @@ export function startTelegramBot(
           ? `${hook}\n\n\u2014 ${author} | ${config.baseUrl}/#entry-${entry.id}`
           : `${author}\n\n${entry.content.slice(0, 3500)}`;
         console.log('[Telegram] Retrying as plain text...');
-        await bot.telegram.sendMessage(config.channelId, plainMessage);
+        await bot.telegram.sendMessage(target, plainMessage);
         console.log('[Telegram] Plain text fallback succeeded');
         channelPostTimestamps.push(Date.now());
       } catch (retryErr) {

@@ -1,6 +1,6 @@
 /**
  * Handle @mentions of the bot in Telegram chats.
- * Extracted from the original telegram.ts — behavior unchanged.
+ * Can search the notebook and write entries on behalf of the bot.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -10,6 +10,8 @@ import { MENTION_SYSTEM_PROMPT } from './prompts.js';
 export interface MentionContext {
   query: string;
   reply: (text: string) => Promise<void>;
+  /** Recent chat context (formatted) — gives Claude awareness of the conversation. */
+  chatContext?: string;
 }
 
 /**
@@ -50,13 +52,20 @@ export async function handleMention(
       tools: [searchTool],
     };
 
-    let messages: Anthropic.MessageParam[] = [{ role: 'user', content: query }];
+    const userMessage = ctx.chatContext
+      ? `Recent group chat:\n\n${ctx.chatContext}\n\n---\n\nQuestion (directed at you):\n${query}`
+      : query;
+
+    let messages: Anthropic.MessageParam[] = [{ role: 'user', content: userMessage }];
     let currentResponse = await anthropic.messages.create({
       ...apiParams,
       messages,
     });
 
-    while (currentResponse.stop_reason === 'tool_use') {
+    // Tool use loop (max 5 rounds)
+    let rounds = 0;
+    while (currentResponse.stop_reason === 'tool_use' && rounds < 5) {
+      rounds++;
       const assistantContent = currentResponse.content;
       messages.push({ role: 'assistant', content: assistantContent });
 

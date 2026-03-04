@@ -179,6 +179,10 @@ export function startTelegramBot(
     }
   };
 
+  // --- Bot identity (for proactive features) ---
+  const botSecretKey = config.botSecretKey || generateSecretKey();
+  const botHandle = config.botHandle || 'hermes_bot';
+
   // --- Proactive features (group chat) ---
   let interjector: Interjector | null = null;
   let writer: Writer | null = null;
@@ -188,9 +192,6 @@ export function startTelegramBot(
   const botMessageIds = new Set<number>();
 
   if (config.groupChatId && config.anthropicApiKey) {
-    const botSecretKey = config.botSecretKey || generateSecretKey();
-    const botHandle = config.botHandle || 'hermes_bot';
-
     ensureBotIdentity(storage, botSecretKey, botHandle).then((identity) => {
       const botCtx: BotContext = {
         config,
@@ -307,7 +308,7 @@ export function startTelegramBot(
         const replyToId = msg.reply_to_message?.message_id;
         if (replyToId && botMessageIds.has(replyToId)) {
           console.log(`[Telegram] Follow-up detected on bot message ${replyToId}`);
-          const chatContext = buffer.formatForContext(10);
+          const chatContext = buffer.formatForContext(50);
           handleFollowup(
             {
               text,
@@ -346,10 +347,12 @@ export function startTelegramBot(
       const query = text.replace(`@${botUsername}`, '').trim();
       console.log(`[Telegram] Query extracted: "${query}"`);
 
+      const chatContext = buffer.size > 0 ? buffer.formatForContext(50) : undefined;
       await handleMention(
         {
           query,
           reply: async (answer: string) => { await ctx.reply(answer); },
+          chatContext,
         },
         storage,
         mentionAnthropic,

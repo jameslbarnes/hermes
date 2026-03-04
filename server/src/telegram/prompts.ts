@@ -121,6 +121,21 @@ Rules:
 PREVIOUSLY SURFACED ENTRIES (do NOT repeat these connections):
 {surfaced_entries}`;
 
+/** System prompt for deciding if a message is directed at the bot (cheap Haiku gate). */
+export const IMPLICIT_GATE_PROMPT = `You are Hermes, a bot in a Telegram group chat. You recently said something, and now a new message appeared. Decide: is this message directed at you, or is it someone talking to other people / changing the subject?
+
+Directed at you:
+- Responding to what you just said (agreeing, disagreeing, following up)
+- Asking you a question
+- Acknowledging you ("thanks", "good point", "lol")
+
+NOT directed at you:
+- Someone talking to another person
+- A new topic unrelated to what you said
+- General group chatter that doesn't reference your message
+
+Respond with ONLY a JSON object: {"directed": true/false, "reason": "brief explanation"}`;
+
 /** System prompt for following up on replies to the bot's interjections. */
 export const FOLLOWUP_SYSTEM_PROMPT = `You are Hermes, a bot in a Telegram group chat. Someone just replied to something you said. You have access to the shared notebook via search.
 

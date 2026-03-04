@@ -23,7 +23,7 @@ import {
   trackPostedEntry,
 } from './filter.js';
 import { handleMention } from './mention-handler.js';
-import { handleFollowup } from './followup-handler.js';
+import { handleFollowup, isDirectedAtBot } from './followup-handler.js';
 import { Interjector } from './interjector.js';
 import { Writer } from './writer.js';
 import { loadState, startStateSaver, type BotState } from './state.js';
@@ -339,37 +339,41 @@ export function startTelegramBot(
         }
 
         // Implicit conversation: if the bot spoke recently (within last 5 messages),
-        // treat this as a continuation even without @mention or direct reply
+        // use a cheap Haiku gate to check if the message is directed at the bot
         const recentMsgs = buffer.recent(5);
         const botSpokeRecently = recentMsgs.some(
           (m) => m.senderName === 'Hermes' && m.timestamp > Date.now() - 10 * 60 * 1000,
         );
         if (botSpokeRecently) {
-          console.log(`[Telegram] Implicit conversation detected (bot spoke in last 5 messages)`);
           const chatContext = buffer.formatForContext(50);
-          handleFollowup(
-            {
-              text,
-              chatContext,
-              reply: async (answer: string) => {
-                const sent = await ctx.reply(answer, {
-                  reply_parameters: { message_id: msg.message_id },
-                });
-                botMessageIds.add(sent.message_id);
-                buffer.push({
-                  senderName: 'Hermes',
-                  text: answer.slice(0, 500),
-                  timestamp: Date.now(),
-                  messageId: sent.message_id,
-                });
+          const directed = await isDirectedAtBot(chatContext, mentionAnthropic);
+          if (directed) {
+            console.log(`[Telegram] Implicit conversation: message directed at bot`);
+            handleFollowup(
+              {
+                text,
+                chatContext,
+                reply: async (answer: string) => {
+                  const sent = await ctx.reply(answer, {
+                    reply_parameters: { message_id: msg.message_id },
+                  });
+                  botMessageIds.add(sent.message_id);
+                  buffer.push({
+                    senderName: 'Hermes',
+                    text: answer.slice(0, 500),
+                    timestamp: Date.now(),
+                    messageId: sent.message_id,
+                  });
+                },
               },
-            },
-            storage,
-            mentionAnthropic,
-          ).catch((err) => {
-            console.error('[Telegram/Followup] Failed:', err);
-          });
-          return;
+              storage,
+              mentionAnthropic,
+            ).catch((err) => {
+              console.error('[Telegram/Followup] Failed:', err);
+            });
+            return;
+          }
+          console.log(`[Telegram] Bot spoke recently but message not directed at bot`);
         }
 
         // Check if interjector should evaluate

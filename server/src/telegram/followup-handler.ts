@@ -5,7 +5,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { Storage } from '../storage.js';
-import { FOLLOWUP_SYSTEM_PROMPT } from './prompts.js';
+import { FOLLOWUP_SYSTEM_PROMPT, IMPLICIT_GATE_PROMPT } from './prompts.js';
 
 export interface FollowupContext {
   /** The user's reply text. */
@@ -111,5 +111,49 @@ export async function handleFollowup(
   } catch (err) {
     console.error('[Telegram/Followup] Failed:', err);
     // Don't reply with an error message for follow-ups — just silently fail
+  }
+}
+
+/** Extract a JSON object from a model response. */
+function extractJson(text: string): string {
+  let s = text.trim();
+  if (s.startsWith('```')) {
+    s = s.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+  }
+  const start = s.indexOf('{');
+  if (start >= 0) {
+    let depth = 0;
+    for (let i = start; i < s.length; i++) {
+      if (s[i] === '{') depth++;
+      else if (s[i] === '}') { depth--; if (depth === 0) return s.slice(start, i + 1); }
+    }
+  }
+  return s;
+}
+
+/**
+ * Cheap gate: is this message directed at the bot?
+ * Used for implicit conversation detection (no @mention, no direct reply).
+ * Returns true if Haiku thinks the message is directed at the bot.
+ */
+export async function isDirectedAtBot(
+  chatContext: string,
+  anthropic: Anthropic,
+): Promise<boolean> {
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 64,
+      system: IMPLICIT_GATE_PROMPT,
+      messages: [{ role: 'user', content: `Recent chat:\n\n${chatContext}` }],
+    });
+    const text = response.content.find((b) => b.type === 'text');
+    if (!text) return false;
+    const parsed = JSON.parse(extractJson((text as Anthropic.TextBlock).text));
+    console.log(`[Telegram/Gate] directed=${parsed.directed}, reason: ${parsed.reason}`);
+    return parsed.directed === true;
+  } catch (err) {
+    console.error('[Telegram/Gate] Failed:', err);
+    return false; // Default to not responding on error
   }
 }

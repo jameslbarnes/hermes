@@ -151,8 +151,13 @@ export async function scoreEntry(
       ],
     });
     const text = response.content.find((b) => b.type === 'text');
-    if (!text) return null;
-    const parsed = JSON.parse(extractJson((text as Anthropic.TextBlock).text));
+    if (!text) {
+      console.error('[Telegram/Filter] Score: no text block in response, stop_reason:', response.stop_reason);
+      return null;
+    }
+    const raw = (text as Anthropic.TextBlock).text;
+    console.log(`[Telegram/Filter] Score raw response: ${raw.slice(0, 200)}`);
+    const parsed = JSON.parse(extractJson(raw));
     return { score: parsed.score, keywords: parsed.keywords || [] };
   } catch (err) {
     console.error('[Telegram/Filter] Failed to score entry:', err);
@@ -286,7 +291,10 @@ export async function filterEntry(
 
   // Step 1: Score (cheap Haiku call)
   const scoreResult = await scoreEntry(entry, anthropic);
-  if (!scoreResult) return { post: true }; // On error, default to posting raw
+  if (!scoreResult) {
+    console.log(`[Telegram/Filter] Score failed for ${entry.id}, posting raw`);
+    return { post: true };
+  }
   console.log(`[Telegram/Filter] Entry ${entry.id} scored ${scoreResult.score}/10`);
   if (scoreResult.score < SCORE_THRESHOLD) return { post: false };
 
@@ -304,7 +312,7 @@ export async function filterEntry(
   // Step 3: Write hook (Sonnet call with search context)
   const hook = await writeHook(entry, relatedEntries, recentlyPosted, anthropic);
   if (!hook) {
-    // Sonnet said SKIP or errored — still post, but raw
+    console.log(`[Telegram/Filter] Hook failed/skipped for ${entry.id}, posting raw`);
     return { post: true };
   }
 

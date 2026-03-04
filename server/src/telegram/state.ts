@@ -23,6 +23,9 @@ function resolveStatePath(): string {
 }
 
 const STATE_FILE = resolveStatePath();
+if (!STATE_FILE.startsWith('/data')) {
+  console.warn(`[Telegram/State] WARNING: using ${STATE_FILE} — state will be LOST on restart`);
+}
 const SAVE_INTERVAL_MS = 5 * 60 * 1000; // Save every 5 minutes
 
 export interface BotState {

@@ -654,28 +654,27 @@ if (storage instanceof StagedStorage && existsSync(RECOVERY_FILE)) {
 
 // Check /data volume status on startup
 if (storage instanceof StagedStorage) {
+  const usingDataVolume = RECOVERY_FILE.startsWith('/data');
   const dataDir = dirname(RECOVERY_FILE);
-  if (existsSync(dataDir)) {
-    // Test if writable
+
+  if (usingDataVolume) {
     const testFile = join(dataDir, '.write-test');
     try {
       writeFileSync(testFile, 'test');
       unlinkSync(testFile);
-      console.log(`[Recovery] Volume OK: ${dataDir} is writable - pending entries will survive restarts`);
+      console.log(`[Recovery] Volume OK: /data is writable - pending entries will survive restarts`);
     } catch {
-      console.error(`[Recovery] ERROR: ${dataDir} exists but is not writable`);
-      console.error(`[Recovery] Action: Check volume permissions in docker-compose.yml`);
+      console.error(`[Recovery] ERROR: /data exists but is not writable - pending entries will be LOST on restart`);
     }
   } else {
-    console.warn(`[Recovery] WARNING: ${dataDir} does not exist`);
-    console.warn(`[Recovery] Pending entries will NOT survive restarts`);
-    console.warn(`[Recovery] Action: Add volume mount to docker-compose.yml:`);
-    console.warn(`[Recovery]   services:`);
-    console.warn(`[Recovery]     hermes:`);
-    console.warn(`[Recovery]       volumes:`);
-    console.warn(`[Recovery]         - hermes-data:/data`);
-    console.warn(`[Recovery]   volumes:`);
-    console.warn(`[Recovery]     hermes-data:`);
+    console.error(`[Recovery] WARNING: /data volume not available, falling back to ${dataDir}`);
+    console.error(`[Recovery] Pending entries will be LOST on restart`);
+    // Check if /data exists but wasn't writable
+    if (existsSync('/data')) {
+      console.error(`[Recovery] /data exists but was not writable - check volume permissions`);
+    } else {
+      console.error(`[Recovery] /data does not exist - check volume mount in docker-compose.yml`);
+    }
   }
 }
 

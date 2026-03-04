@@ -298,25 +298,8 @@ export async function filterEntry(
   console.log(`[Telegram/Filter] Entry ${entry.id} scored ${scoreResult.score}/10`);
   if (scoreResult.score < SCORE_THRESHOLD) return { post: false };
 
-  // Step 2: Search for related entries (free — just storage)
-  let relatedEntries: JournalEntry[] = [];
-  if (storage && scoreResult.keywords.length > 0) {
-    const searchQuery = scoreResult.keywords.join(' ');
-    console.log(`[Telegram/Filter] Searching for related entries: "${searchQuery}"`);
-    const results = await storage.searchEntries(searchQuery, 5);
-    // Exclude the entry itself
-    relatedEntries = results.filter((e) => e.id !== entry.id);
-    console.log(`[Telegram/Filter] Found ${relatedEntries.length} related entries`);
-  }
-
-  // Step 3: Write hook (Sonnet call with search context)
-  const hook = await writeHook(entry, relatedEntries, recentlyPosted, anthropic);
-  if (!hook) {
-    console.log(`[Telegram/Filter] Hook failed/skipped for ${entry.id}, posting raw`);
-    return { post: true };
-  }
-
-  return { post: true, hook };
+  // Score passed — post the raw entry
+  return { post: true };
 }
 
 /**

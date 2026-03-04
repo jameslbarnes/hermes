@@ -42,10 +42,13 @@ export async function handleFollowup(
     };
 
     const apiParams = {
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-4-6' as const,
       max_tokens: 512,
       system: FOLLOWUP_SYSTEM_PROMPT,
-      tools: [searchTool],
+      tools: [
+        searchTool,
+        { type: 'web_search_20250305', name: 'web_search', max_uses: 3 },
+      ] as any[],
     };
 
     let messages: Anthropic.MessageParam[] = [
@@ -57,12 +60,18 @@ export async function handleFollowup(
 
     let response = await anthropic.messages.create({ ...apiParams, messages });
 
-    // Handle tool use loop (at most 3 rounds)
+    // Handle tool use loop (at most 5 rounds, including pause_turn for web search)
     let rounds = 0;
-    while (response.stop_reason === 'tool_use' && rounds < 3) {
+    const stopReason = () => response.stop_reason as string;
+    while ((stopReason() === 'tool_use' || stopReason() === 'pause_turn') && rounds < 5) {
       rounds++;
       const assistantContent = response.content;
       messages.push({ role: 'assistant', content: assistantContent });
+
+      if (stopReason() === 'pause_turn') {
+        response = await anthropic.messages.create({ ...apiParams, messages });
+        continue;
+      }
 
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       for (const block of assistantContent) {

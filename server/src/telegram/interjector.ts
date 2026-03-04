@@ -211,6 +211,9 @@ export class Interjector {
         model: 'claude-sonnet-4-6',
         max_tokens: 256,
         system: systemPrompt,
+        tools: [
+          { type: 'web_search_20250305', name: 'web_search', max_uses: 2 },
+        ] as any[],
         messages: [
           {
             role: 'user',

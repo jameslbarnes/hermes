@@ -139,17 +139,10 @@ export function startTelegramBot(
       return;
     }
 
-    // In score mode with a hook, post the curated version.
-    // Otherwise fall back to raw content.
-    const message = filterResult.hook
-      ? formatCuratedPost(entry, filterResult.hook, config.baseUrl)
-      : formatEntryForTelegram(entry, config.baseUrl);
-
-    // Post to group if available, otherwise channel
+    const message = formatEntryForTelegram(entry, config.baseUrl);
     const target = config.groupChatId || config.channelId;
-    const postType = filterResult.hook ? 'curated' : 'raw';
     console.log(
-      `[Telegram] Posting ${postType} entry ${entry.id} by ${author} to ${target} (${message.length} chars)`,
+      `[Telegram] Posting entry ${entry.id} by ${author} to ${target} (${message.length} chars)`,
     );
     try {
       const result = await bot.telegram.sendMessage(target, message, {
@@ -157,18 +150,14 @@ export function startTelegramBot(
         link_preview_options: { is_disabled: true },
       });
       console.log(`[Telegram] Posted successfully, message_id=${result.message_id}`);
-      // Track for dedup + curation context + rate limiting
-      const updated = trackPostedEntry(recentlyPosted, entry, filterResult.hook);
+      const updated = trackPostedEntry(recentlyPosted, entry);
       recentlyPosted.length = 0;
       recentlyPosted.push(...updated);
       channelPostTimestamps.push(Date.now());
     } catch (err) {
       console.error('[Telegram] Failed to post entry:', err);
       try {
-        const hook = filterResult.hook;
-        const plainMessage = hook
-          ? `${hook}\n\n\u2014 ${author} | ${config.baseUrl}/#entry-${entry.id}`
-          : `${author}\n\n${entry.content.slice(0, 3500)}`;
+        const plainMessage = `${author}\n\n${entry.content.slice(0, 3500)}\n\n${config.baseUrl}/#entry-${entry.id}`;
         console.log('[Telegram] Retrying as plain text...');
         await bot.telegram.sendMessage(target, plainMessage);
         console.log('[Telegram] Plain text fallback succeeded');

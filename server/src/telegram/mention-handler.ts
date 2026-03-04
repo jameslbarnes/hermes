@@ -46,10 +46,13 @@ export async function handleMention(
     };
 
     const apiParams = {
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-4-6' as const,
       max_tokens: 1024,
       system: MENTION_SYSTEM_PROMPT,
-      tools: [searchTool],
+      tools: [
+        searchTool,
+        { type: 'web_search_20250305', name: 'web_search', max_uses: 3 },
+      ] as any[],
     };
 
     const userMessage = ctx.chatContext
@@ -62,13 +65,24 @@ export async function handleMention(
       messages,
     });
 
-    // Tool use loop (max 5 rounds)
+    // Tool use loop (max 5 rounds). Also continue on 'pause_turn' (web search can pause).
     let rounds = 0;
-    while (currentResponse.stop_reason === 'tool_use' && rounds < 5) {
+    const stopReason = () => currentResponse.stop_reason as string;
+    while ((stopReason() === 'tool_use' || stopReason() === 'pause_turn') && rounds < 5) {
       rounds++;
       const assistantContent = currentResponse.content;
       messages.push({ role: 'assistant', content: assistantContent });
 
+      // For pause_turn, just continue without adding tool results
+      if (stopReason() === 'pause_turn') {
+        currentResponse = await anthropic.messages.create({
+          ...apiParams,
+          messages,
+        });
+        continue;
+      }
+
+      // Handle client-side tool calls
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       for (const block of assistantContent) {
         if (block.type === 'tool_use' && block.name === 'search_hermes') {
@@ -91,7 +105,9 @@ export async function handleMention(
         }
       }
 
-      messages.push({ role: 'user', content: toolResults });
+      if (toolResults.length > 0) {
+        messages.push({ role: 'user', content: toolResults });
+      }
       currentResponse = await anthropic.messages.create({
         ...apiParams,
         messages,

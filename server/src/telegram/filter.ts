@@ -105,6 +105,7 @@ export function formatCuratedPost(
 export function shouldPostToTelegram(entry: JournalEntry): boolean {
   if (entry.to && entry.to.length > 0) return false;
   if (entry.visibility === 'private') return false;
+  if (entry.channel === 'ai-oly') return false;
   return true;
 }
 

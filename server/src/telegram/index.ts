@@ -19,11 +19,15 @@ import { RateLimiter } from './rate-limiter.js';
 import {
   filterEntry,
   formatEntryForTelegram,
+  escapeMarkdownV2,
   formatCuratedPost,
   trackPostedEntry,
+  extractJson,
 } from './filter.js';
+
 import { handleMention } from './mention-handler.js';
 import { handleFollowup, isDirectedAtBot } from './followup-handler.js';
+import { BATCH_PICK_PROMPT } from './prompts.js';
 import { Interjector } from './interjector.js';
 import { Writer } from './writer.js';
 import { loadState, startStateSaver, type BotState } from './state.js';
@@ -115,7 +119,145 @@ export function startTelegramBot(
     channelPostTimestamps.shift();
   }
 
-  // --- Channel posting ---
+  // --- Session debounce queue ---
+  // Entries are held per-pseudonym for SESSION_DEBOUNCE_MS.
+  // If more arrive from the same author, the timer resets.
+  // When the timer fires: 1 entry → post raw, multiple → pick best or summarize.
+  const SESSION_DEBOUNCE_MS = 30 * 60 * 1000; // 30 minutes
+  const sessionQueues = new Map<string, { entries: JournalEntry[]; timer: ReturnType<typeof setTimeout> }>();
+
+  /** Actually send a message to the group/channel and track it. */
+  async function sendEntry(entry: JournalEntry) {
+    if (!bot) return;
+    const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
+    const message = formatEntryForTelegram(entry, config.baseUrl);
+    const target = config.groupChatId || config.channelId;
+    console.log(`[Telegram] Posting entry ${entry.id} by ${author} to ${target}`);
+    try {
+      const result = await bot.telegram.sendMessage(target, message, {
+        parse_mode: 'MarkdownV2',
+        link_preview_options: { is_disabled: true },
+      });
+      console.log(`[Telegram] Posted successfully, message_id=${result.message_id}`);
+      buffer.push({
+        senderName: 'Hermes',
+        text: `${author}: ${entry.content.slice(0, 500)}`,
+        timestamp: Date.now(),
+        messageId: result.message_id,
+      });
+      botMessageIds.add(result.message_id);
+      const updated = trackPostedEntry(recentlyPosted, entry);
+      recentlyPosted.length = 0;
+      recentlyPosted.push(...updated);
+      channelPostTimestamps.push(Date.now());
+    } catch (err) {
+      console.error('[Telegram] Failed to post entry:', err);
+      try {
+        const plainMessage = `${author}\n\n${entry.content.slice(0, 3500)}\n\n${config.baseUrl}/#entry-${entry.id}`;
+        const fallbackResult = await bot.telegram.sendMessage(target, plainMessage);
+        buffer.push({
+          senderName: 'Hermes',
+          text: `${author}: ${entry.content.slice(0, 500)}`,
+          timestamp: Date.now(),
+          messageId: fallbackResult.message_id,
+        });
+        botMessageIds.add(fallbackResult.message_id);
+        channelPostTimestamps.push(Date.now());
+      } catch (retryErr) {
+        console.error('[Telegram] Plain text fallback also failed:', retryErr);
+      }
+    }
+  }
+
+  /** Send a plain-text summary message to the group/channel. */
+  async function sendSummary(author: string, summaryText: string, permalink: string) {
+    if (!bot) return;
+    const target = config.groupChatId || config.channelId;
+    const link = `[Permalink](${escapeMarkdownV2(permalink)})`;
+    const message = `*${escapeMarkdownV2(author)}*\n\n${escapeMarkdownV2(summaryText)}\n\n${link}`;
+    try {
+      const result = await bot.telegram.sendMessage(target, message, {
+        parse_mode: 'MarkdownV2',
+        link_preview_options: { is_disabled: true },
+      });
+      buffer.push({
+        senderName: 'Hermes',
+        text: `${author}: ${summaryText.slice(0, 500)}`,
+        timestamp: Date.now(),
+        messageId: result.message_id,
+      });
+      botMessageIds.add(result.message_id);
+      channelPostTimestamps.push(Date.now());
+    } catch (err) {
+      console.error('[Telegram] Failed to post summary:', err);
+    }
+  }
+
+  /** Flush a session queue: pick best entry or summarize, then post. */
+  async function flushSessionQueue(pseudonym: string) {
+    const queue = sessionQueues.get(pseudonym);
+    if (!queue || queue.entries.length === 0) {
+      sessionQueues.delete(pseudonym);
+      return;
+    }
+    const entries = queue.entries;
+    sessionQueues.delete(pseudonym);
+
+    console.log(`[Telegram/Debounce] Flushing ${entries.length} entries for ${pseudonym}`);
+
+    if (entries.length === 1) {
+      await sendEntry(entries[0]);
+      return;
+    }
+
+    // Multiple entries — use Haiku to pick the best or summarize
+    if (!anthropic) {
+      // No API key, just post the first one
+      await sendEntry(entries[0]);
+      return;
+    }
+
+    try {
+      const author = entries[0].handle ? `@${entries[0].handle}` : entries[0].pseudonym;
+      const entriesText = entries
+        .map((e, i) => `[${i}] ${e.content.slice(0, 500)}`)
+        .join('\n\n');
+
+      const response = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 256,
+        system: BATCH_PICK_PROMPT,
+        messages: [{ role: 'user', content: `Author: ${author}\n\nEntries:\n${entriesText}` }],
+      });
+
+      const textBlock = response.content.find((b) => b.type === 'text');
+      if (!textBlock) {
+        await sendEntry(entries[0]);
+        return;
+      }
+
+      const raw = (textBlock as Anthropic.TextBlock).text;
+      console.log(`[Telegram/Debounce] Haiku response: ${raw.slice(0, 200)}`);
+      const parsed = JSON.parse(extractJson(raw));
+
+      if (parsed.mode === 'pick' && typeof parsed.index === 'number') {
+        const idx = Math.max(0, Math.min(parsed.index, entries.length - 1));
+        console.log(`[Telegram/Debounce] Picked entry ${idx} of ${entries.length}`);
+        await sendEntry(entries[idx]);
+      } else if (parsed.mode === 'summary' && parsed.text) {
+        console.log(`[Telegram/Debounce] Using summary for ${entries.length} entries`);
+        const permalink = `${config.baseUrl}/#entry-${entries[0].id}`;
+        await sendSummary(author, parsed.text, permalink);
+      } else {
+        await sendEntry(entries[0]);
+      }
+    } catch (err) {
+      console.error('[Telegram/Debounce] Failed to pick/summarize:', err);
+      await sendEntry(entries[0]);
+    }
+  }
+
+  // --- Channel posting (with session debounce) ---
   postToChannel = async (entry: JournalEntry) => {
     const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
 
@@ -139,47 +281,18 @@ export function startTelegramBot(
       return;
     }
 
-    const message = formatEntryForTelegram(entry, config.baseUrl);
-    const target = config.groupChatId || config.channelId;
-    console.log(
-      `[Telegram] Posting entry ${entry.id} by ${author} to ${target} (${message.length} chars)`,
-    );
-    try {
-      const result = await bot.telegram.sendMessage(target, message, {
-        parse_mode: 'MarkdownV2',
-        link_preview_options: { is_disabled: true },
-      });
-      console.log(`[Telegram] Posted successfully, message_id=${result.message_id}`);
-      // Buffer own message so mention/followup handlers see it in context
-      buffer.push({
-        senderName: 'Hermes',
-        text: `${author}: ${entry.content.slice(0, 500)}`,
-        timestamp: Date.now(),
-        messageId: result.message_id,
-      });
-      botMessageIds.add(result.message_id);
-      const updated = trackPostedEntry(recentlyPosted, entry);
-      recentlyPosted.length = 0;
-      recentlyPosted.push(...updated);
-      channelPostTimestamps.push(Date.now());
-    } catch (err) {
-      console.error('[Telegram] Failed to post entry:', err);
-      try {
-        const plainMessage = `${author}\n\n${entry.content.slice(0, 3500)}\n\n${config.baseUrl}/#entry-${entry.id}`;
-        console.log('[Telegram] Retrying as plain text...');
-        const fallbackResult = await bot.telegram.sendMessage(target, plainMessage);
-        console.log('[Telegram] Plain text fallback succeeded');
-        buffer.push({
-          senderName: 'Hermes',
-          text: `${author}: ${entry.content.slice(0, 500)}`,
-          timestamp: Date.now(),
-          messageId: fallbackResult.message_id,
-        });
-        botMessageIds.add(fallbackResult.message_id);
-        channelPostTimestamps.push(Date.now());
-      } catch (retryErr) {
-        console.error('[Telegram] Plain text fallback also failed:', retryErr);
-      }
+    // Queue the entry with a debounce timer per pseudonym
+    const key = entry.pseudonym;
+    const existing = sessionQueues.get(key);
+    if (existing) {
+      clearTimeout(existing.timer);
+      existing.entries.push(entry);
+      console.log(`[Telegram/Debounce] Queued entry ${entry.id} for ${key} (${existing.entries.length} in batch)`);
+      existing.timer = setTimeout(() => flushSessionQueue(key), SESSION_DEBOUNCE_MS);
+    } else {
+      console.log(`[Telegram/Debounce] First entry ${entry.id} for ${key}, starting 30m timer`);
+      const timer = setTimeout(() => flushSessionQueue(key), SESSION_DEBOUNCE_MS);
+      sessionQueues.set(key, { entries: [entry], timer });
     }
   };
 
@@ -434,6 +547,11 @@ export function startTelegramBot(
   // Return cleanup function
   return () => {
     if (interjectionTimer) clearInterval(interjectionTimer);
+    // Flush all pending session queues immediately on shutdown
+    for (const [key, queue] of sessionQueues) {
+      clearTimeout(queue.timer);
+      flushSessionQueue(key).catch(() => {});
+    }
     stopStateSaver(); // Final save
     bot?.stop('shutdown');
     bot = null;

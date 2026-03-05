@@ -15,7 +15,7 @@ import type { PostedEntry } from './types.js';
 import { ENTRY_SCORE_PROMPT, ENTRY_HOOK_PROMPT } from './prompts.js';
 
 /** Extract a JSON object from a model response, handling fences and trailing text. */
-function extractJson(text: string): string {
+export function extractJson(text: string): string {
   let s = text.trim();
   if (s.startsWith('```')) {
     s = s.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();

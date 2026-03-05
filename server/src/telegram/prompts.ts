@@ -121,6 +121,17 @@ Rules:
 PREVIOUSLY SURFACED ENTRIES (do NOT repeat these connections):
 {surfaced_entries}`;
 
+/** System prompt for picking the best entry from a batch (session debounce). */
+export const BATCH_PICK_PROMPT = `You curate a Telegram group that surfaces notebook entries. Multiple entries just arrived from the same author in a single session. Pick the ONE most interesting entry to post, or write a brief summary if the entries tell a better story together.
+
+Rules:
+- If one entry clearly stands out, output: {"mode": "pick", "index": N} (0-indexed)
+- If the entries are better as a combined summary, output: {"mode": "summary", "text": "1-2 sentence summary"}
+- The summary should read like a single notebook entry — present tense, brief, captures the arc
+- Prefer picking a single standout entry over summarizing. Only summarize if the entries really build on each other.
+
+Respond with ONLY a JSON object.`;
+
 /** System prompt for deciding if a message is directed at the bot (cheap Haiku gate). */
 export const IMPLICIT_GATE_PROMPT = `You are Hermes, a bot in a Telegram group chat. You recently said something, and now a new message appeared. Decide: is this message directed at you, or is it someone talking to other people / changing the subject?
 

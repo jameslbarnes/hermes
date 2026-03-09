@@ -100,43 +100,49 @@ jobs:
         env:
           GIT_SHA_FULL: ${{ github.sha }}
           IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
-          FIREBASE_SERVICE_ACCOUNT_BASE64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
-          BASE_URL: ${{ secrets.BASE_URL }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
-          SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
-          FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-          TELEGRAM_GROUP_CHAT_ID: ${{ secrets.TELEGRAM_GROUP_CHAT_ID }}
-          TELEGRAM_BOT_SECRET_KEY: ${{ secrets.TELEGRAM_BOT_SECRET_KEY }}
-          TELEGRAM_BOT_HANDLE: ${{ secrets.TELEGRAM_BOT_HANDLE }}
-          TELEGRAM_POST_MODE: ${{ secrets.TELEGRAM_POST_MODE }}
-          TELEGRAM_MAX_PER_HOUR: ${{ secrets.TELEGRAM_MAX_PER_HOUR }}
-          TELEGRAM_COOLDOWN_MS: ${{ secrets.TELEGRAM_COOLDOWN_MS }}
         run: |
-          # Substitute all variables into compose template
+          # Only non-secret values go into the compose (visible in TEE metadata)
           export GIT_SHA=$(echo "$GIT_SHA_FULL" | cut -c1-7)
-          # Strip newlines from base64 Firebase creds
-          export FIREBASE_SERVICE_ACCOUNT_BASE64=$(echo "$FIREBASE_SERVICE_ACCOUNT_BASE64" | tr -d '\n\r ')
           envsubst < docker-compose.template.yml > docker-compose.deploy.yml
-
-          # Debug: show compose (secrets will be masked by GitHub)
           cat docker-compose.deploy.yml
+
+      - name: Generate encrypted env file
+        run: |
+          # Secrets go via --env-file (encrypted by Phala CLI, never in metadata)
+          FIREBASE_CREDS=$(echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}" | tr -d '\n\r ')
+          cat > .env.deploy <<'HEADER'
+          # Hermes secrets — encrypted by Phala CLI before transmission
+          HEADER
+          {
+            echo "BASE_URL=${{ secrets.BASE_URL }}"
+            echo "FIREBASE_SERVICE_ACCOUNT_BASE64=${FIREBASE_CREDS}"
+            echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}"
+            echo "FIRECRAWL_API_KEY=${{ secrets.FIRECRAWL_API_KEY }}"
+            echo "SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}"
+            echo "SENDGRID_FROM_EMAIL=${{ secrets.SENDGRID_FROM_EMAIL }}"
+            echo "CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}"
+            echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}"
+            echo "TELEGRAM_CHANNEL_ID=${{ secrets.TELEGRAM_CHANNEL_ID }}"
+            echo "TELEGRAM_GROUP_CHAT_ID=${{ secrets.TELEGRAM_GROUP_CHAT_ID }}"
+            echo "TELEGRAM_BOT_SECRET_KEY=${{ secrets.TELEGRAM_BOT_SECRET_KEY }}"
+            echo "TELEGRAM_BOT_HANDLE=${{ secrets.TELEGRAM_BOT_HANDLE }}"
+            echo "TELEGRAM_POST_MODE=${{ secrets.TELEGRAM_POST_MODE }}"
+            echo "TELEGRAM_MAX_PER_HOUR=${{ secrets.TELEGRAM_MAX_PER_HOUR }}"
+            echo "TELEGRAM_COOLDOWN_MS=${{ secrets.TELEGRAM_COOLDOWN_MS }}"
+          } >> .env.deploy
 
       - name: Deploy to Phala Cloud
         run: |
-          # Compose file has all env vars baked in — no separate env file needed
+          # Secrets encrypted via --env-file, never appear in public TEE metadata
           # NOTE: Switching to Base on-chain KMS requires recreating the CVM via the Phala dashboard.
           # See https://github.com/jameslbarnes/hermes/issues/4
-          phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml
+          phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml --env-file .env.deploy
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_API_KEY }}
 
       - name: Cleanup secrets
         if: always()
-        run: rm -f docker-compose.deploy.yml
+        run: rm -f docker-compose.deploy.yml .env.deploy
 
       - name: Wait for TEE to restart
         run: sleep 30

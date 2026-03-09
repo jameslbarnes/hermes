@@ -6,24 +6,12 @@ services:
     ports:
       - "3000:3000"
     environment:
+      # Non-secret config — visible in TEE metadata (this is intentional)
       - PORT=3000
       - STAGING_DELAY_MS=3600000
-      - BASE_URL=${BASE_URL}
-      - FIREBASE_SERVICE_ACCOUNT_BASE64=${FIREBASE_SERVICE_ACCOUNT_BASE64}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
-      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
-      - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
-      - TELEGRAM_GROUP_CHAT_ID=${TELEGRAM_GROUP_CHAT_ID}
-      - TELEGRAM_BOT_SECRET_KEY=${TELEGRAM_BOT_SECRET_KEY}
-      - TELEGRAM_BOT_HANDLE=${TELEGRAM_BOT_HANDLE}
-      - TELEGRAM_POST_MODE=${TELEGRAM_POST_MODE}
-      - TELEGRAM_MAX_PER_HOUR=${TELEGRAM_MAX_PER_HOUR}
-      - TELEGRAM_COOLDOWN_MS=${TELEGRAM_COOLDOWN_MS}
       - GIT_SHA=${GIT_SHA}
       - IMAGE_DIGEST=${IMAGE_DIGEST}
+      # Secrets are injected via --env-file (encrypted, not visible in metadata)
     volumes:
       - hermes-data:/data
     restart: unless-stopped
@@ -35,11 +23,11 @@ services:
     environment:
       - DOMAIN=hermes.teleport.computer
       - DNS_PROVIDER=cloudflare
-      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
       - GATEWAY_DOMAIN=_.dstack-pha-prod9.phala.network
       - CERTBOT_EMAIL=james@generalsemantics.nyc
       - SET_CAA=true
       - TARGET_ENDPOINT=http://hermes:3000
+      # CLOUDFLARE_API_TOKEN injected via --env-file
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
       - cert-data-cf:/etc/letsencrypt

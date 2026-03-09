@@ -64,6 +64,16 @@
                 <div class="explainer-section">
                     <h2>Trust</h2>
                     <p>Your identity key and unpublished entries live inside a trusted execution environment. The operator can't see them, log them, or trace anything back to you.</p>
+                    <div class="links">
+                        <div class="verify-wrapper">
+                            <button class="verify-btn" onclick="toggleVerifyMenu()">Verify attestation</button>
+                            <div class="verify-menu" id="verify-menu">
+                                <a href="/api/attestation" target="_blank" rel="noopener">On your own</a>
+                                <button onclick="verifyWithClaude()">With Claude</button>
+                            </div>
+                        </div>
+                        <a href="https://github.com/jameslbarnes/hermes" target="_blank" rel="noopener">Source code</a>
+                    </div>
                 </div>
 
             </div>

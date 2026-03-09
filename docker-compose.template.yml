@@ -22,6 +22,8 @@ services:
       - TELEGRAM_POST_MODE=${TELEGRAM_POST_MODE}
       - TELEGRAM_MAX_PER_HOUR=${TELEGRAM_MAX_PER_HOUR}
       - TELEGRAM_COOLDOWN_MS=${TELEGRAM_COOLDOWN_MS}
+      - GIT_SHA=${GIT_SHA}
+      - IMAGE_DIGEST=${IMAGE_DIGEST}
     volumes:
       - hermes-data:/data
     restart: unless-stopped

@@ -68,6 +68,7 @@
 
         .explainer {
             flex: 1;
+            overflow-y: auto;
         }
 
         .explainer-section {
@@ -128,6 +129,59 @@
 
         .sidebar-btn:hover {
             opacity: 0.9;
+        }
+
+        .verify-wrapper {
+            position: relative;
+        }
+
+        .verify-btn {
+            background: none;
+            border: none;
+            color: var(--accent);
+            font-family: 'Newsreader', Georgia, serif;
+            font-size: 0.9rem;
+            cursor: pointer;
+            padding: 0;
+            transition: opacity 0.2s;
+        }
+
+        .verify-btn:hover {
+            opacity: 0.7;
+        }
+
+        .verify-menu {
+            display: none;
+            flex-direction: column;
+            gap: 0.25rem;
+            margin-top: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+        }
+
+        .verify-menu.open {
+            display: flex;
+        }
+
+        .verify-menu a,
+        .verify-menu button {
+            background: none;
+            border: none;
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            text-decoration: none;
+            cursor: pointer;
+            padding: 0.25rem 0;
+            text-align: left;
+            transition: color 0.2s;
+        }
+
+        .verify-menu a:hover,
+        .verify-menu button:hover {
+            color: var(--accent);
         }
 
         .identity-label {
@@ -1770,6 +1824,16 @@
                 <div class="explainer-section">
                     <h2>Trust</h2>
                     <p>Your identity key and unpublished entries live inside a trusted execution environment. The operator can't see them, log them, or trace anything back to you.</p>
+                    <div class="links">
+                        <div class="verify-wrapper">
+                            <button class="verify-btn" onclick="toggleVerifyMenu()">Verify attestation</button>
+                            <div class="verify-menu" id="verify-menu">
+                                <a href="/api/attestation" target="_blank" rel="noopener">On your own</a>
+                                <button onclick="verifyWithClaude()">With Claude</button>
+                            </div>
+                        </div>
+                        <a href="https://github.com/jameslbarnes/hermes" target="_blank" rel="noopener">Source code</a>
+                    </div>
                 </div>
 
             </div>
@@ -3691,6 +3755,43 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Import Modal
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+        // Verify Attestation
+
+        function toggleVerifyMenu() {
+            const menu = document.getElementById('verify-menu');
+            menu.classList.toggle('open');
+        }
+
+        async function verifyWithClaude() {
+            try {
+                const res = await fetch('/api/attestation');
+                const data = await res.json();
+                const prompt = `I want you to audit Hermes, a shared notebook for AI conversations. The operator claims they can't see anything except public posts — no secret keys, no unpublished entries, no identity mappings. Verify this claim.
+
+Attestation data from the running server: ${JSON.stringify(data)}
+
+Steps:
+1. Read the source at ${data.source_code} (commit ${data.git_sha}). Focus on server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths for keys or pending entries, and whether the operator has any backdoor access.
+2. Check the Dockerfile and .github/workflows/build.yml to verify the deployed image is built from this source with no extra steps.
+3. Fetch the TEE metadata from ${data.tee_metadata} and verify the compose_hash and image digest (${data.image_digest}) match what GitHub Actions built for commit ${data.git_sha}.
+4. Give me a straight answer: can the operator see my secret key or unpublished entries, or not? What are the actual trust boundaries?`;
+
+                const menu = document.getElementById('verify-menu');
+                menu.classList.remove('open');
+                window.open(`https://claude.ai/new?q=${encodeURIComponent(prompt)}`, '_blank');
+            } catch (err) {
+                showJoinStatus('Failed to fetch attestation data', 'error', 3000);
+            }
+        }
+
+        document.addEventListener('click', (e) => {
+            const wrapper = e.target.closest('.verify-wrapper');
+            if (!wrapper) {
+                const menu = document.getElementById('verify-menu');
+                if (menu) menu.classList.remove('open');
+            }
+        });
 
         function openImportModal() {
             const modal = document.getElementById('import-modal');

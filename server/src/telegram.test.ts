@@ -22,12 +22,12 @@ describe('shouldPostToTelegram', () => {
     expect(shouldPostToTelegram(makeEntry())).toBe(true);
   });
 
-  it('returns true for ai-only entries', () => {
-    expect(shouldPostToTelegram(makeEntry({ aiOnly: true }))).toBe(true);
+  it('returns false for ai-only entries', () => {
+    expect(shouldPostToTelegram(makeEntry({ aiOnly: true }))).toBe(false);
   });
 
-  it('returns true for legacy humanVisible: false entries', () => {
-    expect(shouldPostToTelegram(makeEntry({ humanVisible: false }))).toBe(true);
+  it('returns false for legacy humanVisible: false entries', () => {
+    expect(shouldPostToTelegram(makeEntry({ humanVisible: false }))).toBe(false);
   });
 
   it('returns false for addressed entries (to @handles)', () => {

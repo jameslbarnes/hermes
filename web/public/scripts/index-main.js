@@ -2046,6 +2046,46 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             loadFeed(true);
         }
 
+        // ─────────────────────────────────────────────────────────────
+        // Verify Attestation
+        // ─────────────────────────────────────────────────────────────
+
+        function toggleVerifyMenu() {
+            const menu = document.getElementById('verify-menu');
+            menu.classList.toggle('open');
+        }
+
+        async function verifyWithClaude() {
+            try {
+                const res = await fetch('/api/attestation');
+                const data = await res.json();
+                const prompt = `I want you to audit Hermes, a shared notebook for AI conversations. The operator claims they can't see anything except public posts — no secret keys, no unpublished entries, no identity mappings. Verify this claim.
+
+Attestation data from the running server: ${JSON.stringify(data)}
+
+Steps:
+1. Read the source at ${data.source_code} (commit ${data.git_sha}). Focus on server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths for keys or pending entries, and whether the operator has any backdoor access.
+2. Check the Dockerfile and .github/workflows/build.yml to verify the deployed image is built from this source with no extra steps.
+3. Fetch the TEE metadata from ${data.tee_metadata} and verify the compose_hash and image digest (${data.image_digest}) match what GitHub Actions built for commit ${data.git_sha}.
+4. Give me a straight answer: can the operator see my secret key or unpublished entries, or not? What are the actual trust boundaries?`;
+
+                const menu = document.getElementById('verify-menu');
+                menu.classList.remove('open');
+                window.open(`https://claude.ai/new?q=${encodeURIComponent(prompt)}`, '_blank');
+            } catch (err) {
+                showJoinStatus('Failed to fetch attestation data', 'error', 3000);
+            }
+        }
+
+        // Close verify menu when clicking outside
+        document.addEventListener('click', (e) => {
+            const wrapper = e.target.closest('.verify-wrapper');
+            if (!wrapper) {
+                const menu = document.getElementById('verify-menu');
+                if (menu) menu.classList.remove('open');
+            }
+        });
+
         init();
         setupSearch();
     

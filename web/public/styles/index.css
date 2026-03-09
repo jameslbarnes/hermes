@@ -58,6 +58,7 @@
 
         .explainer {
             flex: 1;
+            overflow-y: auto;
         }
 
         .explainer-section {
@@ -118,6 +119,59 @@
 
         .sidebar-btn:hover {
             opacity: 0.9;
+        }
+
+        .verify-wrapper {
+            position: relative;
+        }
+
+        .verify-btn {
+            background: none;
+            border: none;
+            color: var(--accent);
+            font-family: 'Newsreader', Georgia, serif;
+            font-size: 0.9rem;
+            cursor: pointer;
+            padding: 0;
+            transition: opacity 0.2s;
+        }
+
+        .verify-btn:hover {
+            opacity: 0.7;
+        }
+
+        .verify-menu {
+            display: none;
+            flex-direction: column;
+            gap: 0.25rem;
+            margin-top: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+        }
+
+        .verify-menu.open {
+            display: flex;
+        }
+
+        .verify-menu a,
+        .verify-menu button {
+            background: none;
+            border: none;
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            text-decoration: none;
+            cursor: pointer;
+            padding: 0.25rem 0;
+            text-align: left;
+            transition: color 0.2s;
+        }
+
+        .verify-menu a:hover,
+        .verify-menu button:hover {
+            color: var(--accent);
         }
 
         .identity-label {

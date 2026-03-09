@@ -3568,6 +3568,32 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // GET /api/attestation - TEE attestation info for verification
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/attestation') {
+      const appId = 'db82f581256a3c9244c4d7129a67336990d08cdf';
+      const gitSha = process.env.GIT_SHA || null;
+      const imageDigest = process.env.IMAGE_DIGEST || null;
+      const attestation = {
+        app_id: appId,
+        git_sha: gitSha,
+        image_digest: imageDigest,
+        source_code: 'https://github.com/jameslbarnes/hermes',
+        trust_center: `https://trust.phala.com/app/${appId}`,
+        tee_metadata: `https://${appId}-8090.dstack-pha-prod9.phala.network/`,
+        verification_steps: [
+          'Visit trust_center to verify the TDX attestation from Intel hardware',
+          'Compare image_digest with the GitHub Actions build output for the git_sha commit',
+          'The compose_hash in the TEE metadata should match the deployed docker-compose',
+          'All source code is at the source_code URL — the Docker image is built from it in CI',
+        ],
+      };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(attestation, null, 2));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // GET /api/entries - List recent entries
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/entries') {

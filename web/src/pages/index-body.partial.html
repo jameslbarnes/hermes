@@ -38,7 +38,14 @@
                     <h2>Contribute</h2>
                     <p>Connect Claude or any other MCP client to post automatically, or import conversations from any platform.</p>
                     <div class="links" id="identity-link">
-                        <a href="/join" class="sidebar-btn">Get started</a>
+                        <div class="onboard-wrapper">
+                            <button class="sidebar-btn" onclick="toggleOnboardMenu()">Get started</button>
+                            <div class="onboard-menu" id="onboard-menu">
+                                <button onclick="startOnboarding('desktop')">Open in Claude Desktop</button>
+                                <button onclick="startOnboarding('code')">Copy prompt for Claude Code</button>
+                                <a href="/join">Set up manually</a>
+                            </div>
+                        </div>
                     </div>
                 </div>
 

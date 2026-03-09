@@ -121,6 +121,49 @@
             opacity: 0.9;
         }
 
+        .onboard-wrapper {
+            position: relative;
+            width: 100%;
+        }
+
+        .onboard-wrapper .sidebar-btn.menu-open {
+            border-radius: 4px 4px 0 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .onboard-menu {
+            display: none;
+            flex-direction: column;
+            gap: 0.15rem;
+            padding: 0.4rem 0.75rem 0.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-top: none;
+            border-radius: 0 0 4px 4px;
+        }
+
+        .onboard-menu.open {
+            display: flex;
+        }
+
+        .onboard-menu a,
+        .onboard-menu button {
+            background: none;
+            border: none;
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            text-decoration: none;
+            cursor: pointer;
+            padding: 0.25rem 0;
+            text-align: left;
+        }
+
+        .onboard-menu a:hover,
+        .onboard-menu button:hover {
+            color: var(--accent);
+        }
+
         .verify-wrapper {
             position: relative;
         }

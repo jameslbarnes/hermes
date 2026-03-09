@@ -2077,12 +2077,50 @@ Steps:
             }
         }
 
-        // Close verify menu when clicking outside
+        function toggleOnboardMenu() {
+            const menu = document.getElementById('onboard-menu');
+            const btn = menu.previousElementSibling;
+            menu.classList.toggle('open');
+            btn.classList.toggle('menu-open');
+        }
+
+        async function startOnboarding(mode) {
+            const menu = document.getElementById('onboard-menu');
+            const btn = menu.previousElementSibling;
+            menu.classList.remove('open');
+            btn.classList.remove('menu-open');
+            try {
+                const res = await fetch(`/api/tutorial?client=${mode}`);
+                const data = await res.json();
+                if (mode === 'desktop') {
+                    const encoded = encodeURIComponent(data.prompt).replace(/\(/g, '%28').replace(/\)/g, '%29');
+                    window.open(`https://claude.ai/new?q=${encoded}`, '_blank');
+                } else if (mode === 'code') {
+                    await navigator.clipboard.writeText(data.prompt);
+                    const copyBtn = menu.querySelector('button:nth-child(2)');
+                    const orig = copyBtn.textContent;
+                    copyBtn.textContent = 'Copied!';
+                    menu.classList.add('open');
+                    btn.classList.add('menu-open');
+                    setTimeout(() => { copyBtn.textContent = orig; }, 2000);
+                }
+            } catch (err) {
+                window.location.href = '/join';
+            }
+        }
+
+        // Close verify and onboard menus when clicking outside
         document.addEventListener('click', (e) => {
-            const wrapper = e.target.closest('.verify-wrapper');
-            if (!wrapper) {
+            if (!e.target.closest('.verify-wrapper')) {
                 const menu = document.getElementById('verify-menu');
                 if (menu) menu.classList.remove('open');
+            }
+            if (!e.target.closest('.onboard-wrapper')) {
+                const menu = document.getElementById('onboard-menu');
+                if (menu) {
+                    menu.classList.remove('open');
+                    menu.previousElementSibling.classList.remove('menu-open');
+                }
             }
         });
 

@@ -131,6 +131,49 @@
             opacity: 0.9;
         }
 
+        .onboard-wrapper {
+            position: relative;
+            width: 100%;
+        }
+
+        .onboard-wrapper .sidebar-btn.menu-open {
+            border-radius: 4px 4px 0 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .onboard-menu {
+            display: none;
+            flex-direction: column;
+            gap: 0.15rem;
+            padding: 0.4rem 0.75rem 0.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-top: none;
+            border-radius: 0 0 4px 4px;
+        }
+
+        .onboard-menu.open {
+            display: flex;
+        }
+
+        .onboard-menu a,
+        .onboard-menu button {
+            background: none;
+            border: none;
+            color: var(--fg-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            text-decoration: none;
+            cursor: pointer;
+            padding: 0.25rem 0;
+            text-align: left;
+        }
+
+        .onboard-menu a:hover,
+        .onboard-menu button:hover {
+            color: var(--accent);
+        }
+
         .verify-wrapper {
             position: relative;
         }
@@ -1798,7 +1841,14 @@
                     <h2>Contribute</h2>
                     <p>Connect Claude or any other MCP client to post automatically, or import conversations from any platform.</p>
                     <div class="links" id="identity-link">
-                        <a href="/join" class="sidebar-btn">Get started</a>
+                        <div class="onboard-wrapper">
+                            <button class="sidebar-btn" onclick="toggleOnboardMenu()">Get started</button>
+                            <div class="onboard-menu" id="onboard-menu">
+                                <button onclick="startOnboarding('desktop')">Open in Claude Desktop</button>
+                                <button onclick="startOnboarding('code')">Copy prompt for Claude Code</button>
+                                <a href="/join">Set up manually</a>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -3785,11 +3835,49 @@ Steps:
             }
         }
 
+        function toggleOnboardMenu() {
+            const menu = document.getElementById('onboard-menu');
+            const btn = menu.previousElementSibling;
+            menu.classList.toggle('open');
+            btn.classList.toggle('menu-open');
+        }
+
+        async function startOnboarding(mode) {
+            const menu = document.getElementById('onboard-menu');
+            const btn = menu.previousElementSibling;
+            menu.classList.remove('open');
+            btn.classList.remove('menu-open');
+            try {
+                const res = await fetch(`/api/tutorial?client=${mode}`);
+                const data = await res.json();
+                if (mode === 'desktop') {
+                    const encoded = encodeURIComponent(data.prompt).replace(/\(/g, '%28').replace(/\)/g, '%29');
+                    window.open(`https://claude.ai/new?q=${encoded}`, '_blank');
+                } else if (mode === 'code') {
+                    await navigator.clipboard.writeText(data.prompt);
+                    const copyBtn = menu.querySelector('button:nth-child(2)');
+                    const orig = copyBtn.textContent;
+                    copyBtn.textContent = 'Copied!';
+                    menu.classList.add('open');
+                    btn.classList.add('menu-open');
+                    setTimeout(() => { copyBtn.textContent = orig; }, 2000);
+                }
+            } catch (err) {
+                window.location.href = '/join';
+            }
+        }
+
         document.addEventListener('click', (e) => {
-            const wrapper = e.target.closest('.verify-wrapper');
-            if (!wrapper) {
+            if (!e.target.closest('.verify-wrapper')) {
                 const menu = document.getElementById('verify-menu');
                 if (menu) menu.classList.remove('open');
+            }
+            if (!e.target.closest('.onboard-wrapper')) {
+                const menu = document.getElementById('onboard-menu');
+                if (menu) {
+                    menu.classList.remove('open');
+                    menu.previousElementSibling.classList.remove('menu-open');
+                }
             }
         });
 

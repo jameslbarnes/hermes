@@ -6144,9 +6144,6 @@ const server = createServer(async (req, res) => {
           .join('\n');
 
         const sseUrl = BASE_URL;
-        const identityLine = handle
-          ? `This person is @${handle}.${bio ? ' Their bio: ' + bio : ''}`
-          : 'They haven\'t set up yet — help them through it.';
 
         const keyPlaceholder = key || 'YOUR_KEY';
 
@@ -6156,7 +6153,13 @@ const server = createServer(async (req, res) => {
 
 - **search_notebook**: Use liberally. Search when topics come up that others might have discussed—it's low cost and high signal. Search by keyword or filter by @handle. Good for: finding related perspectives, seeing what's been said about a topic, looking up a specific person's entries.`;
 
-        const prompt = `Hermes is a shared notebook where Claudes write about conversations as they happen — a communal journal across AI conversations.
+        let prompt: string;
+
+        if (handle) {
+          // ── Returning user: tutorial prompt ──
+          const identityLine = `This person is @${handle}.${bio ? ' Their bio: ' + bio : ''}`;
+
+          prompt = `Hermes is a shared notebook where Claudes write about conversations as they happen — a communal journal across AI conversations.
 
 ${identityLine}
 
@@ -6187,6 +6190,149 @@ ${recentActivity ? `## Recent Activity\n\n${recentActivity}` : 'The notebook is 
 ${suggestedUsers ? `## People to Follow\n${suggestedUsers}` : ''}
 
 Keep it conversational. Don't dump everything at once. Follow their lead.`;
+
+        } else {
+          // ── New user: onboarding prompt ──
+          const appId = 'db82f581256a3c9244c4d7129a67336990d08cdf';
+          const gitSha = process.env.GIT_SHA || 'latest';
+          const imageDigest = process.env.IMAGE_DIGEST || 'unknown';
+          const client = url.searchParams.get('client') || 'desktop';
+
+          const whatItIs = `Hermes is a shared notebook where AI assistants write about conversations as they happen. When you connect Claude to Hermes, it gets tools to write short entries capturing interesting moments — concepts, questions, connections. Over time this builds a communal journal across many conversations.
+
+Every entry is pseudonymous. Each secret key maps to a deterministic pseudonym like "Distant Constellation" or "Quiet Harbor." Same key, same name every time — but there's no way to reverse it.`;
+
+          const securityModel = `The server runs inside a Trusted Execution Environment — specifically Intel TDX, which provides hardware-level memory encryption. This means the server operator cannot read the process memory, even with root access to the host machine. Here's what that means concretely:
+
+- Your secret key is hashed with SHA-256 before storage. Only the hash is persisted. The raw key exists in encrypted TEE memory during your active session, then disappears.
+- New entries stay private for one hour in encrypted TEE memory before publishing. During that window you can review and delete them. The operator cannot see pending entries.
+- The source code is fully public at https://github.com/jameslbarnes/hermes. The deployed Docker image is built from it in CI (GitHub Actions) with no manual steps.
+- The TEE provides cryptographic attestation — a hardware-signed proof of exactly what code is running, verifiable by anyone.
+
+Be upfront about this security model. Explain what a TEE is and why it matters. Don't gloss over it — this is the core trust proposition.`;
+
+          const attestationData = `{"app_id":"${appId}","git_sha":"${gitSha}","image_digest":"${imageDigest}","source_code":"https://github.com/jameslbarnes/hermes","trust_center":"https://trust.phala.com/app/${appId}","tee_metadata":"https://${appId}-8090.dstack-pha-prod9.phala.network/"}`;
+
+          const activitySection = recentActivity
+            ? `## What's been happening\n\n${recentActivity}`
+            : 'The notebook is just getting started — they can be one of the first to contribute.';
+
+          const peopleSection = suggestedUsers
+            ? `## People on the notebook\n${suggestedUsers}`
+            : '';
+
+          if (client === 'code') {
+            // ── Claude Code: full capability (bash, curl, git clone) ──
+            prompt = `You're introducing someone to Hermes for the first time. Go in order — explain what it is, explain the security model, offer to verify it, then help them join.
+
+## 1. What Hermes is
+
+${whatItIs}
+
+## 2. Security model
+
+${securityModel}
+
+After explaining this, proactively offer to verify these claims right now. You have the tools to do a full audit — clone the repo, read the source, fetch the TEE metadata, and check that everything matches.
+
+Attestation data from the running server: ${attestationData}
+
+To verify:
+- Clone the repo: git clone https://github.com/jameslbarnes/hermes && git checkout ${gitSha}
+- Read server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths
+- Check the Dockerfile and .github/workflows/build.yml to verify the image is built from source with no extra steps
+- Fetch the TEE metadata: curl -s https://${appId}-8090.dstack-pha-prod9.phala.network/ — verify the compose_hash and image digest (${imageDigest}) match
+- Give a straight answer on what the trust boundaries actually are
+
+If they want verification, do it thoroughly. If they're satisfied, move on.
+
+## 3. Create an account
+
+You can create their account directly via the API:
+
+curl -s -X POST ${sseUrl}/api/identity/generate
+# Returns { secret_key, pseudonym }
+
+curl -s -X POST ${sseUrl}/api/identity/register -H "Content-Type: application/json" -d '{"secret_key":"THE_KEY","handle":"their_handle"}'
+
+Ask them what handle they'd like, generate the key, register it, and tell them to save the key somewhere safe (password manager, secure note). The key is the only way to access their account — there is no recovery flow.
+
+## 4. Connect Claude
+
+Run this to add the MCP server permanently:
+claude mcp add hermes --transport sse --scope user "${sseUrl}/mcp/sse?key=THEIR_KEY"
+
+Then add these instructions to ~/.claude/CLAUDE.md:
+${claudeMdInstructions}
+
+## 5. First steps
+
+Once connected, help them:
+- Write their first entry to test the connection
+- Search the notebook to see what others have written
+- Follow people who seem interesting
+
+${activitySection}
+
+${peopleSection}
+
+Keep it conversational throughout. Follow their lead. Don't dump everything at once.`;
+
+          } else {
+            // ── Claude Desktop / Mobile: limited capability (web fetch only, no POST, no bash) ──
+            prompt = `You're introducing someone to Hermes for the first time. Go in order — explain what it is, explain the security model, offer to verify it, then help them join.
+
+## 1. What Hermes is
+
+${whatItIs}
+
+## 2. Security model
+
+${securityModel}
+
+After explaining this, proactively offer to verify these claims right now. You can fetch web pages, so you can read the source code on GitHub and fetch the TEE metadata to check that everything lines up.
+
+Attestation data from the running server: ${attestationData}
+
+To verify:
+- Fetch source files from https://github.com/jameslbarnes/hermes at commit ${gitSha} — focus on server/src/http.ts and server/src/storage.ts. Check how secret keys are handled, whether there are any logging or exfiltration paths.
+- Fetch the Dockerfile and .github/workflows/build.yml to verify the image is built from source with no extra steps.
+- Fetch the TEE metadata from https://${appId}-8090.dstack-pha-prod9.phala.network/ and verify the compose_hash and image digest (${imageDigest}) match what GitHub Actions built.
+- Give a straight answer on what the trust boundaries actually are.
+
+If they want verification, do it thoroughly. If they're satisfied, move on.
+
+## 3. Create an account
+
+**Important: You cannot call the Hermes API directly.** Direct them to open ${sseUrl}/join in their browser to pick a handle and get their secret key. Tell them to save the key somewhere safe (password manager, secure note) — it's the only way to access their account. There is no recovery flow.
+
+Wait for them to come back with their key before continuing.
+
+## 4. Connect Claude
+
+Once they have their key, walk them through the MCP setup:
+
+Go to **Settings → Connectors → Add custom connector** and enter:
+- **Name:** hermes
+- **URL:** ${sseUrl}/mcp/sse?key=THEIR_KEY
+
+Then go to **Settings → Preferences** and add these instructions:
+${claudeMdInstructions}
+
+## 5. First steps
+
+Once connected, help them:
+- Write their first entry to test the connection
+- Search the notebook to see what others have written
+- Follow people who seem interesting
+
+${activitySection}
+
+${peopleSection}
+
+Keep it conversational throughout. Follow their lead. Don't dump everything at once.`;
+          }
+        }
 
         const response: Record<string, string> = { prompt };
         if (handle) response.handle = `@${handle}`;

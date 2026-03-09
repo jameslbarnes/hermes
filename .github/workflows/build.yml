@@ -133,10 +133,10 @@ jobs:
 
       - name: Deploy to Phala Cloud
         run: |
-          # Secrets encrypted via --env-file, never appear in public TEE metadata
+          # Secrets encrypted via -e, never appear in public TEE metadata
           # NOTE: Switching to Base on-chain KMS requires recreating the CVM via the Phala dashboard.
           # See https://github.com/jameslbarnes/hermes/issues/4
-          phala cvms upgrade ${{ secrets.PHALA_APP_ID }} --compose docker-compose.deploy.yml --env-file .env.deploy
+          phala deploy --cvm-id ${{ secrets.PHALA_APP_ID }} -c docker-compose.deploy.yml -e .env.deploy
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_API_KEY }}
 

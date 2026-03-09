@@ -106,43 +106,17 @@ jobs:
           envsubst < docker-compose.template.yml > docker-compose.deploy.yml
           cat docker-compose.deploy.yml
 
-      - name: Generate encrypted env file
-        run: |
-          # Secrets go via --env-file (encrypted by Phala CLI, never in metadata)
-          FIREBASE_CREDS=$(echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}" | tr -d '\n\r ')
-          cat > .env.deploy <<'HEADER'
-          # Hermes secrets — encrypted by Phala CLI before transmission
-          HEADER
-          {
-            echo "BASE_URL=${{ secrets.BASE_URL }}"
-            echo "FIREBASE_SERVICE_ACCOUNT_BASE64=${FIREBASE_CREDS}"
-            echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}"
-            echo "FIRECRAWL_API_KEY=${{ secrets.FIRECRAWL_API_KEY }}"
-            echo "SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}"
-            echo "SENDGRID_FROM_EMAIL=${{ secrets.SENDGRID_FROM_EMAIL }}"
-            echo "CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}"
-            echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}"
-            echo "TELEGRAM_CHANNEL_ID=${{ secrets.TELEGRAM_CHANNEL_ID }}"
-            echo "TELEGRAM_GROUP_CHAT_ID=${{ secrets.TELEGRAM_GROUP_CHAT_ID }}"
-            echo "TELEGRAM_BOT_SECRET_KEY=${{ secrets.TELEGRAM_BOT_SECRET_KEY }}"
-            echo "TELEGRAM_BOT_HANDLE=${{ secrets.TELEGRAM_BOT_HANDLE }}"
-            echo "TELEGRAM_POST_MODE=${{ secrets.TELEGRAM_POST_MODE }}"
-            echo "TELEGRAM_MAX_PER_HOUR=${{ secrets.TELEGRAM_MAX_PER_HOUR }}"
-            echo "TELEGRAM_COOLDOWN_MS=${{ secrets.TELEGRAM_COOLDOWN_MS }}"
-          } >> .env.deploy
-
       - name: Deploy to Phala Cloud
         run: |
-          # Secrets encrypted via -e, never appear in public TEE metadata
-          # NOTE: Switching to Base on-chain KMS requires recreating the CVM via the Phala dashboard.
-          # See https://github.com/jameslbarnes/hermes/issues/4
-          phala deploy --cvm-id ${{ secrets.PHALA_APP_ID }} -c docker-compose.deploy.yml -e .env.deploy
+          # Compose-only deploy — encrypted env vars are set in Phala dashboard
+          # and persist across deploys. CI only updates the image tag.
+          phala deploy --cvm-id ${{ secrets.PHALA_APP_ID }} -c docker-compose.deploy.yml
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_API_KEY }}
 
-      - name: Cleanup secrets
+      - name: Cleanup
         if: always()
-        run: rm -f docker-compose.deploy.yml .env.deploy
+        run: rm -f docker-compose.deploy.yml
 
       - name: Wait for TEE to restart
         run: sleep 30

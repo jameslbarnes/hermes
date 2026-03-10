@@ -30,6 +30,8 @@ export interface TelegramConfig {
   maxPerHour?: number;
   /** Cooldown between proactive posts in ms. */
   cooldownMs?: number;
+  /** Map Hermes channel IDs to Telegram chat IDs for cross-posting. */
+  channelChatMapping?: Record<string, string>;
 }
 
 /** Runtime context passed to sub-modules. */

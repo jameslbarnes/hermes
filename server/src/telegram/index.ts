@@ -139,13 +139,16 @@ export function startTelegramBot(
         link_preview_options: { is_disabled: true },
       });
       console.log(`[Telegram] Posted successfully, message_id=${result.message_id}`);
-      buffer.push({
-        senderName: 'Hermes',
-        text: `${author}: ${entry.content.slice(0, 500)}`,
-        timestamp: Date.now(),
-        messageId: result.message_id,
-      });
-      botMessageIds.add(result.message_id);
+      const mainGroup = groups.get(target);
+      if (mainGroup) {
+        mainGroup.buffer.push({
+          senderName: 'Hermes',
+          text: `${author}: ${entry.content.slice(0, 500)}`,
+          timestamp: Date.now(),
+          messageId: result.message_id,
+        });
+        mainGroup.botMessageIds.add(result.message_id);
+      }
       const updated = trackPostedEntry(recentlyPosted, entry);
       recentlyPosted.length = 0;
       recentlyPosted.push(...updated);
@@ -155,13 +158,16 @@ export function startTelegramBot(
       try {
         const plainMessage = `${author}\n\n${entry.content.slice(0, 3500)}\n\n${config.baseUrl}/#entry-${entry.id}`;
         const fallbackResult = await bot.telegram.sendMessage(target, plainMessage);
-        buffer.push({
-          senderName: 'Hermes',
-          text: `${author}: ${entry.content.slice(0, 500)}`,
-          timestamp: Date.now(),
-          messageId: fallbackResult.message_id,
-        });
-        botMessageIds.add(fallbackResult.message_id);
+        const fallbackGroup = groups.get(target);
+        if (fallbackGroup) {
+          fallbackGroup.buffer.push({
+            senderName: 'Hermes',
+            text: `${author}: ${entry.content.slice(0, 500)}`,
+            timestamp: Date.now(),
+            messageId: fallbackResult.message_id,
+          });
+          fallbackGroup.botMessageIds.add(fallbackResult.message_id);
+        }
         channelPostTimestamps.push(Date.now());
       } catch (retryErr) {
         console.error('[Telegram] Plain text fallback also failed:', retryErr);
@@ -180,13 +186,16 @@ export function startTelegramBot(
         parse_mode: 'MarkdownV2',
         link_preview_options: { is_disabled: true },
       });
-      buffer.push({
-        senderName: 'Hermes',
-        text: `${author}: ${summaryText.slice(0, 500)}`,
-        timestamp: Date.now(),
-        messageId: result.message_id,
-      });
-      botMessageIds.add(result.message_id);
+      const summaryGroup = groups.get(target);
+      if (summaryGroup) {
+        summaryGroup.buffer.push({
+          senderName: 'Hermes',
+          text: `${author}: ${summaryText.slice(0, 500)}`,
+          timestamp: Date.now(),
+          messageId: result.message_id,
+        });
+        summaryGroup.botMessageIds.add(result.message_id);
+      }
       channelPostTimestamps.push(Date.now());
     } catch (err) {
       console.error('[Telegram] Failed to post summary:', err);
@@ -296,96 +305,198 @@ export function startTelegramBot(
     }
   };
 
+  // --- Scheduled summaries for channel chats ---
+  const channelChatMapping = config.channelChatMapping || {};
+  const scheduledTimers: ReturnType<typeof setTimeout>[] = [];
+
+  async function postScheduledSummary(channelId: string, chatId: string, type: 'morning' | 'evening') {
+    if (!bot || !anthropic) return;
+    try {
+      // Get entries from the last 24h for this channel
+      const since = Date.now() - 24 * 60 * 60 * 1000;
+      const allEntries = await storage.getChannelEntries(channelId, 50);
+      const recentEntries = allEntries.filter(e => e.timestamp > since);
+
+      if (recentEntries.length === 0) {
+        console.log(`[Telegram/Schedule] No recent entries for #${channelId}, skipping ${type} summary`);
+        return;
+      }
+
+      const entriesText = recentEntries
+        .map(e => {
+          const author = e.handle ? `@${e.handle}` : e.pseudonym;
+          return `${author}: ${e.content.slice(0, 500)}`;
+        })
+        .join('\n\n---\n\n');
+
+      const systemPrompt = type === 'morning'
+        ? `You are a hackathon coordinator bot. Write a concise morning progress digest for the team's Telegram group. Summarize what happened overnight — who's building what, key progress, any blockers mentioned. Keep it energizing and under 200 words. Use plain text, no markdown. Start with a brief greeting like "Good morning, hackers!" or similar.`
+        : `You are a hackathon coordinator bot. Write a brief evening shoutout for the team's Telegram group. Highlight one team or person who made exceptional progress today — be specific about what they did. Keep it celebratory and under 150 words. Use plain text, no markdown. Start with something like "Evening shoutout!" or similar.`;
+
+      const response = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 400,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: `Here are today's updates from #${channelId}:\n\n${entriesText}` }],
+      });
+
+      const textBlock = response.content.find(b => b.type === 'text');
+      if (!textBlock) return;
+
+      const summary = (textBlock as Anthropic.TextBlock).text;
+      console.log(`[Telegram/Schedule] Posting ${type} summary to ${chatId} for #${channelId}`);
+      await bot.telegram.sendMessage(chatId, summary);
+    } catch (err) {
+      console.error(`[Telegram/Schedule] Failed to post ${type} summary:`, err);
+    }
+  }
+
+  function scheduleDaily(hour: number, minute: number, callback: () => void) {
+    function scheduleNext() {
+      const now = new Date();
+      const target = new Date(now);
+      target.setUTCHours(hour, minute, 0, 0);
+      if (target <= now) target.setDate(target.getDate() + 1);
+      const delay = target.getTime() - now.getTime();
+      console.log(`[Telegram/Schedule] Next run in ${Math.round(delay / 1000 / 60)} minutes (${target.toISOString()})`);
+      const timer = setTimeout(() => {
+        callback();
+        scheduleNext();
+      }, delay);
+      scheduledTimers.push(timer);
+    }
+    scheduleNext();
+  }
+
+  // Schedule morning digest at 13:00 UTC (9am ET) and evening shoutout at 00:00 UTC (8pm ET)
+  for (const [channelId, chatId] of Object.entries(channelChatMapping)) {
+    scheduleDaily(13, 0, () => postScheduledSummary(channelId, chatId, 'morning'));
+    scheduleDaily(0, 0, () => postScheduledSummary(channelId, chatId, 'evening'));
+    console.log(`[Telegram/Schedule] Scheduled morning (13:00 UTC) and evening (00:00 UTC) summaries for #${channelId} → ${chatId}`);
+  }
+
   // --- Bot identity (for proactive features) ---
   const botSecretKey = config.botSecretKey || generateSecretKey();
   const botHandle = config.botHandle || 'hermes_bot';
 
-  // --- Proactive features (group chat) ---
-  let interjector: Interjector | null = null;
-  let writer: Writer | null = null;
-  const buffer = new MessageBuffer();
+  // --- Multi-group proactive features ---
+  // Each watched group gets its own buffer, interjector, writer, and message tracking.
+  interface GroupState {
+    chatId: string;
+    buffer: MessageBuffer;
+    interjector: Interjector | null;
+    writer: Writer | null;
+    botMessageIds: Set<number>;
+  }
+  const groups = new Map<string, GroupState>();
   let interjectionTimer: ReturnType<typeof setInterval> | null = null;
-  /** Message IDs the bot has sent, for follow-up detection. */
-  const botMessageIds = new Set<number>();
 
-  if (config.groupChatId && config.anthropicApiKey) {
+  // Collect all group chat IDs: main group + channel-mapped groups
+  const allGroupChatIds = new Set<string>();
+  if (config.groupChatId) allGroupChatIds.add(String(config.groupChatId));
+  for (const chatId of Object.values(channelChatMapping)) {
+    allGroupChatIds.add(String(chatId));
+  }
+
+  if (allGroupChatIds.size > 0 && config.anthropicApiKey) {
     ensureBotIdentity(storage, botSecretKey, botHandle).then((identity) => {
-      const botCtx: BotContext = {
-        config,
-        storage,
-        sendToChannel: async (text: string) => {
-          if (!bot) return;
-          await bot.telegram.sendMessage(config.channelId, text, {
-            parse_mode: 'MarkdownV2',
-            link_preview_options: { is_disabled: true },
-          });
-        },
-        sendToGroup: async (text: string, replyToMessageId?: number) => {
-          if (!bot || !config.groupChatId) return;
-          const sent = await bot.telegram.sendMessage(config.groupChatId, text, {
-            ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId } } : {}),
-          });
-          botMessageIds.add(sent.message_id);
-        },
-        botPseudonym: identity.pseudonym,
-        botHandle: identity.handle,
-      };
+      // Create per-group state
+      for (const groupChatId of allGroupChatIds) {
+        const groupBuffer = new MessageBuffer();
+        const groupBotMessageIds = new Set<number>();
 
-      const rateLimiter = new RateLimiter({
-        maxPerHour: config.maxPerHour || 6,
-        cooldownMs: config.cooldownMs || 5 * 60 * 1000,
-      });
+        const groupCtx: BotContext = {
+          config,
+          storage,
+          sendToChannel: async (text: string) => {
+            if (!bot) return;
+            await bot.telegram.sendMessage(config.channelId, text, {
+              parse_mode: 'MarkdownV2',
+              link_preview_options: { is_disabled: true },
+            });
+          },
+          sendToGroup: async (text: string, replyToMessageId?: number) => {
+            if (!bot) return;
+            const sent = await bot.telegram.sendMessage(groupChatId, text, {
+              ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId } } : {}),
+            });
+            groupBotMessageIds.add(sent.message_id);
+          },
+          botPseudonym: identity.pseudonym,
+          botHandle: identity.handle,
+        };
 
-      // Restore proactive rate limiter state
-      for (const ts of state.proactivePostTimestamps) {
-        rateLimiter.record(ts);
-      }
+        const rateLimiter = new RateLimiter({
+          maxPerHour: config.maxPerHour || 6,
+          cooldownMs: config.cooldownMs || 5 * 60 * 1000,
+        });
 
-      interjector = new Interjector(
-        botCtx,
-        buffer,
-        rateLimiter,
-        config.anthropicApiKey!,
-        state.surfacedEntryIds,
-        state.surfacedSummaries,
-      );
-      writer = new Writer(botCtx, buffer, config.anthropicApiKey!, state.lastWritebackTime);
-
-      // Timer-based checks (every 15 min)
-      interjectionTimer = setInterval(async () => {
-        if (interjector && buffer.size > 0) {
-          try {
-            await interjector.tryInterject();
-          } catch (err) {
-            console.error('[Telegram/Interjector] Timer check failed:', err);
+        // Only restore state for the original main group
+        if (groupChatId === String(config.groupChatId)) {
+          for (const ts of state.proactivePostTimestamps) {
+            rateLimiter.record(ts);
           }
         }
-        if (writer) {
-          try {
-            await writer.tryWriteBack();
-          } catch (err) {
-            console.error('[Telegram/Writer] Timer check failed:', err);
+
+        const groupInterjector = new Interjector(
+          groupCtx,
+          groupBuffer,
+          rateLimiter,
+          config.anthropicApiKey!,
+          groupChatId === String(config.groupChatId) ? state.surfacedEntryIds : [],
+          groupChatId === String(config.groupChatId) ? state.surfacedSummaries : [],
+        );
+        const groupWriter = new Writer(groupCtx, groupBuffer, config.anthropicApiKey!,
+          groupChatId === String(config.groupChatId) ? state.lastWritebackTime : Date.now(),
+        );
+
+        groups.set(groupChatId, {
+          chatId: groupChatId,
+          buffer: groupBuffer,
+          interjector: groupInterjector,
+          writer: groupWriter,
+          botMessageIds: groupBotMessageIds,
+        });
+
+        console.log(`[Telegram] Proactive features enabled for group ${groupChatId} as @${identity.handle}`);
+      }
+
+      // Timer-based checks (every 15 min) — iterate all groups
+      interjectionTimer = setInterval(async () => {
+        for (const [gid, group] of groups) {
+          if (group.interjector && group.buffer.size > 0) {
+            try {
+              await group.interjector.tryInterject();
+            } catch (err) {
+              console.error(`[Telegram/Interjector] Timer check failed for group ${gid}:`, err);
+            }
+          }
+          if (group.writer) {
+            try {
+              await group.writer.tryWriteBack();
+            } catch (err) {
+              console.error(`[Telegram/Writer] Timer check failed for group ${gid}:`, err);
+            }
           }
         }
       }, 15 * 60 * 1000);
-
-      console.log(
-        `[Telegram] Proactive features enabled for group ${config.groupChatId} as @${identity.handle}`,
-      );
     }).catch((err) => {
       console.error('[Telegram] Failed to set up bot identity:', err);
     });
   }
 
   // --- State persistence ---
+  // Persist state from the main group (backward compatible)
+  const mainGroupId = config.groupChatId ? String(config.groupChatId) : null;
   const stopStateSaver = startStateSaver(() => {
+    const mainGroup = mainGroupId ? groups.get(mainGroupId) : null;
     const currentState: BotState = {
-      surfacedEntryIds: interjector?.getSurfacedEntryIds() || state.surfacedEntryIds,
-      surfacedSummaries: interjector?.getSurfacedSummaries() || state.surfacedSummaries,
+      surfacedEntryIds: mainGroup?.interjector?.getSurfacedEntryIds() || state.surfacedEntryIds,
+      surfacedSummaries: mainGroup?.interjector?.getSurfacedSummaries() || state.surfacedSummaries,
       recentlyPosted,
       channelPostTimestamps,
-      proactivePostTimestamps: [], // Rate limiter handles its own pruning
-      lastWritebackTime: writer?.getLastWritebackTime() || state.lastWritebackTime,
+      proactivePostTimestamps: [],
+      lastWritebackTime: mainGroup?.writer?.getLastWritebackTime() || state.lastWritebackTime,
     };
     return currentState;
   });
@@ -407,14 +518,14 @@ export function startTelegramBot(
         `[Telegram] Message received in ${chatType} (chat_id: ${chatId}): "${text.slice(0, 100)}"`,
       );
 
-      // Buffer group messages for interjection context
-      const isGroupChat = config.groupChatId && String(chatId) === String(config.groupChatId);
-      if (isGroupChat) {
+      // Find the group state for this chat (if it's a watched group)
+      const group = chatId ? groups.get(String(chatId)) : null;
+      if (group) {
         const senderName =
           msg.from?.first_name ||
           msg.from?.username ||
           'Unknown';
-        buffer.push({
+        group.buffer.push({
           senderName,
           text,
           timestamp: Date.now(),
@@ -423,9 +534,9 @@ export function startTelegramBot(
 
         // Check for reply to one of the bot's own messages (follow-up)
         const replyToId = msg.reply_to_message?.message_id;
-        if (replyToId && botMessageIds.has(replyToId)) {
-          console.log(`[Telegram] Follow-up detected on bot message ${replyToId}`);
-          const chatContext = buffer.formatForContext(50);
+        if (replyToId && group.botMessageIds.has(replyToId)) {
+          console.log(`[Telegram] Follow-up detected on bot message ${replyToId} in group ${chatId}`);
+          const chatContext = group.buffer.formatForContext(50);
           handleFollowup(
             {
               text,
@@ -434,8 +545,8 @@ export function startTelegramBot(
                 const sent = await ctx.reply(answer, {
                   reply_parameters: { message_id: msg.message_id },
                 });
-                botMessageIds.add(sent.message_id);
-                buffer.push({
+                group.botMessageIds.add(sent.message_id);
+                group.buffer.push({
                   senderName: 'Hermes',
                   text: answer.slice(0, 500),
                   timestamp: Date.now(),
@@ -451,17 +562,16 @@ export function startTelegramBot(
           return;
         }
 
-        // Implicit conversation: if the bot spoke recently (within last 5 messages),
-        // use a cheap Haiku gate to check if the message is directed at the bot
-        const recentMsgs = buffer.recent(5);
+        // Implicit conversation: if the bot spoke recently (within last 5 messages)
+        const recentMsgs = group.buffer.recent(5);
         const botSpokeRecently = recentMsgs.some(
           (m) => m.senderName === 'Hermes' && m.timestamp > Date.now() - 10 * 60 * 1000,
         );
         if (botSpokeRecently) {
-          const chatContext = buffer.formatForContext(50);
+          const chatContext = group.buffer.formatForContext(50);
           const directed = await isDirectedAtBot(chatContext, mentionAnthropic);
           if (directed) {
-            console.log(`[Telegram] Implicit conversation: message directed at bot`);
+            console.log(`[Telegram] Implicit conversation in group ${chatId}`);
             handleFollowup(
               {
                 text,
@@ -470,8 +580,8 @@ export function startTelegramBot(
                   const sent = await ctx.reply(answer, {
                     reply_parameters: { message_id: msg.message_id },
                   });
-                  botMessageIds.add(sent.message_id);
-                  buffer.push({
+                  group.botMessageIds.add(sent.message_id);
+                  group.buffer.push({
                     senderName: 'Hermes',
                     text: answer.slice(0, 500),
                     timestamp: Date.now(),
@@ -486,18 +596,17 @@ export function startTelegramBot(
             });
             return;
           }
-          console.log(`[Telegram] Bot spoke recently but message not directed at bot`);
         }
 
         // Check if interjector should evaluate
-        if (interjector && interjector.shouldEvaluate()) {
-          interjector.tryInterject().catch((err) => {
-            console.error('[Telegram/Interjector] Eval failed:', err);
+        if (group.interjector && group.interjector.shouldEvaluate()) {
+          group.interjector.tryInterject().catch((err) => {
+            console.error(`[Telegram/Interjector] Eval failed for group ${chatId}:`, err);
           });
         }
       }
 
-      // Check if the bot is @mentioned
+      // Check if the bot is @mentioned (works in any chat, not just watched groups)
       const botInfo = await bot!.telegram.getMe();
       const botUsername = botInfo.username;
       const isMentioned =
@@ -510,7 +619,7 @@ export function startTelegramBot(
       const query = text.replace(`@${botUsername}`, '').trim();
       console.log(`[Telegram] Query extracted: "${query}"`);
 
-      const chatContext = buffer.size > 0 ? buffer.formatForContext(50) : undefined;
+      const chatContext = group && group.buffer.size > 0 ? group.buffer.formatForContext(50) : undefined;
       await handleMention(
         {
           query,
@@ -518,13 +627,15 @@ export function startTelegramBot(
             const sent = await ctx.reply(answer, {
               reply_parameters: { message_id: msg.message_id },
             });
-            botMessageIds.add(sent.message_id);
-            buffer.push({
-              senderName: 'Hermes',
-              text: answer.slice(0, 500),
-              timestamp: Date.now(),
-              messageId: sent.message_id,
-            });
+            if (group) {
+              group.botMessageIds.add(sent.message_id);
+              group.buffer.push({
+                senderName: 'Hermes',
+                text: answer.slice(0, 500),
+                timestamp: Date.now(),
+                messageId: sent.message_id,
+              });
+            }
           },
           chatContext,
           botUsername: botUsername || undefined,
@@ -547,6 +658,7 @@ export function startTelegramBot(
   // Return cleanup function
   return () => {
     if (interjectionTimer) clearInterval(interjectionTimer);
+    scheduledTimers.forEach(t => clearTimeout(t));
     // Flush all pending session queues immediately on shutdown
     for (const [key, queue] of sessionQueues) {
       clearTimeout(queue.timer);

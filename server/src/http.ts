@@ -6772,6 +6772,16 @@ server.listen(PORT, () => {
 
   // Start Telegram bot if configured
   if (process.env.TELEGRAM_BOT_TOKEN) {
+    // Build channel → Telegram chat mapping from env vars
+    // Format: TELEGRAM_CHANNEL_MAP=shape-rotator:-5252482080,other-channel:-100999
+    const channelChatMapping: Record<string, string> = {};
+    if (process.env.TELEGRAM_CHANNEL_MAP) {
+      for (const pair of process.env.TELEGRAM_CHANNEL_MAP.split(',')) {
+        const [ch, chatId] = pair.split(':');
+        if (ch && chatId) channelChatMapping[ch.trim()] = chatId.trim();
+      }
+    }
+
     startTelegramBot(storage, {
       botToken: process.env.TELEGRAM_BOT_TOKEN,
       channelId: process.env.TELEGRAM_CHANNEL_ID || '',
@@ -6783,6 +6793,7 @@ server.listen(PORT, () => {
       postMode: (process.env.TELEGRAM_POST_MODE as 'score' | 'all') || undefined,
       maxPerHour: process.env.TELEGRAM_MAX_PER_HOUR ? parseInt(process.env.TELEGRAM_MAX_PER_HOUR, 10) : undefined,
       cooldownMs: process.env.TELEGRAM_COOLDOWN_MS ? parseInt(process.env.TELEGRAM_COOLDOWN_MS, 10) : undefined,
+      channelChatMapping,
     });
   }
 });

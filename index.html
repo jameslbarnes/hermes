@@ -3821,7 +3821,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
 
 Attestation data from the running server (self-reported): ${JSON.stringify(data)}
 
-The attestation data above is served by the application itself and includes an env_vars field showing which secrets are set. However, self-reported data alone is not sufficient for a security audit — you need to independently verify it.
+The attestation data above is served by the application itself. Self-reported data alone is not sufficient for a security audit — you need to independently verify it.
 
 Steps:
 1. Clone the source code and read it — do NOT try to fetch individual files from GitHub URLs, they will fail:
@@ -3829,10 +3829,10 @@ Steps:
    cd /tmp/hermes-audit && git checkout ${data.git_sha}
    Focus on server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths for keys or pending entries, and whether the operator has any backdoor access.
 2. Check the Dockerfile and .github/workflows/build.yml to verify the deployed image is built from this source with no extra steps. Also check docker-compose.template.yml — confirm secrets are bare variable names with no baked-in values.
-3. Close the attestation loop — the TEE metadata comes from dstack infrastructure, NOT the application, so it's independently verifiable:
-   Fetch: ${data.tee_metadata}
-   This returns the docker-compose file actually running in the TEE and the image digest. Compare the GIT_SHA and IMAGE_DIGEST from this metadata against what the app self-reports.
-   Note: web fetch may return cached results — if the GIT_SHA in the metadata doesn't match, state this honestly as an unresolved verification gap rather than confirming or denying the security claims. Recommend the user verify this step independently (e.g. via curl or a browser).
+3. Close the attestation loop — ask the user to open this URL in their browser and paste the result back to you:
+   ${data.tee_metadata}
+   This is the TEE metadata endpoint served by dstack infrastructure (NOT the application) — it returns the docker-compose file actually running in the TEE and the image digest. The app cannot fake this data. You cannot fetch it yourself because web fetch returns cached results. The user's browser will get fresh data.
+   Once the user pastes it, compare the GIT_SHA and IMAGE_DIGEST against what the app self-reports above.
 4. Check the Phala Trust Center for the hardware attestation: ${data.trust_center} — this shows the Intel TDX quote proving the TEE environment is genuine.
 5. Report exactly what you find. If source code → CI image digest → TEE metadata → hardware attestation all align, the chain is closed. If anything doesn't match, report it as a finding. Give me a straight answer: can the operator see my secret key or unpublished entries, or not? What are the actual trust boundaries?`;
 

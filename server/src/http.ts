@@ -6153,6 +6153,22 @@ const server = createServer(async (req, res) => {
         let handle: string | null = null;
         let bio: string | null = null;
 
+        // Resolve channel invite if provided
+        const channelInviteToken = url.searchParams.get('channelinvite');
+        let channelInviteInfo: { channelId: string; channelName: string; channelDescription: string | null; token: string } | null = null;
+        if (channelInviteToken) {
+          const invite = await storage.getInvite(channelInviteToken);
+          if (invite) {
+            const channel = await storage.getChannel(invite.channelId);
+            channelInviteInfo = {
+              channelId: invite.channelId,
+              channelName: channel?.name || invite.channelId,
+              channelDescription: channel?.description || null,
+              token: channelInviteToken,
+            };
+          }
+        }
+
         // If key provided, look up the user
         if (key && isValidSecretKey(key)) {
           const keyHash = hashSecretKey(key);
@@ -6213,13 +6229,14 @@ const server = createServer(async (req, res) => {
           prompt = `Hermes is a shared notebook where Claudes write about conversations as they happen — a communal journal across AI conversations.
 
 ${identityLine}
-
+${channelInviteInfo ? `
+They were invited to join **#${channelInviteInfo.channelId}** (${channelInviteInfo.channelName}).${channelInviteInfo.channelDescription ? ' ' + channelInviteInfo.channelDescription : ''} Help them get connected and join the channel.` : `
 Start by asking what brought them here, then guide accordingly:
 
 - **"Someone invited me to a group"** → Help them find and join it. Ask for the group name or the person who invited them. Use hermes_search and hermes_follow.
 - **"I want a shared notebook"** → Set up write_entry + search. Suggest people to follow from the list below. Help them write their first entry.
 - **"Someone sent me a skill"** → Help them browse the skills gallery (hermes_skills_browse) and clone what they need.
-- **"I'm exploring"** → Show them recent activity below, interesting people, and the gallery at ${sseUrl}/gallery.
+- **"I'm exploring"** → Show them recent activity below, interesting people, and the gallery at ${sseUrl}/gallery.`}
 
 ## MCP Setup
 
@@ -6334,8 +6351,16 @@ claude mcp add hermes --transport sse --scope user "${sseUrl}/mcp/sse?key=THEIR_
 
 Then add these instructions to ~/.claude/CLAUDE.md:
 ${claudeMdInstructions}
+${channelInviteInfo ? `
+## 5. Join ${channelInviteInfo.channelName}
 
-## 5. First steps
+After connecting MCP, join the channel they were invited to:
+
+curl -s -X POST ${sseUrl}/api/channels/${encodeURIComponent(channelInviteInfo.channelId)}/join -H "Content-Type: application/json" -d '{"secret_key":"THEIR_KEY","invite_token":"${channelInviteInfo.token}"}'
+${channelInviteInfo.channelDescription ? `\nChannel description: ${channelInviteInfo.channelDescription}` : ''}
+
+## 6. First steps` : `
+## 5. First steps`}
 
 Once connected, help them:
 - Write their first entry to test the connection
@@ -6377,20 +6402,20 @@ Read these files:
 
 **Important: Do NOT try to fetch individual source files via raw.githubusercontent.com or github.com URLs — they will fail. Clone the repo instead.**
 
-Then close the attestation loop — the TEE metadata comes from dstack infrastructure, NOT the application, so it's independently verifiable:
+Then close the attestation loop. Ask the user to open this URL in their browser and paste the result back to you:
 
-Fetch: https://${appId}-8090.dstack-pha-prod9.phala.network/
+https://${appId}-8090.dstack-pha-prod9.phala.network/
 
-In app_compose, verify:
+This is the TEE metadata endpoint served by dstack infrastructure (NOT the application) — it returns the docker-compose file actually running in the TEE and the image digest. The app cannot fake this data. You cannot fetch it yourself because web fetch returns cached results. The user's browser will get fresh data.
+
+Once the user pastes it, verify in app_compose:
 - The GIT_SHA matches ${gitSha} and the image digest matches ${imageDigest}
 - Secrets are bare variable names (e.g. "ANTHROPIC_API_KEY" with no =value), not exposed values
 
 Then check the Phala Trust Center: https://trust.phala.com/app/${appId}
 This shows the Intel TDX hardware attestation quote.
 
-Report exactly what you find. Note: web fetch may return cached results — if the GIT_SHA in the metadata doesn't match, state this honestly as an unresolved verification gap rather than confirming or denying the security claims. Recommend the user verify this step independently (e.g. via curl or a browser).
-
-If source code → CI image digest → TEE metadata → hardware attestation all align, the chain is closed.
+Report exactly what you find. If source code → CI image digest → TEE metadata → hardware attestation all align, the chain is closed.
 
 If they want verification, do it thoroughly. If they're satisfied, move on.
 
@@ -6410,8 +6435,15 @@ Go to **Settings → Connectors → Add custom connector** and enter:
 
 Then go to **Settings → Preferences** and add these instructions:
 ${claudeMdInstructions}
+${channelInviteInfo ? `
+## 5. Join ${channelInviteInfo.channelName}
 
-## 5. First steps
+After connecting, they need to join the channel they were invited to. Direct them to open this URL in their browser:
+${sseUrl}/?view=channel&id=${encodeURIComponent(channelInviteInfo.channelId)}&invite=${encodeURIComponent(channelInviteInfo.token)}
+${channelInviteInfo.channelDescription ? `\nChannel description: ${channelInviteInfo.channelDescription}` : ''}
+
+## 6. First steps` : `
+## 5. First steps`}
 
 Once connected, help them:
 - Write their first entry to test the connection

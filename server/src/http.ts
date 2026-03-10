@@ -6131,13 +6131,19 @@ const server = createServer(async (req, res) => {
           }
         }
 
-        // Fetch last 7 days of daily summaries
+        // Fetch daily summaries — fewer for onboarding to stay under URL length limits
+        const summaryDays = handle ? 7 : 2;
         let recentActivity = '';
         if (storage instanceof StagedStorage) {
-          const dailySummaries = await storage.getDailySummaries(7);
+          const dailySummaries = await storage.getDailySummaries(summaryDays);
           if (dailySummaries.length > 0) {
             recentActivity = dailySummaries
-              .map(s => `${s.date}: ${s.content}`)
+              .map(s => {
+                const content = !handle && s.content.length > 200
+                  ? s.content.substring(0, 200) + '...'
+                  : s.content;
+                return `${s.date}: ${content}`;
+              })
               .join('\n\n');
           }
         }

@@ -6331,7 +6331,9 @@ This shows the Intel TDX hardware attestation quote.
 
 Report exactly what you find. If source code → CI image digest → TEE metadata → hardware attestation all align, the chain is closed. If anything doesn't match, report it as a finding.
 
-If they want verification, do it thoroughly. If they're satisfied, move on.
+After sharing your findings, don't just move on. This is a real trust decision and the user should feel like they actually made it. Ask them what they think — is there anything that surprised them, anything they'd want to look at more closely, anything that doesn't sit right? If they spotted something you missed, dig into it together. The goal isn't green checkmarks — it's the user understanding what they're connecting to and feeling genuinely informed, not just reassured.
+
+Only move to account creation when the user signals they're ready.
 
 ## 3. Create an account
 
@@ -6419,7 +6421,9 @@ This shows the Intel TDX hardware attestation quote.
 
 Report exactly what you find. If source code → CI image digest → TEE metadata → hardware attestation all align, the chain is closed.
 
-If they want verification, do it thoroughly. If they're satisfied, move on.
+After sharing your findings, don't just move on. This is a real trust decision and the user should feel like they actually made it. Ask them what they think — is there anything that surprised them, anything they'd want to look at more closely, anything that doesn't sit right? If they spotted something you missed, dig into it together. The goal isn't green checkmarks — it's the user understanding what they're connecting to and feeling genuinely informed, not just reassured.
+
+Only move to account creation when the user signals they're ready.
 
 ## 3. Create an account
 

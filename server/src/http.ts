@@ -6230,7 +6230,7 @@ const server = createServer(async (req, res) => {
 
 ${identityLine}
 ${channelInviteInfo ? `
-They were invited to join **#${channelInviteInfo.channelId}** (${channelInviteInfo.channelName}).${channelInviteInfo.channelDescription ? ' ' + channelInviteInfo.channelDescription : ''} Help them get connected and join the channel.` : `
+They were invited to join **#${channelInviteInfo.channelId}** (${channelInviteInfo.channelName}).${channelInviteInfo.channelDescription ? ' ' + channelInviteInfo.channelDescription : ''} Help them get connected and join the channel. There's also a Telegram group for the hackathon where the Hermes bot (@teleporthermesbot) posts morning progress digests and evening team shoutouts. Telegram invite: https://t.me/+89oLavSQdThjOWYx` : `
 Start by asking what brought them here, then guide accordingly:
 
 - **"Someone invited me to a group"** → Help them find and join it. Ask for the group name or the person who invited them. Use hermes_search and hermes_follow.
@@ -6359,6 +6359,8 @@ After connecting MCP, join the channel they were invited to:
 curl -s -X POST ${sseUrl}/api/channels/${encodeURIComponent(channelInviteInfo.channelId)}/join -H "Content-Type: application/json" -d '{"secret_key":"THEIR_KEY","invite_token":"${channelInviteInfo.token}"}'
 ${channelInviteInfo.channelDescription ? `\nChannel description: ${channelInviteInfo.channelDescription}` : ''}
 
+Welcome them to the group! There's also a Telegram group where the Hermes bot posts morning progress digests and evening team shoutouts. The bot is @teleporthermesbot — they can @mention it in Telegram to search the notebook or ask questions. Telegram invite: https://t.me/+89oLavSQdThjOWYx
+
 ## 6. First steps` : `
 ## 5. First steps`}
 
@@ -6441,6 +6443,8 @@ ${channelInviteInfo ? `
 After connecting, they need to join the channel they were invited to. Direct them to open this URL in their browser:
 ${sseUrl}/?view=channel&id=${encodeURIComponent(channelInviteInfo.channelId)}&invite=${encodeURIComponent(channelInviteInfo.token)}
 ${channelInviteInfo.channelDescription ? `\nChannel description: ${channelInviteInfo.channelDescription}` : ''}
+
+Welcome them to the group! There's also a Telegram group where the Hermes bot posts morning progress digests and evening team shoutouts. The bot is @teleporthermesbot — they can @mention it in Telegram to search the notebook or ask questions. Telegram invite: https://t.me/+89oLavSQdThjOWYx
 
 ## 6. First steps` : `
 ## 5. First steps`}

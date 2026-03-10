@@ -3827,8 +3827,9 @@ Steps:
    cd /tmp/hermes-audit && git checkout ${data.git_sha}
    Focus on server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths for keys or pending entries, and whether the operator has any backdoor access.
 2. Check the Dockerfile and .github/workflows/build.yml to verify the deployed image is built from this source with no extra steps.
-3. Fetch the live TEE metadata (proxied by the server to avoid caching): ${window.location.origin}/api/attestation?include=tee_metadata — verify the compose_hash and image digest (${data.image_digest}) match what GitHub Actions built for commit ${data.git_sha}.
-4. Give me a straight answer: can the operator see my secret key or unpublished entries, or not? What are the actual trust boundaries?`;
+3. Fetch the live TEE metadata directly (add ?t= with current timestamp to avoid cached results): ${data.tee_metadata}?t=${Date.now()} — check that the image digest in app_compose matches ${data.image_digest}, and that no secret values are exposed (only bare env var names).
+4. Check the Phala Trust Center for the hardware attestation: ${data.trust_center} — this shows the Intel TDX quote proving what code is running.
+5. Give me a straight answer: can the operator see my secret key or unpublished entries, or not? What are the actual trust boundaries?`;
 
                 const menu = document.getElementById('verify-menu');
                 menu.classList.remove('open');

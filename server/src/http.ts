@@ -3588,19 +3588,6 @@ const server = createServer(async (req, res) => {
           'All source code is at the source_code URL — the Docker image is built from it in CI',
         ],
       };
-      // If ?include=tee_metadata, also fetch and embed live TEE metadata
-      if (url.searchParams.get('include') === 'tee_metadata') {
-        try {
-          const metaUrl = `https://${appId}-8090.dstack-pha-prod9.phala.network/`;
-          const metaRes = await fetch(metaUrl);
-          const metaData = await metaRes.json();
-          (attestation as any).tee_metadata_live = metaData;
-        } catch (err) {
-          (attestation as any).tee_metadata_live = null;
-          (attestation as any).tee_metadata_error = 'Failed to fetch live TEE metadata';
-        }
-      }
-
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(attestation, null, 2));
       return;
@@ -6271,11 +6258,11 @@ Then read:
 
 Then close the attestation loop:
 
-1. Fetch the live TEE metadata (proxied server-side to avoid caching):
-   curl -s ${sseUrl}/api/attestation?include=tee_metadata
-   This returns attestation data plus a tee_metadata_live field with the actual TEE state. Verify:
-   - image_digest in the attestation matches the image tag in tee_metadata_live.app_compose
-   - tee_metadata_live.app_compose contains only bare env var names for secrets (no actual values)
+1. Fetch the live TEE metadata directly (add a cache-busting parameter to avoid stale results):
+   https://${appId}-8090.dstack-pha-prod9.phala.network/?t=${Date.now()}
+   In the response, check app_compose — verify:
+   - The image digest in app_compose matches image_digest from the attestation data above
+   - app_compose contains only bare environment variable names for secrets (no actual values exposed)
 
 2. Check the Phala Trust Center for the hardware attestation:
    https://trust.phala.com/app/${appId}

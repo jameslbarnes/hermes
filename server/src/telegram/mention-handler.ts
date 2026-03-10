@@ -16,6 +16,15 @@ export interface MentionContext {
   botUsername?: string;
 }
 
+/** Stream a messages.create call and collect it into a Message object. */
+async function streamToMessage(
+  anthropic: Anthropic,
+  params: Anthropic.MessageCreateParams,
+): Promise<Anthropic.Message> {
+  const stream = anthropic.messages.stream(params);
+  return await stream.finalMessage();
+}
+
 /**
  * Handle an @mention query: search Hermes via Claude tool use, reply with synthesis.
  */
@@ -49,7 +58,7 @@ export async function handleMention(
 
     const apiParams = {
       model: 'claude-opus-4-6' as const,
-      max_tokens: 4096,
+      max_tokens: 16000,
       system: MENTION_SYSTEM_PROMPT,
       tools: [
         searchTool,
@@ -65,7 +74,7 @@ export async function handleMention(
       : query;
 
     let messages: Anthropic.MessageParam[] = [{ role: 'user', content: userMessage }];
-    let currentResponse = await anthropic.messages.create({
+    let currentResponse = await streamToMessage(anthropic, {
       ...apiParams,
       messages,
     });
@@ -80,7 +89,7 @@ export async function handleMention(
 
       // For pause_turn, just continue without adding tool results
       if (stopReason() === 'pause_turn') {
-        currentResponse = await anthropic.messages.create({
+        currentResponse = await streamToMessage(anthropic, {
           ...apiParams,
           messages,
         });
@@ -113,7 +122,7 @@ export async function handleMention(
       if (toolResults.length > 0) {
         messages.push({ role: 'user', content: toolResults });
       }
-      currentResponse = await anthropic.messages.create({
+      currentResponse = await streamToMessage(anthropic, {
         ...apiParams,
         messages,
       });
@@ -145,6 +154,6 @@ export async function handleMention(
     }
   } catch (err) {
     console.error('[Telegram/Mention] Failed to handle query:', err);
-    await reply('Sorry, something went wrong while searching the notebook.');
+    await reply('Sorry, I ran into an error searching the notebook. Try again in a bit.');
   }
 }

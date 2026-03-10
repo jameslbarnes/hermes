@@ -503,6 +503,21 @@ export function startTelegramBot(
 
   // --- Message handlers ---
 
+  /** Send a reply, falling back to a plain message if the original message is gone. */
+  async function safeReply(ctx: any, text: string, replyToMessageId?: number) {
+    try {
+      return await ctx.reply(text, {
+        ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId } } : {}),
+      });
+    } catch (err: any) {
+      if (err?.response?.error_code === 400 && err?.response?.description?.includes('message to be replied not found')) {
+        // Original message was deleted (e.g. during deploy restart) — send without reply
+        return await ctx.reply(text);
+      }
+      throw err;
+    }
+  }
+
   if (config.anthropicApiKey) {
     const mentionAnthropic = new Anthropic({ apiKey: config.anthropicApiKey });
 
@@ -542,9 +557,7 @@ export function startTelegramBot(
               text,
               chatContext,
               reply: async (answer: string) => {
-                const sent = await ctx.reply(answer, {
-                  reply_parameters: { message_id: msg.message_id },
-                });
+                const sent = await safeReply(ctx, answer, msg.message_id);
                 group.botMessageIds.add(sent.message_id);
                 group.buffer.push({
                   senderName: 'Hermes',
@@ -577,9 +590,7 @@ export function startTelegramBot(
                 text,
                 chatContext,
                 reply: async (answer: string) => {
-                  const sent = await ctx.reply(answer, {
-                    reply_parameters: { message_id: msg.message_id },
-                  });
+                  const sent = await safeReply(ctx, answer, msg.message_id);
                   group.botMessageIds.add(sent.message_id);
                   group.buffer.push({
                     senderName: 'Hermes',
@@ -624,9 +635,7 @@ export function startTelegramBot(
         {
           query,
           reply: async (answer: string) => {
-            const sent = await ctx.reply(answer, {
-              reply_parameters: { message_id: msg.message_id },
-            });
+            const sent = await safeReply(ctx, answer, msg.message_id);
             if (group) {
               group.botMessageIds.add(sent.message_id);
               group.buffer.push({

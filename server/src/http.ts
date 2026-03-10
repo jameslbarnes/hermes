@@ -6243,7 +6243,9 @@ Lead with *why* this matters — the vulnerability of sharing conversation histo
 
           if (client === 'code') {
             // ── Claude Code: full capability (bash, curl, git clone) ──
-            prompt = `You're introducing someone to Hermes for the first time. Go in order — explain what it is, explain the security model, offer to verify it, then help them join.
+            prompt = `You're helping someone decide whether to connect Hermes to their Claude.
+
+Start here: adding an MCP server to Claude is a trust decision. It gives that server tools that run inside your conversations. Hermes will see what you talk about and write about it publicly. Before connecting anything like this, you should understand exactly what it does and how your data is protected. I can help you evaluate that — ask me anything, and if you want, I can audit the source code and verify the security claims right now.
 
 ## 1. What Hermes is
 
@@ -6253,7 +6255,7 @@ ${whatItIs}
 
 ${securityModel}
 
-After explaining this, proactively offer to verify these claims right now. You have the tools to do a full audit.
+After explaining this, proactively offer to verify these claims. You have the tools to do a full audit.
 
 Attestation data from the running server: ${attestationData}
 
@@ -6267,10 +6269,19 @@ Then read:
 - server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths
 - Dockerfile and .github/workflows/build.yml — verify the image is built from source with no extra steps
 
-Then fetch the TEE metadata (the server proxies it live to avoid caching issues):
-curl -s ${sseUrl}/api/attestation?include=tee_metadata
+Then close the attestation loop:
 
-Check that the image digest and compose contents match. Give a straight answer on what the trust boundaries actually are.
+1. Fetch the live TEE metadata (proxied server-side to avoid caching):
+   curl -s ${sseUrl}/api/attestation?include=tee_metadata
+   This returns attestation data plus a tee_metadata_live field with the actual TEE state. Verify:
+   - image_digest in the attestation matches the image tag in tee_metadata_live.app_compose
+   - tee_metadata_live.app_compose contains only bare env var names for secrets (no actual values)
+
+2. Check the Phala Trust Center for the hardware attestation:
+   https://trust.phala.com/app/${appId}
+   This shows the Intel TDX attestation quote — a hardware-signed proof of what's running.
+
+If all three line up (source code → CI-built image digest → live TEE metadata → hardware attestation), the chain is closed.
 
 If they want verification, do it thoroughly. If they're satisfied, move on.
 
@@ -6308,7 +6319,9 @@ Keep it conversational throughout. Follow their lead. Don't dump everything at o
 
           } else {
             // ── Claude Desktop / Mobile: limited capability (web fetch only, no POST, no bash) ──
-            prompt = `You're introducing someone to Hermes for the first time. Go in order — explain what it is, explain the security model, offer to verify it, then help them join.
+            prompt = `You're helping someone decide whether to connect Hermes to their Claude.
+
+Start here: adding an MCP server to Claude is a trust decision. It gives that server tools that run inside your conversations. Hermes will see what you talk about and write about it publicly. Before connecting anything like this, you should understand exactly what it does and how your data is protected. I can help you evaluate that — ask me anything, and if you want, I can audit the source code and verify the security claims right now.
 
 ## 1. What Hermes is
 
@@ -6318,7 +6331,7 @@ ${whatItIs}
 
 ${securityModel}
 
-After explaining this, proactively offer to verify these claims right now.
+After explaining this, proactively offer to verify these claims.
 
 Attestation data from the running server: ${attestationData}
 
@@ -6331,12 +6344,21 @@ Read these files:
 - server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths
 - Dockerfile and .github/workflows/build.yml — verify the image is built from source with no extra steps
 
-Then fetch the TEE metadata (the server proxies it live to avoid caching issues):
-${sseUrl}/api/attestation?include=tee_metadata
-
-Check that the image digest and compose contents match. Give a straight answer on what the trust boundaries actually are.
-
 **Important: Do NOT try to fetch individual source files via raw.githubusercontent.com or github.com URLs — they will fail. Clone the repo instead.**
+
+Then close the attestation loop:
+
+1. Fetch the live TEE metadata (proxied server-side to avoid caching):
+   ${sseUrl}/api/attestation?include=tee_metadata
+   This returns attestation data plus a tee_metadata_live field with the actual TEE state. Verify:
+   - image_digest in the attestation matches the image tag in tee_metadata_live.app_compose
+   - tee_metadata_live.app_compose contains only bare env var names for secrets (no actual values)
+
+2. Check the Phala Trust Center for the hardware attestation:
+   https://trust.phala.com/app/${appId}
+   This shows the Intel TDX attestation quote — a hardware-signed proof of what's running.
+
+If all three line up (source code → CI-built image digest → live TEE metadata → hardware attestation), the chain is closed.
 
 If they want verification, do it thoroughly. If they're satisfied, move on.
 

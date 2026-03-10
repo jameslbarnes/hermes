@@ -13,16 +13,14 @@
         // Handle ?channelinvite=TOKEN shorthand — resolve token to channel and redirect
         const channelInviteToken = params.get('channelinvite');
         if (channelInviteToken) {
-            try {
-                const resolveRes = await fetch(`/api/invites/${encodeURIComponent(channelInviteToken)}/resolve`);
-                if (resolveRes.ok) {
-                    const data = await resolveRes.json();
-                    window.location.replace(`/?view=channel&id=${encodeURIComponent(data.channelId)}&invite=${encodeURIComponent(channelInviteToken)}`);
-                    return;
-                }
-            } catch (e) {
-                console.error('Failed to resolve channel invite:', e);
-            }
+            fetch(`/api/invites/${encodeURIComponent(channelInviteToken)}/resolve`)
+                .then(resolveRes => {
+                    if (resolveRes.ok) return resolveRes.json();
+                })
+                .then(data => {
+                    if (data) window.location.replace(`/?view=channel&id=${encodeURIComponent(data.channelId)}&invite=${encodeURIComponent(channelInviteToken)}`);
+                })
+                .catch(e => console.error('Failed to resolve channel invite:', e));
         }
 
         // Save URL key to localStorage for persistence across pages

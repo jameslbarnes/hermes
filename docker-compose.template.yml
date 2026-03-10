@@ -25,6 +25,7 @@ services:
       - TELEGRAM_POST_MODE
       - TELEGRAM_MAX_PER_HOUR
       - TELEGRAM_COOLDOWN_MS
+      - TELEGRAM_CHANNEL_MAP
     volumes:
       - hermes-data:/data
     restart: unless-stopped

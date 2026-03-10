@@ -49,7 +49,7 @@ export async function handleMention(
 
     const apiParams = {
       model: 'claude-sonnet-4-6' as const,
-      max_tokens: 1024,
+      max_tokens: 30000,
       system: MENTION_SYSTEM_PROMPT,
       tools: [
         searchTool,
@@ -127,7 +127,22 @@ export async function handleMention(
     console.log(
       `[Telegram/Mention] Replying (${answer.length} chars): "${answer.slice(0, 100)}..."`,
     );
-    await reply(answer);
+    // Telegram has a 4096 char limit — split long messages
+    const MAX_LEN = 4000;
+    if (answer.length <= MAX_LEN) {
+      await reply(answer);
+    } else {
+      let remaining = answer;
+      while (remaining.length > 0) {
+        let chunk = remaining.slice(0, MAX_LEN);
+        if (remaining.length > MAX_LEN) {
+          const lastNewline = chunk.lastIndexOf('\n');
+          if (lastNewline > MAX_LEN / 2) chunk = chunk.slice(0, lastNewline);
+        }
+        await reply(chunk);
+        remaining = remaining.slice(chunk.length).trimStart();
+      }
+    }
   } catch (err) {
     console.error('[Telegram/Mention] Failed to handle query:', err);
     await reply('Sorry, something went wrong while searching the notebook.');

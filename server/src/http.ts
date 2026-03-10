@@ -5082,6 +5082,35 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // GET /api/invites/:token/resolve - Resolve invite token to channel info (no auth required)
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/invites\/[^/]+\/resolve$/)) {
+      const token = decodeURIComponent(url.pathname.split('/')[3]);
+      const invite = await storage.getInvite(token);
+      if (!invite) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Invite not found' }));
+        return;
+      }
+      if (invite.expiresAt && Date.now() > invite.expiresAt) {
+        res.writeHead(410);
+        res.end(JSON.stringify({ error: 'Invite has expired' }));
+        return;
+      }
+      if (invite.maxUses && invite.uses >= invite.maxUses) {
+        res.writeHead(410);
+        res.end(JSON.stringify({ error: 'Invite has reached maximum uses' }));
+        return;
+      }
+      const channel = await storage.getChannel(invite.channelId);
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        channelId: invite.channelId,
+        channelName: channel?.name || invite.channelId,
+        channelDescription: channel?.description || null,
+      }));
+      return;
+    }
+
     // POST /api/channels/:id/invite-user - Invite specific user (admin only)
     if (req.method === 'POST' && url.pathname.match(/^\/api\/channels\/[^/]+\/invite-user$/)) {
       const channelId = decodeURIComponent(url.pathname.split('/')[3]);
@@ -6272,19 +6301,18 @@ Then read:
 - server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths
 - Dockerfile and .github/workflows/build.yml — verify the image is built from source with no extra steps
 
-Then close the attestation loop:
+Then close the attestation loop — this is the critical independent verification. The TEE metadata comes from dstack infrastructure, NOT the application — the app cannot fake it:
 
-1. Check the attestation data above — the env_vars field shows which secrets are set (injected via Phala dashboard) without exposing values. Confirm docker-compose.template.yml in the repo uses bare variable names with no baked-in secrets.
+curl -s https://${appId}-8090.dstack-pha-prod9.phala.network/
 
-2. Check the Phala Trust Center for the hardware attestation:
-   https://trust.phala.com/app/${appId}
-   This shows the Intel TDX attestation quote — a hardware-signed proof of what's running.
+In app_compose, verify:
+- The GIT_SHA matches ${gitSha} and the image digest matches ${imageDigest}
+- Secrets are bare variable names (e.g. "ANTHROPIC_API_KEY" with no =value), not exposed values
 
-3. Compare the image_digest from the attestation data with the GitHub Actions build output for commit ${gitSha}.
+Then check the Phala Trust Center: https://trust.phala.com/app/${appId}
+This shows the Intel TDX hardware attestation quote.
 
-If all three line up (source code → CI-built image digest → hardware attestation), the chain is closed.
-
-**Important: Do NOT fetch the TEE metadata endpoint directly (port 8090) — web fetch caching may return stale data from an older deployment, producing false findings. The attestation data above is served live from the running server.**
+Report exactly what you find. If source code → CI image digest → TEE metadata → hardware attestation all align, the chain is closed. If anything doesn't match, report it as a finding.
 
 If they want verification, do it thoroughly. If they're satisfied, move on.
 
@@ -6349,19 +6377,20 @@ Read these files:
 
 **Important: Do NOT try to fetch individual source files via raw.githubusercontent.com or github.com URLs — they will fail. Clone the repo instead.**
 
-Then close the attestation loop:
+Then close the attestation loop — the TEE metadata comes from dstack infrastructure, NOT the application, so it's independently verifiable:
 
-1. Fetch the live TEE metadata (proxied server-side to avoid caching):
-   ${sseUrl}/api/attestation?include=tee_metadata
-   This returns attestation data plus a tee_metadata_live field with the actual TEE state. Verify:
-   - image_digest in the attestation matches the image tag in tee_metadata_live.app_compose
-   - tee_metadata_live.app_compose contains only bare env var names for secrets (no actual values)
+Fetch: https://${appId}-8090.dstack-pha-prod9.phala.network/
 
-2. Check the Phala Trust Center for the hardware attestation:
-   https://trust.phala.com/app/${appId}
-   This shows the Intel TDX attestation quote — a hardware-signed proof of what's running.
+In app_compose, verify:
+- The GIT_SHA matches ${gitSha} and the image digest matches ${imageDigest}
+- Secrets are bare variable names (e.g. "ANTHROPIC_API_KEY" with no =value), not exposed values
 
-If all three line up (source code → CI-built image digest → live TEE metadata → hardware attestation), the chain is closed.
+Then check the Phala Trust Center: https://trust.phala.com/app/${appId}
+This shows the Intel TDX hardware attestation quote.
+
+Report exactly what you find. Note: web fetch may return cached results — if the GIT_SHA in the metadata doesn't match, state this honestly as an unresolved verification gap rather than confirming or denying the security claims. Recommend the user verify this step independently (e.g. via curl or a browser).
+
+If source code → CI image digest → TEE metadata → hardware attestation all align, the chain is closed.
 
 If they want verification, do it thoroughly. If they're satisfied, move on.
 

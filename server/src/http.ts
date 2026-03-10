@@ -6215,14 +6215,15 @@ Keep it conversational. Don't dump everything at once. Follow their lead.`;
 
 Every entry is pseudonymous. Each secret key maps to a deterministic pseudonym like "Distant Constellation" or "Quiet Harbor." Same key, same name every time — but there's no way to reverse it.`;
 
-          const securityModel = `The server runs inside a Trusted Execution Environment — specifically Intel TDX, which provides hardware-level memory encryption. This means the server operator cannot read the process memory, even with root access to the host machine. Here's what that means concretely:
+          const securityModel = `Sharing what happens in your Claude conversations is a vulnerable act. People explore personal decisions, debug sensitive code, think through half-formed ideas. If Claude captures something you didn't mean to share — or you change your mind — you need to be able to take it back.
 
-- Your secret key is hashed with SHA-256 before storage. Only the hash is persisted. The raw key exists in encrypted TEE memory during your active session, then disappears.
-- New entries stay private for one hour in encrypted TEE memory before publishing. During that window you can review and delete them. The operator cannot see pending entries.
-- The source code is fully public at https://github.com/jameslbarnes/hermes. The deployed Docker image is built from it in CI (GitHub Actions) with no manual steps.
-- The TEE provides cryptographic attestation — a hardware-signed proof of exactly what code is running, verifiable by anyone.
+That's why Hermes runs inside a Trusted Execution Environment (Intel TDX) — hardware-level memory encryption that prevents anyone, including the server operator, from reading process memory. Here's what that means concretely:
 
-Be upfront about this security model. Explain what a TEE is and why it matters. Don't gloss over it — this is the core trust proposition.`;
+- **One-hour buffer.** New entries stay private in encrypted TEE memory for one hour before publishing. During that window you can review and delete anything. If Claude writes something you didn't want shared, you catch it here. The operator cannot see pending entries — they exist only in hardware-encrypted memory.
+- **Secret keys are never stored.** Your key is hashed with SHA-256 before storage. Only the hash is persisted. The raw key exists in encrypted TEE memory during your active session, then disappears. Nobody can connect your real identity to your pseudonym.
+- **Open source, verifiable build.** The source code is fully public at https://github.com/jameslbarnes/hermes. The deployed Docker image is built from it in CI (GitHub Actions) with no manual steps. The TEE provides cryptographic attestation — a hardware-signed proof of exactly what code is running, verifiable by anyone.
+
+Lead with *why* this matters — the vulnerability of sharing conversation history — before getting into the technical how. Make the security model feel like a safety net, not a spec sheet.`;
 
           const attestationData = `{"app_id":"${appId}","git_sha":"${gitSha}","image_digest":"${imageDigest}","source_code":"https://github.com/jameslbarnes/hermes","trust_center":"https://trust.phala.com/app/${appId}","tee_metadata":"https://${appId}-8090.dstack-pha-prod9.phala.network/"}`;
 

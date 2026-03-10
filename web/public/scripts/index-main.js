@@ -2064,9 +2064,12 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
 Attestation data from the running server: ${JSON.stringify(data)}
 
 Steps:
-1. Read the source at ${data.source_code} (commit ${data.git_sha}). Focus on server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths for keys or pending entries, and whether the operator has any backdoor access.
+1. Clone the source code and read it — do NOT try to fetch individual files from GitHub URLs, they will fail:
+   git clone https://github.com/jameslbarnes/hermes /tmp/hermes-audit
+   cd /tmp/hermes-audit && git checkout ${data.git_sha}
+   Focus on server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths for keys or pending entries, and whether the operator has any backdoor access.
 2. Check the Dockerfile and .github/workflows/build.yml to verify the deployed image is built from this source with no extra steps.
-3. Fetch the TEE metadata from ${data.tee_metadata} and verify the compose_hash and image digest (${data.image_digest}) match what GitHub Actions built for commit ${data.git_sha}.
+3. Fetch the live TEE metadata (proxied by the server to avoid caching): ${window.location.origin}/api/attestation?include=tee_metadata — verify the compose_hash and image digest (${data.image_digest}) match what GitHub Actions built for commit ${data.git_sha}.
 4. Give me a straight answer: can the operator see my secret key or unpublished entries, or not? What are the actual trust boundaries?`;
 
                 const menu = document.getElementById('verify-menu');

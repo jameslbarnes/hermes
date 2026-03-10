@@ -3588,6 +3588,19 @@ const server = createServer(async (req, res) => {
           'All source code is at the source_code URL — the Docker image is built from it in CI',
         ],
       };
+      // If ?include=tee_metadata, also fetch and embed live TEE metadata
+      if (url.searchParams.get('include') === 'tee_metadata') {
+        try {
+          const metaUrl = `https://${appId}-8090.dstack-pha-prod9.phala.network/`;
+          const metaRes = await fetch(metaUrl);
+          const metaData = await metaRes.json();
+          (attestation as any).tee_metadata_live = metaData;
+        } catch (err) {
+          (attestation as any).tee_metadata_live = null;
+          (attestation as any).tee_metadata_error = 'Failed to fetch live TEE metadata';
+        }
+      }
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(attestation, null, 2));
       return;
@@ -6233,16 +6246,24 @@ ${whatItIs}
 
 ${securityModel}
 
-After explaining this, proactively offer to verify these claims right now. You have the tools to do a full audit — clone the repo, read the source, fetch the TEE metadata, and check that everything matches.
+After explaining this, proactively offer to verify these claims right now. You have the tools to do a full audit.
 
 Attestation data from the running server: ${attestationData}
 
-To verify:
-- Clone the repo: git clone https://github.com/jameslbarnes/hermes && git checkout ${gitSha}
-- Read server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths
-- Check the Dockerfile and .github/workflows/build.yml to verify the image is built from source with no extra steps
-- Fetch the TEE metadata: curl -s https://${appId}-8090.dstack-pha-prod9.phala.network/ — verify the compose_hash and image digest (${imageDigest}) match
-- Give a straight answer on what the trust boundaries actually are
+To verify, run these commands:
+
+git clone https://github.com/jameslbarnes/hermes /tmp/hermes-audit
+cd /tmp/hermes-audit
+git checkout ${gitSha}
+
+Then read:
+- server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths
+- Dockerfile and .github/workflows/build.yml — verify the image is built from source with no extra steps
+
+Then fetch the TEE metadata (the server proxies it live to avoid caching issues):
+curl -s ${sseUrl}/api/attestation?include=tee_metadata
+
+Check that the image digest and compose contents match. Give a straight answer on what the trust boundaries actually are.
 
 If they want verification, do it thoroughly. If they're satisfied, move on.
 
@@ -6290,15 +6311,25 @@ ${whatItIs}
 
 ${securityModel}
 
-After explaining this, proactively offer to verify these claims right now. You can fetch web pages, so you can read the source code on GitHub and fetch the TEE metadata to check that everything lines up.
+After explaining this, proactively offer to verify these claims right now.
 
 Attestation data from the running server: ${attestationData}
 
-To verify:
-- Fetch source files from https://github.com/jameslbarnes/hermes at commit ${gitSha} — focus on server/src/http.ts and server/src/storage.ts. Check how secret keys are handled, whether there are any logging or exfiltration paths.
-- Fetch the Dockerfile and .github/workflows/build.yml to verify the image is built from source with no extra steps.
-- Fetch the TEE metadata from https://${appId}-8090.dstack-pha-prod9.phala.network/ and verify the compose_hash and image digest (${imageDigest}) match what GitHub Actions built.
-- Give a straight answer on what the trust boundaries actually are.
+To verify, clone the source code and read it:
+
+git clone https://github.com/jameslbarnes/hermes /tmp/hermes-audit
+cd /tmp/hermes-audit && git checkout ${gitSha}
+
+Read these files:
+- server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths
+- Dockerfile and .github/workflows/build.yml — verify the image is built from source with no extra steps
+
+Then fetch the TEE metadata (the server proxies it live to avoid caching issues):
+${sseUrl}/api/attestation?include=tee_metadata
+
+Check that the image digest and compose contents match. Give a straight answer on what the trust boundaries actually are.
+
+**Important: Do NOT try to fetch individual source files via raw.githubusercontent.com or github.com URLs — they will fail. Clone the repo instead.**
 
 If they want verification, do it thoroughly. If they're satisfied, move on.
 

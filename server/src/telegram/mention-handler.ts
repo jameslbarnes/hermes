@@ -48,7 +48,7 @@ export async function handleMention(
     };
 
     const apiParams = {
-      model: 'claude-sonnet-4-6' as const,
+      model: 'claude-opus-4-6' as const,
       max_tokens: 4096,
       system: MENTION_SYSTEM_PROMPT,
       tools: [

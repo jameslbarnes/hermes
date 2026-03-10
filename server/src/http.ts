@@ -746,7 +746,7 @@ async function generateSummary(entries: JournalEntry[], otherEntriesToday: Journ
     .join('\n');
 
   const response = await anthropic.messages.create({
-    model: 'claude-opus-4-5',
+    model: 'claude-opus-4-6',
     max_tokens: 150,
     messages: [{
       role: 'user',
@@ -895,7 +895,7 @@ async function generateDailySummary(date: string, entries: JournalEntry[]): Prom
   const pseudonymList = Array.from(byPseudonym.keys()).join(', ');
 
   const response = await anthropic.messages.create({
-    model: 'claude-opus-4-5',
+    model: 'claude-opus-4-6',
     max_tokens: 200,
     messages: [{
       role: 'user',

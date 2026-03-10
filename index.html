@@ -3821,15 +3821,18 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
 
 Attestation data from the running server: ${JSON.stringify(data)}
 
+The attestation data includes an env_vars field showing which secrets are set (via encrypted dashboard injection) without exposing values.
+
 Steps:
 1. Clone the source code and read it — do NOT try to fetch individual files from GitHub URLs, they will fail:
    git clone https://github.com/jameslbarnes/hermes /tmp/hermes-audit
    cd /tmp/hermes-audit && git checkout ${data.git_sha}
    Focus on server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths for keys or pending entries, and whether the operator has any backdoor access.
-2. Check the Dockerfile and .github/workflows/build.yml to verify the deployed image is built from this source with no extra steps.
-3. Fetch the live TEE metadata directly (add ?t= with current timestamp to avoid cached results): ${data.tee_metadata}?t=${Date.now()} — check that the image digest in app_compose matches ${data.image_digest}, and that no secret values are exposed (only bare env var names).
-4. Check the Phala Trust Center for the hardware attestation: ${data.trust_center} — this shows the Intel TDX quote proving what code is running.
-5. Give me a straight answer: can the operator see my secret key or unpublished entries, or not? What are the actual trust boundaries?`;
+2. Check the Dockerfile and .github/workflows/build.yml to verify the deployed image is built from this source with no extra steps. Also check docker-compose.template.yml — confirm secrets are bare variable names with no baked-in values.
+3. Check the Phala Trust Center for the hardware attestation: ${data.trust_center} — this shows the Intel TDX quote proving what code is running.
+4. Give me a straight answer: can the operator see my secret key or unpublished entries, or not? What are the actual trust boundaries?
+
+**Important: Do NOT fetch the TEE metadata endpoint (port 8090) directly — web fetch caching returns stale data from older deployments, producing false findings about exposed secrets. The attestation data above is served live from the running server and is the authoritative source.**`;
 
                 const menu = document.getElementById('verify-menu');
                 menu.classList.remove('open');

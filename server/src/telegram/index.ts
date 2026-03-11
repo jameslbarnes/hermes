@@ -386,19 +386,27 @@ export function startTelegramBot(
   // Each watched group gets its own buffer, interjector, writer, and message tracking.
   interface GroupState {
     chatId: string;
+    /** The notebook channel this group is mapped to (if any). */
+    channelId?: string;
     buffer: MessageBuffer;
     interjector: Interjector | null;
     writer: Writer | null;
     botMessageIds: Set<number>;
+    /** Cached: does this group's notebook channel have recent entries? Updated every 15 min. */
+    channelActive: boolean;
   }
   const groups = new Map<string, GroupState>();
   let interjectionTimer: ReturnType<typeof setInterval> | null = null;
 
   // Collect all group chat IDs: main group + channel-mapped groups
+  // Build reverse mapping: chatId → channelId (for channel-mapped groups)
   const allGroupChatIds = new Set<string>();
+  const chatToChannel = new Map<string, string>();
   if (config.groupChatId) allGroupChatIds.add(String(config.groupChatId));
-  for (const chatId of Object.values(channelChatMapping)) {
-    allGroupChatIds.add(String(chatId));
+  for (const [channelId, chatId] of Object.entries(channelChatMapping)) {
+    const cid = String(chatId);
+    allGroupChatIds.add(cid);
+    chatToChannel.set(cid, channelId);
   }
 
   if (allGroupChatIds.size > 0 && config.anthropicApiKey) {
@@ -455,10 +463,12 @@ export function startTelegramBot(
 
         groups.set(groupChatId, {
           chatId: groupChatId,
+          channelId: chatToChannel.get(groupChatId),
           buffer: groupBuffer,
           interjector: groupInterjector,
           writer: groupWriter,
           botMessageIds: groupBotMessageIds,
+          channelActive: !chatToChannel.has(groupChatId), // main group is always active; channel-mapped start inactive until checked
         });
 
         console.log(`[Telegram] Proactive features enabled for group ${groupChatId} as @${identity.handle}`);
@@ -467,6 +477,19 @@ export function startTelegramBot(
       // Timer-based checks (every 15 min) — iterate all groups
       interjectionTimer = setInterval(async () => {
         for (const [gid, group] of groups) {
+          // For channel-mapped groups, refresh the activity cache and skip if dormant
+          if (group.channelId) {
+            try {
+              const since = Date.now() - 24 * 60 * 60 * 1000;
+              const channelEntries = await storage.getChannelEntries(group.channelId, 1);
+              group.channelActive = channelEntries.some(e => e.timestamp > since);
+            } catch (err) {
+              console.error(`[Telegram] Failed to check channel activity for ${group.channelId}:`, err);
+              group.channelActive = false;
+            }
+            if (!group.channelActive) continue;
+          }
+
           if (group.interjector && group.buffer.size > 0) {
             try {
               await group.interjector.tryInterject();
@@ -612,8 +635,8 @@ export function startTelegramBot(
           }
         }
 
-        // Check if interjector should evaluate
-        if (group.interjector && group.interjector.shouldEvaluate()) {
+        // Check if interjector should evaluate (skip if channel-mapped group has no recent entries)
+        if (group.interjector && group.channelActive && group.interjector.shouldEvaluate()) {
           group.interjector.tryInterject().catch((err) => {
             console.error(`[Telegram/Interjector] Eval failed for group ${chatId}:`, err);
           });

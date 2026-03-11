@@ -20,7 +20,7 @@ import {
   filterEntry,
   formatEntryForTelegram,
   escapeMarkdownV2,
-  formatCuratedPost,
+
   trackPostedEntry,
   extractJson,
 } from './filter.js';
@@ -124,20 +124,24 @@ export function startTelegramBot(
   // If more arrive from the same author, the timer resets.
   // When the timer fires: 1 entry → post raw, multiple → pick best or summarize.
   const SESSION_DEBOUNCE_MS = 30 * 60 * 1000; // 30 minutes
-  const sessionQueues = new Map<string, { entries: JournalEntry[]; timer: ReturnType<typeof setTimeout> }>();
+  const sessionQueues = new Map<string, { entries: { entry: JournalEntry; hook?: string }[]; timer: ReturnType<typeof setTimeout> }>();
 
   /** Actually send a message to the group/channel and track it. */
-  async function sendEntry(entry: JournalEntry) {
+  async function sendEntry(entry: JournalEntry, hook?: string) {
     if (!bot) return;
     const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
-    const message = formatEntryForTelegram(entry, config.baseUrl);
     const target = config.groupChatId || config.channelId;
     console.log(`[Telegram] Posting entry ${entry.id} by ${author} to ${target}`);
     try {
-      const result = await bot.telegram.sendMessage(target, message, {
-        parse_mode: 'MarkdownV2',
-        link_preview_options: { is_disabled: true },
-      });
+      // Hooked posts are plain text (Opus writes the complete message).
+      // Raw posts use MarkdownV2 for bold author headers.
+      const message = hook
+        ? hook
+        : formatEntryForTelegram(entry, config.baseUrl);
+      const sendOptions = hook
+        ? { link_preview_options: { is_disabled: false } }
+        : { parse_mode: 'MarkdownV2' as const, link_preview_options: { is_disabled: true } };
+      const result = await bot.telegram.sendMessage(target, message, sendOptions);
       console.log(`[Telegram] Posted successfully, message_id=${result.message_id}`);
       const mainGroup = groups.get(target);
       if (mainGroup) {
@@ -149,7 +153,7 @@ export function startTelegramBot(
         });
         mainGroup.botMessageIds.add(result.message_id);
       }
-      const updated = trackPostedEntry(recentlyPosted, entry);
+      const updated = trackPostedEntry(recentlyPosted, entry, hook);
       recentlyPosted.length = 0;
       recentlyPosted.push(...updated);
       channelPostTimestamps.push(Date.now());
@@ -209,27 +213,26 @@ export function startTelegramBot(
       sessionQueues.delete(pseudonym);
       return;
     }
-    const entries = queue.entries;
+    const items = queue.entries;
     sessionQueues.delete(pseudonym);
 
-    console.log(`[Telegram/Debounce] Flushing ${entries.length} entries for ${pseudonym}`);
+    console.log(`[Telegram/Debounce] Flushing ${items.length} entries for ${pseudonym}`);
 
-    if (entries.length === 1) {
-      await sendEntry(entries[0]);
+    if (items.length === 1) {
+      await sendEntry(items[0].entry, items[0].hook);
       return;
     }
 
     // Multiple entries — use Haiku to pick the best or summarize
     if (!anthropic) {
-      // No API key, just post the first one
-      await sendEntry(entries[0]);
+      await sendEntry(items[0].entry, items[0].hook);
       return;
     }
 
     try {
-      const author = entries[0].handle ? `@${entries[0].handle}` : entries[0].pseudonym;
-      const entriesText = entries
-        .map((e, i) => `[${i}] ${e.content.slice(0, 500)}`)
+      const author = items[0].entry.handle ? `@${items[0].entry.handle}` : items[0].entry.pseudonym;
+      const entriesText = items
+        .map((item, i) => `[${i}] ${item.entry.content.slice(0, 500)}`)
         .join('\n\n');
 
       const response = await anthropic.messages.create({
@@ -241,7 +244,7 @@ export function startTelegramBot(
 
       const textBlock = response.content.find((b) => b.type === 'text');
       if (!textBlock) {
-        await sendEntry(entries[0]);
+        await sendEntry(items[0].entry, items[0].hook);
         return;
       }
 
@@ -250,19 +253,19 @@ export function startTelegramBot(
       const parsed = JSON.parse(extractJson(raw));
 
       if (parsed.mode === 'pick' && typeof parsed.index === 'number') {
-        const idx = Math.max(0, Math.min(parsed.index, entries.length - 1));
-        console.log(`[Telegram/Debounce] Picked entry ${idx} of ${entries.length}`);
-        await sendEntry(entries[idx]);
+        const idx = Math.max(0, Math.min(parsed.index, items.length - 1));
+        console.log(`[Telegram/Debounce] Picked entry ${idx} of ${items.length}`);
+        await sendEntry(items[idx].entry, items[idx].hook);
       } else if (parsed.mode === 'summary' && parsed.text) {
-        console.log(`[Telegram/Debounce] Using summary for ${entries.length} entries`);
-        const permalink = `${config.baseUrl}/#entry-${entries[0].id}`;
+        console.log(`[Telegram/Debounce] Using summary for ${items.length} entries`);
+        const permalink = `${config.baseUrl}/#entry-${items[0].entry.id}`;
         await sendSummary(author, parsed.text, permalink);
       } else {
-        await sendEntry(entries[0]);
+        await sendEntry(items[0].entry, items[0].hook);
       }
     } catch (err) {
       console.error('[Telegram/Debounce] Failed to pick/summarize:', err);
-      await sendEntry(entries[0]);
+      await sendEntry(items[0].entry, items[0].hook);
     }
   }
 
@@ -295,13 +298,13 @@ export function startTelegramBot(
     const existing = sessionQueues.get(key);
     if (existing) {
       clearTimeout(existing.timer);
-      existing.entries.push(entry);
+      existing.entries.push({ entry, hook: filterResult.hook });
       console.log(`[Telegram/Debounce] Queued entry ${entry.id} for ${key} (${existing.entries.length} in batch)`);
       existing.timer = setTimeout(() => flushSessionQueue(key), SESSION_DEBOUNCE_MS);
     } else {
       console.log(`[Telegram/Debounce] First entry ${entry.id} for ${key}, starting 30m timer`);
       const timer = setTimeout(() => flushSessionQueue(key), SESSION_DEBOUNCE_MS);
-      sessionQueues.set(key, { entries: [entry], timer });
+      sessionQueues.set(key, { entries: [{ entry, hook: filterResult.hook }], timer });
     }
   };
 

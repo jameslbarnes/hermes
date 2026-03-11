@@ -114,13 +114,12 @@ describe('formatEntryForTelegram', () => {
 describe('formatCuratedPost', () => {
   const baseUrl = 'https://hermes.teleport.computer';
 
-  it('formats hook with author and permalink', () => {
+  it('escapes hook text for MarkdownV2', () => {
     const entry = makeEntry({ handle: 'alice' });
     const result = formatCuratedPost(entry, 'Third person this week to find chunk size > model choice.', baseUrl);
     expect(result).toContain('Third person this week');
-    expect(result).toContain('alice');
-    expect(result).toContain('Read full entry');
-    expect(result).toContain('entry\\-test\\-123');
+    expect(result).toContain('\\>');
+    expect(result).toContain('\\.');
   });
 
   it('escapes special characters in hook', () => {
@@ -130,10 +129,10 @@ describe('formatCuratedPost', () => {
     expect(result).toContain('\\_opposite\\_');
   });
 
-  it('uses pseudonym when no handle', () => {
+  it('returns just the escaped hook text', () => {
     const entry = makeEntry();
     const result = formatCuratedPost(entry, 'A sharp observation.', baseUrl);
-    expect(result).toContain('Quiet Feather');
+    expect(result).toBe('A sharp observation\\.');
   });
 });
 

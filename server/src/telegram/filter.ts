@@ -88,14 +88,9 @@ export function formatCuratedPost(
   hook: string,
   baseUrl: string,
 ): string {
-  const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
-  const permalink = `${baseUrl}/#entry-${entry.id}`;
-
-  const escapedHook = escapeMarkdownV2(hook);
-  const escapedAuthor = escapeMarkdownV2(author);
-  const escapedPermalink = escapeMarkdownV2(permalink);
-
-  return `${escapedHook}\n\n_${escapedAuthor}_ \\| [Read full entry](${escapedPermalink})`;
+  // Opus writes the complete post — just escape for Telegram.
+  // The hook already includes attribution and links if Opus thought they were worth it.
+  return escapeMarkdownV2(hook);
 }
 
 /**
@@ -168,7 +163,9 @@ export async function scoreEntry(
 }
 
 /**
- * Step 3: Write the editorial hook (Sonnet call, with search results).
+ * Step 3: Write the editorial hook (Opus call with web search).
+ * Searches for recent news related to the entry topic, then writes a hook
+ * combining the entry's insight with relevant real-world context.
  * Returns the hook text, or null if Claude says SKIP or on error.
  */
 export async function writeHook(
@@ -197,24 +194,45 @@ export async function writeHook(
       .replace('{related_entries}', relatedContext)
       .replace('{recent_posts}', recentContext);
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 256,
+    const apiParams = {
+      model: 'claude-opus-4-6' as const,
+      max_tokens: 400,
       system: systemPrompt,
-      messages: [
-        {
-          role: 'user',
-          content: `Author: ${author}\n\nEntry content:\n${entry.content.slice(0, 1500)}`,
-        },
-      ],
-    });
+      tools: [
+        { type: 'web_search_20250305', name: 'web_search', max_uses: 3 },
+      ] as any[],
+    };
+
+    const permalink = `https://hermes.teleport.computer/#entry-${entry.id}`;
+    let messages: Anthropic.MessageParam[] = [
+      {
+        role: 'user',
+        content: `Author: ${author}\nPermalink: ${permalink}\n\nEntry content:\n${entry.content.slice(0, 2000)}`,
+      },
+    ];
+
+    let response = await anthropic.messages.create({ ...apiParams, messages });
+
+    // Handle web search tool-use loop (max 5 rounds)
+    let rounds = 0;
+    const stopReason = () => response.stop_reason as string;
+    while ((stopReason() === 'tool_use' || stopReason() === 'pause_turn') && rounds < 5) {
+      rounds++;
+      messages.push({ role: 'assistant', content: response.content });
+      if (stopReason() === 'pause_turn') {
+        response = await anthropic.messages.create({ ...apiParams, messages });
+        continue;
+      }
+      // Web search is server-side — no client tool results needed, just continue
+      response = await anthropic.messages.create({ ...apiParams, messages });
+    }
 
     const text = response.content.find((b) => b.type === 'text');
     if (!text) return null;
     const hook = (text as Anthropic.TextBlock).text.trim();
 
     if (hook === 'SKIP') {
-      console.log('[Telegram/Filter] Sonnet chose to SKIP hook');
+      console.log('[Telegram/Filter] Opus chose to SKIP hook');
       return null;
     }
 
@@ -300,7 +318,28 @@ export async function filterEntry(
   console.log(`[Telegram/Filter] Entry ${entry.id} scored ${scoreResult.score}/10`);
   if (scoreResult.score < SCORE_THRESHOLD) return { post: false };
 
-  // Score passed — post the raw entry
+  // Step 2: Search notebook for related entries (pattern detection)
+  let relatedEntries: JournalEntry[] = [];
+  if (storage && scoreResult.keywords.length > 0) {
+    try {
+      const query = scoreResult.keywords.join(' ');
+      relatedEntries = (await storage.searchEntries(query, 5))
+        .filter((e) => e.id !== entry.id);
+      console.log(`[Telegram/Filter] Found ${relatedEntries.length} related entries for "${query}"`);
+    } catch (err) {
+      console.error('[Telegram/Filter] Search failed:', err);
+    }
+  }
+
+  // Step 3: Write editorial hook (Opus call)
+  const hook = await writeHook(entry, relatedEntries, recentlyPosted, anthropic);
+  if (hook) {
+    console.log(`[Telegram/Filter] Hook: "${hook.slice(0, 100)}..."`);
+    return { post: true, hook };
+  }
+
+  // Hook returned SKIP or failed — post raw as fallback
+  console.log(`[Telegram/Filter] No hook for ${entry.id}, posting raw`);
   return { post: true };
 }
 

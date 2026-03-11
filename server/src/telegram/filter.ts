@@ -312,8 +312,8 @@ export async function filterEntry(
   // Step 1: Score (cheap Haiku call)
   const scoreResult = await scoreEntry(entry, anthropic);
   if (!scoreResult) {
-    console.log(`[Telegram/Filter] Score failed for ${entry.id}, posting raw`);
-    return { post: true };
+    console.log(`[Telegram/Filter] Score failed for ${entry.id}, skipping`);
+    return { post: false };
   }
   console.log(`[Telegram/Filter] Entry ${entry.id} scored ${scoreResult.score}/10`);
   if (scoreResult.score < SCORE_THRESHOLD) return { post: false };
@@ -338,9 +338,9 @@ export async function filterEntry(
     return { post: true, hook };
   }
 
-  // Hook returned SKIP or failed — post raw as fallback
-  console.log(`[Telegram/Filter] No hook for ${entry.id}, posting raw`);
-  return { post: true };
+  // Hook returned SKIP or failed — don't dump raw content
+  console.log(`[Telegram/Filter] No hook for ${entry.id}, skipping`);
+  return { post: false };
 }
 
 /**

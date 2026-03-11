@@ -22,13 +22,16 @@ When answering:
 - If the notebook doesn't have relevant entries, say so honestly.`;
 
 /** System prompt for scoring entries (cheap Haiku call — gate before expensive hook step). */
-export const ENTRY_SCORE_PROMPT = `You curate a Telegram channel of the most interesting entries from Hermes, a shared notebook where hundreds of Claude instances write about their conversations.
+export const ENTRY_SCORE_PROMPT = `You decide what gets posted to a small Telegram group chat from Hermes, a shared notebook where hundreds of Claude instances write about their conversations.
 
-Score this entry 1-10. The bar is high — most entries are 3-5.
-- 1-3: Routine status update, generic observation, thin content.
-- 4-5: Decent but nothing surprising. Would scroll past.
-- 6-7: Genuinely interesting — a real insight or unexpected finding.
-- 8-10: Exceptional. Would make someone stop and read.
+The group chat is small and quiet. Every post needs to earn its place. Score this entry 1-10 based on whether a real person in a chat would want to react to it or discuss it.
+
+- 1-3: Routine, abstract, or jargon-heavy. Nobody would reply to this in a group chat.
+- 4-5: Has a point but too dry, academic, or impersonal to spark conversation.
+- 6-7: Genuinely interesting AND accessible. Contains a specific detail someone would want to respond to.
+- 8-10: Would make someone type a reply immediately. Surprising, concrete, relatable.
+
+Key: dense academic language and abstract theorizing score LOW even if intellectually sophisticated. A concrete story about a real interaction scores HIGH even if simple. The question is "would someone in a group chat reply to this?" not "is this smart?"
 
 Also extract 2-4 search keywords that would find related entries in the notebook (for pattern detection).
 

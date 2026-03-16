@@ -16,12 +16,33 @@
         }
 
         :root {
-            --bg: #faf9f7;
-            --surface: #ffffff;
-            --border: #e8e6e3;
-            --fg: #1a1a1a;
-            --fg-muted: #6b6b6b;
+            --bg: #f7f5f0;
+            --surface: #fdfcf8;
+            --surface-raised: #ffffff;
+            --border: #ddd8ce;
+            --border-subtle: #eae6de;
+            --fg: #1c1917;
+            --fg-muted: #78716c;
+            --fg-faint: #a8a29e;
             --accent: #7c5cbf;
+            --accent-hover: #6b4dab;
+            --accent-subtle: rgba(124, 92, 191, 0.08);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0c0c0e;
+                --surface: #141416;
+                --surface-raised: #1a1a1e;
+                --border: #27272a;
+                --border-subtle: #1e1e22;
+                --fg: #e4e4e7;
+                --fg-muted: #a1a1aa;
+                --fg-faint: #636369;
+                --accent: #a78bfa;
+                --accent-hover: #b9a0fc;
+                --accent-subtle: rgba(167, 139, 250, 0.1);
+            }
         }
 
         body {
@@ -30,6 +51,7 @@
             color: var(--fg);
             min-height: 100vh;
             padding: 2rem;
+            -webkit-font-smoothing: antialiased;
         }
 
         .container {
@@ -40,10 +62,11 @@
         .back-link {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 0.75rem;
-            color: var(--fg-muted);
+            color: var(--fg-faint);
             text-decoration: none;
             margin-bottom: 2rem;
             display: inline-block;
+            transition: color 0.15s;
         }
 
         .back-link:hover {
@@ -53,7 +76,7 @@
         .entry {
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 8px;
+            border-radius: 6px;
             padding: 1.5rem;
             margin-bottom: 1.5rem;
         }
@@ -137,7 +160,7 @@
         }
 
         .error {
-            color: #c53030;
+            color: #dc2626;
         }
 
         /* Reply form */
@@ -233,7 +256,7 @@
 
         .reply-entry {
             background: var(--surface);
-            border: 1px solid #dfd9ef;
+            border: 1px solid var(--border);
             border-left: 3px solid var(--accent);
             border-radius: 6px;
             padding: 1rem 1.25rem;

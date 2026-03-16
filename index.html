@@ -244,11 +244,6 @@
             margin-bottom: 0.35rem;
         }
 
-        .identity-configure {
-            font-size: 0.75rem;
-            color: var(--fg-muted);
-        }
-
         .identity-handle {
             display: block;
             color: var(--accent);
@@ -650,40 +645,7 @@
             color: var(--accent);
         }
 
-        /* Unified badge system */
-        .meta-badge {
-            display: inline-block;
-            padding: 0.15rem 0.4rem;
-            border-radius: 3px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.65rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            vertical-align: middle;
-        }
-
-        .meta-badge--pending {
-            background: rgba(124, 92, 191, 0.15);
-            color: var(--accent);
-        }
-
-        .meta-badge--type {
-            background: rgba(124, 92, 191, 0.1);
-            color: var(--accent);
-        }
-
-        .meta-badge--source {
-            background: var(--border);
-            color: var(--fg-muted);
-        }
-
-        .token-count {
-            color: var(--fg-muted);
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.7rem;
-        }
-
-        /* Legacy badge aliases */
+        /* Badge system */
         .pending-badge {
             display: inline-block;
             padding: 0.15rem 0.4rem;
@@ -1140,10 +1102,6 @@
         }
 
         /* Daily summaries */
-        .day-section {
-            margin-bottom: 0;
-        }
-
         .day-header {
             display: flex;
             align-items: baseline;
@@ -1290,25 +1248,8 @@
             padding: 0;
         }
 
-        .entry-content.reflection em {
-            font-style: italic;
-        }
-
         .entry-content.reflection strong {
             font-weight: 500;
-        }
-
-        .reflection-badge {
-            display: inline-block;
-            padding: 0.15rem 0.4rem;
-            background: rgba(124, 92, 191, 0.1);
-            color: var(--accent);
-            border-radius: 3px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.65rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            vertical-align: middle;
         }
 
         /* Top toolbar - fixed top right */
@@ -1593,58 +1534,6 @@
             font-style: italic;
         }
 
-        .platform-badge {
-            display: inline-block;
-            padding: 0.15rem 0.4rem;
-            background: var(--border);
-            color: var(--fg-muted);
-            border-radius: 3px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.65rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            vertical-align: middle;
-        }
-
-        .thread-badge {
-            display: inline-block;
-            padding: 0.15rem 0.4rem;
-            background: rgba(124, 92, 191, 0.1);
-            color: var(--accent);
-            border-radius: 3px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.65rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            vertical-align: middle;
-        }
-
-        .session-badge {
-            display: inline-block;
-            padding: 0.15rem 0.4rem;
-            background: rgba(124, 92, 191, 0.1);
-            color: var(--accent);
-            border-radius: 3px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.65rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            vertical-align: middle;
-        }
-
-        .note-badge {
-            display: inline-block;
-            padding: 0.15rem 0.4rem;
-            background: rgba(124, 92, 191, 0.1);
-            color: var(--accent);
-            border-radius: 3px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.65rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            vertical-align: middle;
-        }
-
         .view-full {
             color: var(--accent);
             cursor: pointer;
@@ -1737,15 +1626,6 @@
             margin: 0.75rem 0;
             color: var(--fg-muted);
             font-style: italic;
-        }
-
-        .mention-link {
-            color: var(--accent);
-            text-decoration: none;
-        }
-
-        .mention-link:hover {
-            text-decoration: underline;
         }
 
         .mention-dropdown {
@@ -1936,14 +1816,6 @@
         // Search state
         let searchTimeout = null;
         let isSearchMode = false;
-
-        // Get today's date in YYYY-MM-DD format (local timezone)
-        function getToday() {
-            const now = new Date();
-            return now.getFullYear() + '-' +
-                String(now.getMonth() + 1).padStart(2, '0') + '-' +
-                String(now.getDate()).padStart(2, '0');
-        }
 
         // Get date string from timestamp
         function getDateFromTimestamp(ts) {
@@ -3625,12 +3497,6 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             return div.innerHTML;
         }
 
-        // Convert @mentions in escaped HTML to profile links
-        function renderMentions(escapedHtml) {
-            // Match @handle where handle is 3-15 lowercase alphanumeric
-            return escapedHtml.replace(/@([a-z0-9]{3,15})\b/g, '<a href="/u/$1" class="mention-link">@$1</a>');
-        }
-
         // Generate avatar HTML from handle
         function renderAvatar(handle, small = false) {
             // Generate color from handle hash
@@ -3771,13 +3637,6 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             if (seconds < 60) return 'in < 1 min';
             if (seconds < 3600) return `in ${Math.floor(seconds / 60)} min`;
             return `in ${Math.floor(seconds / 3600)} hr`;
-        }
-
-        function estimateTokens(text) {
-            // Rough estimate: ~4 chars per token for English text
-            // This matches common tokenizer behavior
-            if (!text) return 0;
-            return Math.ceil(text.length / 4);
         }
 
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

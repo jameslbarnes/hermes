@@ -16,28 +16,28 @@
         }
 
         :root {
-            --bg: #f7f5f0;
-            --surface: #fdfcf8;
-            --surface-raised: #ffffff;
-            --border: #ddd8ce;
-            --border-subtle: #eae6de;
+            --bg: #e8e4db;
+            --surface: #f4f2ec;
+            --surface-raised: #fdfcf9;
+            --border: #c9c3b8;
+            --border-subtle: #dbd6cc;
             --fg: #1c1917;
-            --fg-muted: #78716c;
-            --fg-faint: #a8a29e;
+            --fg-muted: #57534e;
+            --fg-faint: #78716c;
             --accent: #7c5cbf;
             --accent-hover: #6b4dab;
             --accent-subtle: rgba(124, 92, 191, 0.08);
             --accent-surface: rgba(124, 92, 191, 0.04);
 
             /* Typography scale */
-            --text-2xs: 0.6rem;
-            --text-xs: 0.7rem;
-            --text-sm: 0.8rem;
-            --text-base: 0.95rem;
-            --text-md: 1.05rem;
-            --text-lg: 1.15rem;
-            --text-xl: 1.5rem;
-            --text-2xl: 1.85rem;
+            --text-2xs: 0.7rem;
+            --text-xs: 0.8rem;
+            --text-sm: 0.9rem;
+            --text-base: 1.05rem;
+            --text-md: 1.15rem;
+            --text-lg: 1.3rem;
+            --text-xl: 1.65rem;
+            --text-2xl: 2rem;
 
             /* Spacing */
             --space-1: 0.25rem;
@@ -80,7 +80,7 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            height: 56px;
+            height: 68px;
             padding: 0 var(--space-6);
         }
 
@@ -91,7 +91,7 @@
         }
 
         .header-left h1 {
-            font-size: var(--text-lg);
+            font-size: 2.588rem;
             font-weight: 500;
             font-style: italic;
             letter-spacing: -0.03em;
@@ -99,11 +99,11 @@
         }
 
         .header-subtitle {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: var(--text-2xs);
-            color: var(--fg-faint);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
+            font-family: 'Newsreader', Georgia, serif;
+            font-size: var(--text-xs);
+            color: var(--fg-muted);
+            font-style: italic;
+            line-height: 1.4;
         }
 
 
@@ -127,6 +127,20 @@
         }
         .nav-panel a:hover {
             color: var(--fg);
+        }
+        .header-stack {
+            position: relative;
+        }
+        .header-stack #theme-toggle {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            margin-top: var(--space-2);
+        }
+        .header-stack.open #theme-toggle {
+            display: flex;
         }
 
         .header-right {
@@ -412,12 +426,11 @@
         }
 
         .entry {
-            padding: var(--space-8) 0;
-            border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .entry:first-child {
-            padding-top: 0;
+            background: var(--surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: var(--space-6);
+            margin-bottom: var(--space-4);
         }
 
         .entry-header {
@@ -661,21 +674,21 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 1.35rem;
-            height: 1.35rem;
+            width: 1.75rem;
+            height: 1.75rem;
             border-radius: 50%;
-            font-size: 0.65rem;
+            font-size: 0.8rem;
             font-weight: 600;
             color: white;
             text-transform: uppercase;
             vertical-align: middle;
-            margin-right: var(--space-1);
+            margin-right: var(--space-2);
         }
 
         .avatar-small {
-            width: 1.05rem;
-            height: 1.05rem;
-            font-size: 0.5rem;
+            width: 1.35rem;
+            height: 1.35rem;
+            font-size: 0.65rem;
             margin-right: var(--space-1);
         }
 
@@ -1134,8 +1147,11 @@
 
         /* Summaries - thread style */
         .summary {
-            padding: var(--space-8) 0;
-            border-bottom: 1px solid var(--border-subtle);
+            background: var(--surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: var(--space-6);
+            margin-bottom: var(--space-4);
         }
 
         .summary-content {
@@ -1197,44 +1213,102 @@
             margin-bottom: 0;
         }
 
-        .day-header {
+        /* ── Date carousel ── */
+        .date-carousel {
+            position: relative;
+            overflow: hidden;
+            transition: height 0.35s ease;
+        }
+
+        .date-panel {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            opacity: 0;
+            pointer-events: none;
+            transform: translateX(100%);
+            transition: transform 0.35s ease, opacity 0.35s ease;
+        }
+
+        .date-panel.active {
+            position: relative;
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateX(0);
+        }
+
+        .date-panel.peek-left {
+            opacity: 0.15;
+            transform: translateX(-92%);
+        }
+
+        .date-panel.peek-right {
+            opacity: 0.15;
+            transform: translateX(92%);
+        }
+
+        .date-panel-header {
             display: flex;
-            align-items: baseline;
-            gap: var(--space-4);
-            padding: var(--space-16) 0 var(--space-6) 0;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-4) 0 var(--space-6) 0;
         }
 
-        .day-header:first-child {
-            padding-top: var(--space-2);
-        }
-
-        .day-header-text {
+        .date-panel-label {
             font-family: 'Newsreader', Georgia, serif;
-            font-size: var(--text-2xl);
+            font-size: var(--text-xl);
             font-weight: 400;
             font-style: italic;
             color: var(--fg);
-            white-space: nowrap;
             letter-spacing: -0.02em;
         }
 
-        .day-header-date {
+        .date-panel-date {
             font-family: 'IBM Plex Mono', monospace;
             font-size: var(--text-xs);
-            color: var(--fg-faint);
+            color: var(--fg-muted);
+            font-weight: 500;
             letter-spacing: 0.03em;
         }
 
-        .day-header-line {
-            flex: 1;
-            height: 1px;
-            background: var(--border);
-            align-self: center;
+        .date-nav-arrows {
+            display: flex;
+            gap: var(--space-2);
+        }
+
+        .date-nav-btn {
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            color: var(--fg-muted);
+            width: 2rem;
+            height: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s;
+            font-size: 0.9rem;
+        }
+
+        .date-nav-btn:hover {
+            color: var(--fg);
+            border-color: var(--fg-muted);
+        }
+
+        .date-nav-btn:disabled {
+            opacity: 0.3;
+            cursor: default;
+        }
+
+        .date-nav-btn:disabled:hover {
+            color: var(--fg-muted);
+            border-color: var(--border);
         }
 
         .daily-intro {
             padding: var(--space-2) 0 var(--space-6) 0;
-            border-bottom: 1px solid var(--border-subtle);
         }
 
         .daily-intro-content {
@@ -1251,11 +1325,12 @@
             }
 
             .search-container.expanded .search-input {
-                width: 160px;
+                width: 320px;
+                max-width: 50vw;
             }
 
-            .day-header-text {
-                font-size: var(--text-xl);
+            .date-panel-label {
+                font-size: var(--text-lg);
             }
 
             .site-footer {
@@ -1428,7 +1503,8 @@
         }
 
         .search-container.expanded .search-input {
-            width: 200px;
+            width: 400px;
+            max-width: 50vw;
             opacity: 1;
             padding: var(--space-2) var(--space-3);
         }
@@ -1609,8 +1685,11 @@
 
         /* Conversation card */
         .conversation {
-            padding: var(--space-8) 0;
-            border-bottom: 1px solid var(--border-subtle);
+            background: var(--surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: var(--space-6);
+            margin-bottom: var(--space-4);
         }
 
         .conversation-summary {
@@ -1786,14 +1865,14 @@
         /* Dark mode */
         /* Dark mode — explicit toggle */
         :root[data-theme="dark"] {
-            --bg: #0c0c0e;
-            --surface: #141416;
-            --surface-raised: #1a1a1e;
-            --border: #27272a;
-            --border-subtle: #1e1e22;
-            --fg: #e4e4e7;
-            --fg-muted: #a1a1aa;
-            --fg-faint: #636369;
+            --bg: #0e0d0b;
+            --surface: #161513;
+            --surface-raised: #1c1b18;
+            --border: #292724;
+            --border-subtle: #201f1c;
+            --fg: #e7e5e0;
+            --fg-muted: #a8a29e;
+            --fg-faint: #8a847e;
             --accent: #a78bfa;
             --accent-hover: #b9a0fc;
             --accent-subtle: rgba(167, 139, 250, 0.1);
@@ -1806,14 +1885,14 @@
         /* Dark mode — system preference (when no manual override) */
         @media (prefers-color-scheme: dark) {
             :root:not([data-theme]) {
-                --bg: #0c0c0e;
-                --surface: #141416;
-                --surface-raised: #1a1a1e;
-                --border: #27272a;
-                --border-subtle: #1e1e22;
-                --fg: #e4e4e7;
-                --fg-muted: #a1a1aa;
-                --fg-faint: #636369;
+                --bg: #0e0d0b;
+                --surface: #161513;
+                --surface-raised: #1c1b18;
+                --border: #292724;
+                --border-subtle: #201f1c;
+                --fg: #e7e5e0;
+                --fg-muted: #a8a29e;
+                --fg-faint: #8a847e;
                 --accent: #a78bfa;
                 --accent-hover: #b9a0fc;
                 --accent-subtle: rgba(167, 139, 250, 0.1);
@@ -1849,15 +1928,15 @@
     <header class="site-header">
         <div class="header-row-1">
             <div class="header-left">
-                <h1>Hermes</h1>
-                <span class="header-subtitle">Shared Notebook</span>
+                <h1><a href="/" style="color: inherit; text-decoration: none;">Hermes</a></h1>
+                <span class="header-subtitle">From AI Conversations<br>To Shared Notebook</span>
                 <div class="search-container" id="search-container">
-                    <input type="search" class="search-input" id="search-input" name="hermes-search" placeholder="Search..." autocomplete="off" data-1p-ignore data-lpignore="true" />
                     <button class="toolbar-btn" id="search-btn" title="Search">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
                     </button>
+                    <input type="search" class="search-input" id="search-input" name="hermes-search" placeholder="Search..." autocomplete="off" data-1p-ignore data-lpignore="true" />
                 </div>
             </div>
             <div class="header-right" id="header-right">
@@ -1882,12 +1961,14 @@
                         </div>
                     </div>
                 </div>
-                <button class="toolbar-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode"></button>
-                <button class="toolbar-btn hamburger-btn" onclick="toggleNavPanel()" title="Menu">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" d="M4 6h16M4 12h16M4 18h16"/>
-                    </svg>
-                </button>
+                <div class="header-stack">
+                    <button class="toolbar-btn hamburger-btn" onclick="toggleNavPanel()" title="Menu">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" d="M4 6h16M4 12h16M4 18h16"/>
+                        </svg>
+                    </button>
+                    <button class="toolbar-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode"></button>
+                </div>
             </div>
         </div>
         <nav class="nav-panel" id="nav-panel"></nav>
@@ -1901,9 +1982,7 @@
     <footer class="site-footer">
         <span>Hermes</span>
         <nav>
-            <a href="/about">About</a>
             <a href="/prompt">See the prompt</a>
-            <a href="/trust">Trust</a>
             <a href="https://github.com/jameslbarnes/hermes">Source</a>
         </nav>
     </footer>
@@ -1916,21 +1995,32 @@
             return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         }
 
-        function updateThemeIcon() {
-            const btn = document.getElementById('theme-toggle');
-            if (btn) btn.innerHTML = getEffectiveTheme() === 'dark'
+        function themeIconSVG() {
+            return getEffectiveTheme() === 'dark'
                 ? '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path stroke-linecap="round" d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>'
                 : '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>';
+        }
+
+        function updateThemeIcon() {
+            const btn = document.getElementById('theme-toggle');
+            if (btn) btn.innerHTML = themeIconSVG();
         }
 
         function toggleTheme(e) {
             const current = getEffectiveTheme();
             const next = current === 'dark' ? 'light' : 'dark';
 
+            const navOpen = document.getElementById('nav-panel')?.classList.contains('open');
             const applyTheme = () => {
                 document.documentElement.setAttribute('data-theme', next);
                 document.cookie = `hermes_theme=${next};path=/;max-age=${60*60*24*365};SameSite=Lax`;
                 updateThemeIcon();
+                if (navOpen) {
+                    const panel = document.getElementById('nav-panel');
+                    const stack = document.querySelector('.header-stack');
+                    if (panel && !panel.classList.contains('open')) panel.classList.add('open');
+                    if (stack) stack.classList.add('open');
+                }
             };
 
             // Radial reveal via View Transitions API
@@ -1943,12 +2033,11 @@
                     Math.max(cx, window.innerWidth - cx),
                     Math.max(cy, window.innerHeight - cy)
                 );
-
                 const t = document.startViewTransition(applyTheme);
                 t.ready.then(() => {
                     document.documentElement.animate(
                         { clipPath: [`circle(0px at ${cx}px ${cy}px)`, `circle(${maxR}px at ${cx}px ${cy}px)`] },
-                        { duration: 450, easing: 'ease-out', pseudoElement: '::view-transition-new(root)' }
+                        { duration: 225, easing: 'ease-out', pseudoElement: '::view-transition-new(root)' }
                     );
                 });
             } else {
@@ -2276,6 +2365,51 @@
             }
         }
 
+        // ── Date carousel state ──
+        let carouselDates = [];   // sorted newest-first (index 0 = yesterday)
+        let carouselIndex = 0;    // currently active panel
+
+        function navigateDate(direction) {
+            // direction: -1 = older (left), +1 = newer (right)
+            const newIndex = carouselIndex - direction;
+            if (newIndex < 0 || newIndex >= carouselDates.length) return;
+
+            const carousel = document.querySelector('.date-carousel');
+            const panels = document.querySelectorAll('.date-panel');
+            if (!carousel || !panels.length) return;
+
+            // Lock current height so container doesn't collapse during transition
+            carousel.style.height = carousel.offsetHeight + 'px';
+
+            // Remove all state classes
+            panels.forEach(p => p.classList.remove('active', 'peek-left', 'peek-right'));
+
+            carouselIndex = newIndex;
+
+            // Set active + peek panels
+            panels[carouselIndex].classList.add('active');
+            if (carouselIndex > 0) panels[carouselIndex - 1].classList.add('peek-right');
+            if (carouselIndex < panels.length - 1) panels[carouselIndex + 1].classList.add('peek-left');
+
+            // Animate to new height on next frame
+            requestAnimationFrame(() => {
+                carousel.style.height = panels[carouselIndex].scrollHeight + 'px';
+            });
+
+            // Update arrow states
+            const leftBtn = document.querySelector('.date-nav-btn.nav-older');
+            const rightBtn = document.querySelector('.date-nav-btn.nav-newer');
+            if (leftBtn) leftBtn.disabled = (carouselIndex >= carouselDates.length - 1);
+            if (rightBtn) rightBtn.disabled = (carouselIndex <= 0);
+
+            // Update the header label
+            const { label, fullDate } = formatDateParts(carouselDates[carouselIndex]);
+            const labelEl = document.querySelector('.date-panel-header .date-panel-label');
+            const dateEl = document.querySelector('.date-panel-header .date-panel-date');
+            if (labelEl) labelEl.textContent = label;
+            if (dateEl) dateEl.textContent = fullDate;
+        }
+
         // Render the feed with all data ready
         function renderFeedWithData(feed, entries, summaries, dailySummaries, conversations) {
             // Build map of daily summaries by date
@@ -2323,13 +2457,61 @@
                 itemsByActivityDate.get(date).push(item);
             });
 
-            // Get all dates sorted (most recent first)
-            const allDates = [...itemsByActivityDate.keys()].sort((a, b) => b.localeCompare(a));
+            // Compute date range: yesterday back 7 days
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const dateCandidates = [];
+            for (let i = 1; i <= 8; i++) {
+                const d = new Date(today);
+                d.setDate(d.getDate() - i);
+                const ds = d.getFullYear() + '-' +
+                    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                    String(d.getDate()).padStart(2, '0');
+                dateCandidates.push(ds);
+            }
 
-            // Render
-            let html = '';
+            // Filter to dates that have content, preserving newest-first order
+            carouselDates = dateCandidates.filter(d => {
+                const items = itemsByActivityDate.get(d) || [];
+                return items.length > 0;
+            });
 
-            for (const date of allDates) {
+            // If no dates have content, fall back to showing all dates with content (excluding today)
+            if (carouselDates.length === 0) {
+                const todayStr = getToday();
+                carouselDates = [...itemsByActivityDate.keys()]
+                    .filter(d => d !== todayStr)
+                    .sort((a, b) => b.localeCompare(a));
+            }
+
+            if (carouselDates.length === 0) {
+                feed.innerHTML = `
+                    <div class="empty-state">
+                        Nothing yet. The notebook is empty.
+                    </div>
+                `;
+                return;
+            }
+
+            // Build carousel panels
+            carouselIndex = 0; // start at newest (yesterday)
+            const { label: firstLabel, fullDate: firstFullDate } = formatDateParts(carouselDates[0]);
+
+            let html = `
+                <div class="date-panel-header">
+                    <div>
+                        <span class="date-panel-label">${firstLabel}</span>
+                        <span class="date-panel-date">${firstFullDate}</span>
+                    </div>
+                    <div class="date-nav-arrows">
+                        <button class="date-nav-btn nav-older" onclick="navigateDate(-1)" title="Older">&larr;</button>
+                        <button class="date-nav-btn nav-newer" onclick="navigateDate(1)" title="Newer" disabled>&rarr;</button>
+                    </div>
+                </div>
+                <div class="date-carousel">
+            `;
+
+            carouselDates.forEach((date, idx) => {
                 const dayItems = itemsByActivityDate.get(date) || [];
                 const dailySummary = dailySummaryByDate.get(date);
 
@@ -2349,11 +2531,9 @@
                 // Sort by activity time (most recent first)
                 filteredItems.sort((a, b) => b.activityTime - a.activityTime);
 
-                if (filteredItems.length === 0) continue;
+                const panelClass = idx === 0 ? 'active' : (idx === 1 ? 'peek-left' : '');
 
-                // Render day header
-                const { label, fullDate } = formatDateParts(date);
-                html += renderDayHeader(label, date);
+                html += `<div class="date-panel ${panelClass}" data-date="${date}">`;
 
                 // Render daily summary as intro if it exists
                 if (dailySummary) {
@@ -2375,27 +2555,25 @@
                         return '';
                     }
                 }).join('');
-            }
 
-            // Add "Load more" button if there are more entries
-            if (hasMoreEntries) {
-                html += `
-                    <div class="load-more-container">
-                        <button class="load-more-btn" onclick="loadFeed(true, true)">Load more</button>
-                    </div>
-                `;
-            }
+                html += `</div>`; // .date-panel
+            });
 
-            if (!html) {
-                feed.innerHTML = `
-                    <div class="empty-state">
-                        Nothing yet. The notebook is empty.
-                    </div>
-                `;
-                return;
+            html += `</div>`; // .date-carousel
+
+            // Disable older arrow if only one panel
+            if (carouselDates.length <= 1) {
+                html = html.replace('class="date-nav-btn nav-older"', 'class="date-nav-btn nav-older" disabled');
             }
 
             feed.innerHTML = html;
+
+            // Set initial carousel height to match active panel
+            const carousel = feed.querySelector('.date-carousel');
+            const activePanel = feed.querySelector('.date-panel.active');
+            if (carousel && activePanel) {
+                carousel.style.height = activePanel.scrollHeight + 'px';
+            }
         }
 
         async function updateInboxBadge() {
@@ -2720,7 +2898,7 @@
                 <div class="channel-card">
                     <div class="channel-card-header">
                         <a href="?view=channel&id=${encodeURIComponent(channel.id)}" class="channel-card-name">#${escapeHtml(channel.id)}</a>
-                        <span class="channel-card-meta">${memberCount} member${memberCount !== 1 ? 's' : ''}${skillCount > 0 ? ` Â· ${skillCount} skill${skillCount !== 1 ? 's' : ''}` : ''}</span>
+                        <span class="channel-card-meta">${memberCount} member${memberCount !== 1 ? 's' : ''}${skillCount > 0 ? ` · ${skillCount} skill${skillCount !== 1 ? 's' : ''}` : ''}</span>
                     </div>
                     ${channel.description ? `<div class="channel-card-description">${escapeHtml(channel.description)}</div>` : ''}
                     <div class="channel-card-actions">
@@ -2807,7 +2985,7 @@
                         </div>
                         ${channel.description ? `<div class="channel-header-description">${escapeHtml(channel.description)}</div>` : ''}
                         <div class="channel-header-meta">
-                            ${memberCount} member${memberCount !== 1 ? 's' : ''} Â· ${skillCount} skill${skillCount !== 1 ? 's' : ''} Â· created by @${escapeHtml(channel.createdBy)}
+                            ${memberCount} member${memberCount !== 1 ? 's' : ''} · ${skillCount} skill${skillCount !== 1 ? 's' : ''} · created by @${escapeHtml(channel.createdBy)}
                         </div>
                         <div style="margin-top: 0.5rem;">
                             <a href="?view=channels" style="font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; color: var(--fg-muted);">â† All channels</a>
@@ -3057,7 +3235,7 @@
                 ? `${replyHtml}${authorHtml} posted a ${type} from ${escapeHtml(source)}`
                 : `${replyHtml}posted a ${type} from ${escapeHtml(source)}`;
 
-            // Footer: [time] Â· [tokens] Â· [status] Â· [actions]
+            // Footer: [time] · [tokens] · [status] · [actions]
             let meta = [];
             meta.push(`<a href="/e/${entry.id}" class="permalink" title="${escapeHtml(formatExactTimestamp(entry.timestamp))}">permalink · ${formatTime(entry.timestamp)}</a>`);
             meta.push(`<button class="copy-link-action" onclick="copyPermalink('${entry.id}', this)">copy link</button>`);
@@ -3077,7 +3255,7 @@
                     <div class="entry-header">${header}</div>
                     <div class="${contentClass}">${contentHtml}</div>
                     ${recipientsHtml}
-                    <div class="entry-meta">${meta.join(' Â· ')}</div>
+                    <div class="entry-meta">${meta.join(' · ')}</div>
                 </div>
             `;
         }
@@ -3096,7 +3274,7 @@
             }
             const header = `${authorHtml} posted ${entryCount} notes from Claude`;
 
-            // Footer: [time] Â· [expand] Â· [discuss]
+            // Footer: [time] · [expand] · [discuss]
             let meta = [];
             meta.push(formatTimeRange(summary.startTime, summary.endTime));
             meta.push(`<span class="summary-toggle" onclick="toggleSummary('${summary.id}')">expand</span>`);
@@ -3108,7 +3286,7 @@
                 <div class="summary" data-id="${summary.id}">
                     <div class="entry-header">${header}</div>
                     <p class="summary-content">${escapeHtml(summary.content)}</p>
-                    <div class="summary-meta">${meta.join(' Â· ')}</div>
+                    <div class="summary-meta">${meta.join(' · ')}</div>
                     <div class="summary-entries" id="summary-entries-${summary.id}">
                         <div class="loading">Loading...</div>
                     </div>
@@ -3132,7 +3310,7 @@
             }
             const header = `${authorHtml} posted a conversation with ${escapeHtml(platformName)}`;
 
-            // Footer: [time] Â· [status] Â· [actions]
+            // Footer: [time] · [status] · [actions]
             let meta = [];
             meta.push(formatTime(conversation.timestamp));
             if (isPending) meta.push(`<span class="pending-badge">publishes ${formatTimeUntil(conversation.publishAt)}</span>`);
@@ -3157,7 +3335,7 @@
                     <div class="entry-header">${header}</div>
                     <div class="conversation-summary">${marked.parse(conversation.summary || '')}</div>
                     ${aiOnlyNote}
-                    <div class="conversation-meta">${meta.join(' Â· ')}</div>
+                    <div class="conversation-meta">${meta.join(' · ')}</div>
                     ${!isAiOnly ? `
                     <div class="conversation-full" id="conversation-full-${conversation.id}">
                         <h3>${escapeHtml(conversation.title || 'Untitled')}</h3>
@@ -3287,7 +3465,7 @@
             container.innerHTML = entries.map(entry => `
                 <div class="entry">
                     <p class="entry-content">${escapeHtml(entry.content)}</p>
-                    <div class="entry-meta">${formatTime(entry.timestamp)}${entry.client ? ` Â· ${entry.client}` : ''}</div>
+                    <div class="entry-meta">${formatTime(entry.timestamp)}${entry.client ? ` · ${entry.client}` : ''}</div>
                 </div>
             `).join('');
         }
@@ -3790,26 +3968,26 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             const date = new Date(year, month - 1, day);
             const now = new Date();
             const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            const yesterday = new Date(today);
-            yesterday.setDate(yesterday.getDate() - 1);
 
             const fullDate = date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+            const daysAgo = Math.round((today - date) / (1000 * 60 * 60 * 24));
 
-            if (date.getTime() === today.getTime()) {
+            if (daysAgo <= 0) {
                 return { label: 'Today', fullDate };
             }
-            if (date.getTime() === yesterday.getTime()) {
+            if (daysAgo === 1) {
                 return { label: 'Yesterday', fullDate };
             }
-
-            const daysAgo = Math.floor((today - date) / (1000 * 60 * 60 * 24));
-            if (daysAgo < 7) {
-                return { label: `${daysAgo} days ago`, fullDate };
+            if (daysAgo === 2) {
+                return { label: 'The Day Before Yesterday', fullDate };
+            }
+            if (daysAgo <= 7) {
+                const weekday = date.toLocaleDateString('en-US', { weekday: 'long' });
+                return { label: `Last ${weekday}`, fullDate };
             }
 
-            // For older dates, use the weekday as the label
-            const weekday = date.toLocaleDateString('en-US', { weekday: 'long' });
-            return { label: weekday, fullDate };
+            // For older dates, just use the full date
+            return { label: fullDate, fullDate };
         }
 
         function formatTimeRange(startTs, endTs) {
@@ -3884,10 +4062,12 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
         function toggleNavPanel() {
             const panel = document.getElementById('nav-panel');
             if (!panel) return;
+            const stack = document.querySelector('.header-stack');
             const isOpen = panel.classList.toggle('open');
+            if (stack) stack.classList.toggle('open', isOpen);
             if (isOpen) {
                 const loggedIn = !!getEffectiveKey();
-                panel.innerHTML = loggedIn
+                panel.innerHTML = (loggedIn
                     ? '<a href="/" onclick="closeNavPanel()">Feed</a>'
                       + '<a href="?view=channels" onclick="closeNavPanel()">Channels</a>'
                       + '<a href="?view=inbox" onclick="closeNavPanel()">Inbox</a>'
@@ -3899,13 +4079,15 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                       + '<a href="/join" onclick="closeNavPanel()">Join</a>'
                       + '<a href="/prompt" onclick="closeNavPanel()">Prompt</a>'
                       + '<a href="/dashboard" onclick="closeNavPanel()">Dashboard</a>'
-                      + '<a href="https://github.com/jameslbarnes/hermes" target="_blank" rel="noopener" onclick="closeNavPanel()">GitHub</a>';
+                      + '<a href="https://github.com/jameslbarnes/hermes" target="_blank" rel="noopener" onclick="closeNavPanel()">GitHub</a>');
             }
         }
 
         function closeNavPanel() {
             const panel = document.getElementById('nav-panel');
             if (panel) panel.classList.remove('open');
+            const stack = document.querySelector('.header-stack');
+            if (stack) stack.classList.remove('open');
         }
 
         function toggleOnboardMenu() {
@@ -3953,7 +4135,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                 const menu = document.getElementById('gear-menu');
                 if (menu) menu.classList.remove('open');
             }
-            if (!e.target.closest('.hamburger-btn') && !e.target.closest('.nav-panel')) {
+            if (!e.target.closest('.header-stack') && !e.target.closest('.nav-panel')) {
                 closeNavPanel();
             }
         });

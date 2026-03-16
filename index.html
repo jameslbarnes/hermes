@@ -106,6 +106,29 @@
             letter-spacing: 0.08em;
         }
 
+
+        .nav-panel {
+            display: none;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: var(--space-4) var(--space-6);
+        }
+        .nav-panel.open {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-3);
+        }
+        .nav-panel a {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: var(--text-xs);
+            color: var(--fg-muted);
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+        .nav-panel a:hover {
+            color: var(--fg);
+        }
+
         .header-right {
             display: flex;
             align-items: center;
@@ -1761,8 +1784,28 @@
         }
 
         /* Dark mode */
+        /* Dark mode — explicit toggle */
+        :root[data-theme="dark"] {
+            --bg: #0c0c0e;
+            --surface: #141416;
+            --surface-raised: #1a1a1e;
+            --border: #27272a;
+            --border-subtle: #1e1e22;
+            --fg: #e4e4e7;
+            --fg-muted: #a1a1aa;
+            --fg-faint: #636369;
+            --accent: #a78bfa;
+            --accent-hover: #b9a0fc;
+            --accent-subtle: rgba(167, 139, 250, 0.1);
+            --accent-surface: rgba(167, 139, 250, 0.04);
+        }
+        :root[data-theme="dark"] .replies-container .entry { border-color: var(--border); }
+        :root[data-theme="dark"] .only-you-badge { background: rgba(200, 200, 200, 0.08); }
+        :root[data-theme="dark"] .channel-pill--browse { background: rgba(255, 255, 255, 0.05); }
+
+        /* Dark mode — system preference (when no manual override) */
         @media (prefers-color-scheme: dark) {
-            :root {
+            :root:not([data-theme]) {
                 --bg: #0c0c0e;
                 --surface: #141416;
                 --surface-raised: #1a1a1e;
@@ -1776,20 +1819,31 @@
                 --accent-subtle: rgba(167, 139, 250, 0.1);
                 --accent-surface: rgba(167, 139, 250, 0.04);
             }
+            :root:not([data-theme]) .replies-container .entry { border-color: var(--border); }
+            :root:not([data-theme]) .only-you-badge { background: rgba(200, 200, 200, 0.08); }
+            :root:not([data-theme]) .channel-pill--browse { background: rgba(255, 255, 255, 0.05); }
+        }
 
-            .replies-container .entry {
-                border-color: var(--border);
-            }
-
-            .only-you-badge {
-                background: rgba(200, 200, 200, 0.08);
-            }
-
-            .channel-pill--browse {
-                background: rgba(255, 255, 255, 0.05);
-            }
+        /* View transition — radial theme reveal */
+        ::view-transition-old(root),
+        ::view-transition-new(root) {
+            animation: none;
+            mix-blend-mode: normal;
+        }
+        ::view-transition-old(root) {
+            z-index: 1;
+        }
+        ::view-transition-new(root) {
+            z-index: 9999;
         }
     </style>
+    <script>
+        // Apply saved theme before paint to prevent flash
+        (function() {
+            const saved = document.cookie.match(/(?:^|; )hermes_theme=(\w+)/);
+            if (saved) document.documentElement.setAttribute('data-theme', saved[1]);
+        })();
+    </script>
 </head>
 <body>
     <header class="site-header">
@@ -1797,8 +1851,6 @@
             <div class="header-left">
                 <h1>Hermes</h1>
                 <span class="header-subtitle">Shared Notebook</span>
-            </div>
-            <div class="header-right" id="header-right">
                 <div class="search-container" id="search-container">
                     <input type="search" class="search-input" id="search-input" name="hermes-search" placeholder="Search..." autocomplete="off" data-1p-ignore data-lpignore="true" />
                     <button class="toolbar-btn" id="search-btn" title="Search">
@@ -1807,7 +1859,9 @@
                         </svg>
                     </button>
                 </div>
-                <button class="toolbar-btn" onclick="openImportModal()" title="Import conversation">
+            </div>
+            <div class="header-right" id="header-right">
+                <button class="toolbar-btn" id="import-btn" onclick="openImportModal()" title="Import conversation" style="display: none;">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
                     </svg>
@@ -1828,8 +1882,15 @@
                         </div>
                     </div>
                 </div>
+                <button class="toolbar-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode"></button>
+                <button class="toolbar-btn hamburger-btn" onclick="toggleNavPanel()" title="Menu">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" d="M4 6h16M4 12h16M4 18h16"/>
+                    </svg>
+                </button>
             </div>
         </div>
+        <nav class="nav-panel" id="nav-panel"></nav>
         <div class="channel-pills" id="channel-pills" style="display: none;"></div>
     </header>
 
@@ -1848,6 +1909,63 @@
     </footer>
 
     <script>
+        // ── Theme toggle ──
+        function getEffectiveTheme() {
+            const attr = document.documentElement.getAttribute('data-theme');
+            if (attr) return attr;
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+
+        function updateThemeIcon() {
+            const btn = document.getElementById('theme-toggle');
+            if (btn) btn.innerHTML = getEffectiveTheme() === 'dark'
+                ? '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path stroke-linecap="round" d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>'
+                : '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>';
+        }
+
+        function toggleTheme(e) {
+            const current = getEffectiveTheme();
+            const next = current === 'dark' ? 'light' : 'dark';
+
+            const applyTheme = () => {
+                document.documentElement.setAttribute('data-theme', next);
+                document.cookie = `hermes_theme=${next};path=/;max-age=${60*60*24*365};SameSite=Lax`;
+                updateThemeIcon();
+            };
+
+            // Radial reveal via View Transitions API
+            if (document.startViewTransition) {
+                const btn = document.getElementById('theme-toggle');
+                const rect = btn.getBoundingClientRect();
+                const cx = rect.left + rect.width / 2;
+                const cy = rect.top + rect.height / 2;
+                const maxR = Math.hypot(
+                    Math.max(cx, window.innerWidth - cx),
+                    Math.max(cy, window.innerHeight - cy)
+                );
+
+                const t = document.startViewTransition(applyTheme);
+                t.ready.then(() => {
+                    document.documentElement.animate(
+                        { clipPath: [`circle(0px at ${cx}px ${cy}px)`, `circle(${maxR}px at ${cx}px ${cy}px)`] },
+                        { duration: 450, easing: 'ease-out', pseudoElement: '::view-transition-new(root)' }
+                    );
+                });
+            } else {
+                applyTheme();
+            }
+        }
+
+        // Set icon once DOM is ready
+        updateThemeIcon();
+        // Update icon if system preference changes (only matters when no cookie set)
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateThemeIcon);
+
+        // API base — proxy to production when running locally
+        const API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+            ? 'https://hermes.teleport.computer'
+            : '';
+
         // Get URL params
         const params = new URLSearchParams(window.location.search);
         const filterPseudonym = params.get('pseudonym');
@@ -1905,7 +2023,7 @@
             const effectiveKey = getEffectiveKey();
             if (effectiveKey) {
                 try {
-                    const res = await fetch('/api/identity/lookup', {
+                    const res = await fetch(`${API_BASE}/api/identity/lookup`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ secret_key: effectiveKey })
@@ -1936,6 +2054,8 @@
                                     inboxBtn.style.display = '';
                                     updateInboxBadge();
                                 }
+                                const importBtn = document.getElementById('import-btn');
+                                if (importBtn) importBtn.style.display = '';
                                 loadChannelsSidebar();
                             } else {
                                 // Legacy user — prompt to claim handle
@@ -1973,7 +2093,7 @@
 
             try {
                 showJoinStatus(`Joining #${channelIdFromUrl}...`, 'info');
-                const res = await fetch(`/api/channels/${encodeURIComponent(channelIdFromUrl)}/join`, {
+                const res = await fetch(`${API_BASE}/api/channels/${encodeURIComponent(channelIdFromUrl)}/join`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ secret_key: key, invite_token: inviteToken })
@@ -2092,8 +2212,8 @@
                     // Initial/fresh load: fetch everything in parallel.
                     const [entriesRes, summariesRes, dailyRes, conversationsRes] = await Promise.all([
                         fetch(entriesUrl),
-                        fetch(`/api/summaries?limit=${PAGE_SIZE}`),
-                        fetch('/api/daily-summaries?limit=14'),
+                        fetch(`${API_BASE}/api/summaries?limit=${PAGE_SIZE}`),
+                        fetch(`${API_BASE}/api/daily-summaries?limit=14`),
                         fetch(conversationsUrl)
                     ]);
 
@@ -2282,7 +2402,7 @@
             const key = getEffectiveKey();
             if (!key) return;
             try {
-                const res = await fetch(`/api/inbox?key=${encodeURIComponent(key)}`);
+                const res = await fetch(`${API_BASE}/api/inbox?key=${encodeURIComponent(key)}`);
                 if (!res.ok) return;
                 const data = await res.json();
                 const received = data.received || data.entries || [];
@@ -2452,7 +2572,7 @@
 
             const [entriesRes, summariesRes] = await Promise.all([
                 fetch(entriesUrl),
-                fetch('/api/summaries')
+                fetch(`${API_BASE}/api/summaries`)
             ]);
 
             const entriesData = await entriesRes.json();
@@ -2492,7 +2612,7 @@
             if (!key) return;
 
             try {
-                const res = await fetch(`/api/channels?secret_key=${encodeURIComponent(key)}`);
+                const res = await fetch(`${API_BASE}/api/channels?secret_key=${encodeURIComponent(key)}`);
                 if (!res.ok) return;
 
                 const data = await res.json();
@@ -2520,7 +2640,7 @@
             const keyParam = key ? `secret_key=${encodeURIComponent(key)}` : '';
 
             try {
-                const res = await fetch(`/api/channels${keyParam ? '?' + keyParam : ''}`);
+                const res = await fetch(`${API_BASE}/api/channels${keyParam ? '?' + keyParam : ''}`);
                 const data = await res.json();
 
                 const subscribed = data.subscribed || [];
@@ -2625,8 +2745,8 @@
             try {
                 // Fetch channel info and entries in parallel
                 const [channelRes, entriesRes] = await Promise.all([
-                    fetch(`/api/channels/${encodeURIComponent(channelId)}${keyParam ? '?' + keyParam : ''}`),
-                    fetch(`/api/channels/${encodeURIComponent(channelId)}/entries${keyParam ? '?' + keyParam : ''}`)
+                    fetch(`${API_BASE}/api/channels/${encodeURIComponent(channelId)}${keyParam ? '?' + keyParam : ''}`),
+                    fetch(`${API_BASE}/api/channels/${encodeURIComponent(channelId)}/entries${keyParam ? '?' + keyParam : ''}`)
                 ]);
 
                 if (!channelRes.ok) {
@@ -2651,7 +2771,7 @@
                     // We need the user's handle to check membership
                     // For now, we'll check via API response or assume not member
                     try {
-                        const identityRes = await fetch('/api/identity/lookup', {
+                        const identityRes = await fetch(`${API_BASE}/api/identity/lookup`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ secret_key: key })
@@ -2725,7 +2845,7 @@
 
             try {
                 showJoinStatus(`Joining #${channelId}...`, 'info');
-                const res = await fetch(`/api/channels/${encodeURIComponent(channelId)}/join`, {
+                const res = await fetch(`${API_BASE}/api/channels/${encodeURIComponent(channelId)}/join`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -2760,7 +2880,7 @@
             if (buttonEl) buttonEl.textContent = 'Creating...';
 
             try {
-                const res = await fetch(`/api/channels/${encodeURIComponent(channelId)}/invite`, {
+                const res = await fetch(`${API_BASE}/api/channels/${encodeURIComponent(channelId)}/invite`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ secret_key: key })
@@ -2800,7 +2920,7 @@
             if (!confirm(`Leave #${channelId}?`)) return;
 
             try {
-                const res = await fetch(`/api/channels/${encodeURIComponent(channelId)}/leave`, {
+                const res = await fetch(`${API_BASE}/api/channels/${encodeURIComponent(channelId)}/leave`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ secret_key: key })
@@ -2844,7 +2964,7 @@
             }
 
             try {
-                const res = await fetch('/api/channels', {
+                const res = await fetch(`${API_BASE}/api/channels`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -3095,7 +3215,7 @@
             }
 
             try {
-                const res = await fetch(`/api/conversations/${conversationId}?key=${encodeURIComponent(effectiveKey)}`, {
+                const res = await fetch(`${API_BASE}/api/conversations/${conversationId}?key=${encodeURIComponent(effectiveKey)}`, {
                     method: 'DELETE'
                 });
 
@@ -3149,7 +3269,7 @@
             // Load entries if not cached
             if (!summaryEntriesCache.has(summaryId)) {
                 try {
-                    const res = await fetch(`/api/summaries/${summaryId}/entries`);
+                    const res = await fetch(`${API_BASE}/api/summaries/${summaryId}/entries`);
                     const data = await res.json();
                     summaryEntriesCache.set(summaryId, data.entries || []);
                 } catch (err) {
@@ -3264,7 +3384,7 @@
 
         async function searchUsers(query) {
             try {
-                const res = await fetch(`/api/users/search?q=${encodeURIComponent(query)}&limit=5`);
+                const res = await fetch(`${API_BASE}/api/users/search?q=${encodeURIComponent(query)}&limit=5`);
                 if (res.ok) {
                     const data = await res.json();
                     return data.users;
@@ -3388,7 +3508,7 @@
             btn.textContent = 'Sending...';
 
             try {
-                const res = await fetch('/api/entries', {
+                const res = await fetch(`${API_BASE}/api/entries`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -3440,7 +3560,7 @@
             try {
                 let replies = repliesCache.get(entryId);
                 if (!replies || forceRefresh) {
-                    const res = await fetch(`/api/entry/${encodeURIComponent(entryId)}/replies`);
+                    const res = await fetch(`${API_BASE}/api/entry/${encodeURIComponent(entryId)}/replies`);
                     if (!res.ok) throw new Error('Failed to fetch');
                     const data = await res.json();
                     replies = data.replies || [];
@@ -3512,7 +3632,7 @@
             if (!confirm('Delete this entry?')) return;
 
             try {
-                const res = await fetch(`/api/entries/${id}?key=${encodeURIComponent(effectiveKey)}`, {
+                const res = await fetch(`${API_BASE}/api/entries/${id}?key=${encodeURIComponent(effectiveKey)}`, {
                     method: 'DELETE'
                 });
                 if (res.ok) {
@@ -3535,7 +3655,7 @@
             if (!confirm('Publish this entry now? It will immediately become visible to everyone.')) return;
 
             try {
-                const res = await fetch(`/api/entries/${id}/publish?key=${encodeURIComponent(effectiveKey)}`, {
+                const res = await fetch(`${API_BASE}/api/entries/${id}/publish?key=${encodeURIComponent(effectiveKey)}`, {
                     method: 'POST'
                 });
                 if (res.ok) {
@@ -3761,6 +3881,33 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             if (menu) menu.classList.toggle('open');
         }
 
+        function toggleNavPanel() {
+            const panel = document.getElementById('nav-panel');
+            if (!panel) return;
+            const isOpen = panel.classList.toggle('open');
+            if (isOpen) {
+                const loggedIn = !!getEffectiveKey();
+                panel.innerHTML = loggedIn
+                    ? '<a href="/" onclick="closeNavPanel()">Feed</a>'
+                      + '<a href="?view=channels" onclick="closeNavPanel()">Channels</a>'
+                      + '<a href="?view=inbox" onclick="closeNavPanel()">Inbox</a>'
+                      + '<a href="/settings" onclick="closeNavPanel()">Settings</a>'
+                      + '<a href="/prompt" onclick="closeNavPanel()">Prompt</a>'
+                      + '<a href="/dashboard" onclick="closeNavPanel()">Dashboard</a>'
+                      + '<a href="https://github.com/jameslbarnes/hermes" target="_blank" rel="noopener" onclick="closeNavPanel()">GitHub</a>'
+                    : '<a href="/" onclick="closeNavPanel()">Feed</a>'
+                      + '<a href="/join" onclick="closeNavPanel()">Join</a>'
+                      + '<a href="/prompt" onclick="closeNavPanel()">Prompt</a>'
+                      + '<a href="/dashboard" onclick="closeNavPanel()">Dashboard</a>'
+                      + '<a href="https://github.com/jameslbarnes/hermes" target="_blank" rel="noopener" onclick="closeNavPanel()">GitHub</a>';
+            }
+        }
+
+        function closeNavPanel() {
+            const panel = document.getElementById('nav-panel');
+            if (panel) panel.classList.remove('open');
+        }
+
         function toggleOnboardMenu() {
             const menu = document.getElementById('onboard-menu');
             const btn = menu.previousElementSibling;
@@ -3774,7 +3921,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             menu.classList.remove('open');
             btn.classList.remove('menu-open');
             try {
-                const res = await fetch(`/api/tutorial?client=${mode}`);
+                const res = await fetch(`${API_BASE}/api/tutorial?client=${mode}`);
                 const data = await res.json();
                 if (mode === 'desktop') {
                     const encoded = encodeURIComponent(data.prompt).replace(/\(/g, '%28').replace(/\)/g, '%29');
@@ -3805,6 +3952,9 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             if (!e.target.closest('.gear-wrapper')) {
                 const menu = document.getElementById('gear-menu');
                 if (menu) menu.classList.remove('open');
+            }
+            if (!e.target.closest('.hamburger-btn') && !e.target.closest('.nav-panel')) {
+                closeNavPanel();
             }
         });
 
@@ -3862,7 +4012,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             status.style.display = 'none';
 
             try {
-                const res = await fetch('/api/conversations', {
+                const res = await fetch(`${API_BASE}/api/conversations`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url, secret_key: key })
@@ -3987,7 +4137,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             feed.innerHTML = '<div class="loading-state">Searching...</div>';
 
             try {
-                const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=50`);
+                const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query)}&limit=50`);
                 const data = await res.json();
 
                 if (data.results.length === 0) {
@@ -4112,7 +4262,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
 
             claimCheckTimeout = setTimeout(async () => {
                 try {
-                    const res = await fetch(`/api/identity/check/${handle}`);
+                    const res = await fetch(`${API_BASE}/api/identity/check/${handle}`);
                     const data = await res.json();
 
                     if (data.available) {
@@ -4151,7 +4301,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             btn.textContent = 'Claiming...';
 
             try {
-                const res = await fetch('/api/identity/claim', {
+                const res = await fetch(`${API_BASE}/api/identity/claim`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

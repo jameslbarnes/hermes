@@ -425,8 +425,62 @@
             min-height: calc(100vh - 56px);
         }
 
+        .welcome-card {
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: var(--space-8) var(--space-6);
+            margin-bottom: var(--space-6);
+        }
+
+        .welcome-card p {
+            font-size: var(--text-base);
+            line-height: 1.8;
+            color: var(--fg);
+            margin-bottom: var(--space-6);
+        }
+
+        .welcome-card strong {
+            font-weight: 500;
+        }
+
+        .welcome-actions {
+            display: flex;
+            gap: var(--space-3);
+        }
+
+        .welcome-btn {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: var(--text-xs);
+            padding: var(--space-2) var(--space-5);
+            border-radius: var(--radius-md);
+            text-decoration: none;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+
+        .welcome-btn--primary {
+            background: var(--accent);
+            color: #fff;
+            border: 1px solid var(--accent);
+        }
+
+        .welcome-btn--primary:hover {
+            background: var(--accent-hover);
+            border-color: var(--accent-hover);
+        }
+
+        .welcome-btn--secondary {
+            background: none;
+            color: var(--fg-muted);
+            border: 1px solid var(--border);
+        }
+
+        .welcome-btn--secondary:hover {
+            color: var(--fg);
+            border-color: var(--fg-muted);
+        }
+
         .entry {
-            background: var(--surface);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-lg);
             padding: var(--space-6);
@@ -1147,7 +1201,6 @@
 
         /* Summaries - thread style */
         .summary {
-            background: var(--surface);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-lg);
             padding: var(--space-6);
@@ -1213,49 +1266,25 @@
             margin-bottom: 0;
         }
 
-        /* ── Date carousel ── */
-        .date-carousel {
-            position: relative;
-            overflow: hidden;
-            transition: height 0.35s ease;
-        }
-
-        .date-panel {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            opacity: 0;
-            pointer-events: none;
-            transform: translateX(100%);
-            transition: transform 0.35s ease, opacity 0.35s ease;
-        }
-
-        .date-panel.active {
-            position: relative;
-            opacity: 1;
-            pointer-events: auto;
-            transform: translateX(0);
-        }
-
-        .date-panel.peek-left {
-            opacity: 0.15;
-            transform: translateX(-92%);
-        }
-
-        .date-panel.peek-right {
-            opacity: 0.15;
-            transform: translateX(92%);
-        }
-
-        .date-panel-header {
+        /* ── Date nav strip ── */
+        .date-nav {
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            gap: var(--space-3);
             padding: var(--space-4) 0 var(--space-6) 0;
         }
 
-        .date-panel-label {
+        .date-nav .nav-newer {
+            margin-left: auto;
+        }
+
+        .date-nav-center {
+            display: flex;
+            flex-direction: column;
+            transition: opacity 0.2s ease;
+        }
+
+        .date-nav-label {
             font-family: 'Newsreader', Georgia, serif;
             font-size: var(--text-xl);
             font-weight: 400;
@@ -1264,17 +1293,12 @@
             letter-spacing: -0.02em;
         }
 
-        .date-panel-date {
+        .date-nav-date {
             font-family: 'IBM Plex Mono', monospace;
             font-size: var(--text-xs);
             color: var(--fg-muted);
             font-weight: 500;
             letter-spacing: 0.03em;
-        }
-
-        .date-nav-arrows {
-            display: flex;
-            gap: var(--space-2);
         }
 
         .date-nav-btn {
@@ -1290,6 +1314,7 @@
             cursor: pointer;
             transition: color 0.15s, border-color 0.15s;
             font-size: 0.9rem;
+            flex-shrink: 0;
         }
 
         .date-nav-btn:hover {
@@ -1307,12 +1332,45 @@
             border-color: var(--border);
         }
 
-        .daily-intro {
-            padding: var(--space-2) 0 var(--space-6) 0;
+        .summary-viewport {
+            /* Break out to full viewport width */
+            width: 100vw;
+            margin-left: calc(50% - 50vw);
+            overflow: hidden;
+            /* Gradient mask: opaque across colB + 10% of margin, then fades over next 15% */
+            --col-margin: max(0px, calc(50vw - 350px));
+            --fade-end: calc(var(--col-margin) * 0.75);
+            --fade-mid: calc(var(--col-margin) * 0.9);
+            -webkit-mask-image: linear-gradient(to right,
+                transparent, transparent var(--fade-end),
+                black var(--fade-mid),
+                black calc(100% - var(--fade-mid)),
+                transparent calc(100% - var(--fade-end)), transparent);
+            mask-image: linear-gradient(to right,
+                transparent, transparent var(--fade-end),
+                black var(--fade-mid),
+                black calc(100% - var(--fade-mid)),
+                transparent calc(100% - var(--fade-end)), transparent);
+        }
+
+        .summary-track {
+            display: flex;
+            /* Centering padding so active slot sits in colB */
+            padding: 0 calc(50vw - min(700px, 100vw) / 2);
+            transition: transform 0.4s ease;
+        }
+
+        .summary-track .daily-summary-slot {
+            flex: 0 0 min(700px, 100vw);
+            min-width: 0;
+        }
+
+        .summary-track .daily-intro {
+            padding: var(--space-4) var(--space-6) var(--space-8);
         }
 
         .daily-intro-content {
-            font-size: var(--text-md);
+            font-size: var(--text-lg);
             line-height: 1.7;
             color: var(--fg-muted);
             font-style: italic;
@@ -1329,8 +1387,17 @@
                 max-width: 50vw;
             }
 
-            .date-panel-label {
+            .date-nav-label {
                 font-size: var(--text-lg);
+            }
+
+            .summary-track .daily-intro {
+                padding-left: var(--space-4);
+                padding-right: var(--space-4);
+            }
+
+            .summary-track .daily-summary-slot {
+                flex: 0 0 100vw;
             }
 
             .site-footer {
@@ -1685,7 +1752,6 @@
 
         /* Conversation card */
         .conversation {
-            background: var(--surface);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-lg);
             padding: var(--space-6);
@@ -2365,49 +2431,42 @@
             }
         }
 
-        // ── Date carousel state ──
-        let carouselDates = [];   // sorted newest-first (index 0 = yesterday)
-        let carouselIndex = 0;    // currently active panel
+        // ── Date nav state ──
+        let navDates = [];     // available dates, newest-first
+        let navDateIndex = 0;  // 0 = yesterday
 
         function navigateDate(direction) {
             // direction: -1 = older (left), +1 = newer (right)
-            const newIndex = carouselIndex - direction;
-            if (newIndex < 0 || newIndex >= carouselDates.length) return;
+            const newIndex = navDateIndex - direction;
+            if (newIndex < 0 || newIndex >= navDates.length) return;
+            navDateIndex = newIndex;
 
-            const carousel = document.querySelector('.date-carousel');
-            const panels = document.querySelectorAll('.date-panel');
-            if (!carousel || !panels.length) return;
+            // Crossfade the label
+            const center = document.querySelector('.date-nav-center');
+            const labelEl = document.querySelector('.date-nav-label');
+            const dateEl = document.querySelector('.date-nav-date');
+            if (center) {
+                center.style.opacity = '0';
+                setTimeout(() => {
+                    const { label, fullDate } = formatDateParts(navDates[navDateIndex]);
+                    if (labelEl) labelEl.textContent = label;
+                    if (dateEl) dateEl.textContent = fullDate;
+                    center.style.opacity = '1';
+                }, 200);
+            }
 
-            // Lock current height so container doesn't collapse during transition
-            carousel.style.height = carousel.offsetHeight + 'px';
-
-            // Remove all state classes
-            panels.forEach(p => p.classList.remove('active', 'peek-left', 'peek-right'));
-
-            carouselIndex = newIndex;
-
-            // Set active + peek panels
-            panels[carouselIndex].classList.add('active');
-            if (carouselIndex > 0) panels[carouselIndex - 1].classList.add('peek-right');
-            if (carouselIndex < panels.length - 1) panels[carouselIndex + 1].classList.add('peek-left');
-
-            // Animate to new height on next frame
-            requestAnimationFrame(() => {
-                carousel.style.height = panels[carouselIndex].scrollHeight + 'px';
-            });
+            // Slide the summary track (oldest slot is leftmost, yesterday is rightmost)
+            const track = document.querySelector('.summary-track');
+            if (track) {
+                const slotIdx = navDates.length - 1 - navDateIndex;
+                track.style.transform = `translateX(calc(-${slotIdx} * min(700px, 100vw)))`;
+            }
 
             // Update arrow states
             const leftBtn = document.querySelector('.date-nav-btn.nav-older');
             const rightBtn = document.querySelector('.date-nav-btn.nav-newer');
-            if (leftBtn) leftBtn.disabled = (carouselIndex >= carouselDates.length - 1);
-            if (rightBtn) rightBtn.disabled = (carouselIndex <= 0);
-
-            // Update the header label
-            const { label, fullDate } = formatDateParts(carouselDates[carouselIndex]);
-            const labelEl = document.querySelector('.date-panel-header .date-panel-label');
-            const dateEl = document.querySelector('.date-panel-header .date-panel-date');
-            if (labelEl) labelEl.textContent = label;
-            if (dateEl) dateEl.textContent = fullDate;
+            if (leftBtn) leftBtn.disabled = (navDateIndex >= navDates.length - 1);
+            if (rightBtn) rightBtn.disabled = (navDateIndex <= 0);
         }
 
         // Render the feed with all data ready
@@ -2449,130 +2508,104 @@
                 });
             });
 
-            // Group by activity date
-            const itemsByActivityDate = new Map();
-            allItems.forEach(item => {
-                const date = item.activityDate;
-                if (!itemsByActivityDate.has(date)) itemsByActivityDate.set(date, []);
-                itemsByActivityDate.get(date).push(item);
+            // Sort all items by time (most recent first)
+            allItems.sort((a, b) => b.activityTime - a.activityTime);
+
+            // Build summarized entry IDs set (across all summaries)
+            const summarizedIds = new Set();
+            allItems.filter(i => i.type === 'summary').forEach(i => {
+                (i.data.entryIds || []).forEach(id => summarizedIds.add(id));
             });
 
-            // Compute date range: yesterday back 7 days
+            // Filter out summarized entries
+            const filteredItems = allItems.filter(item => {
+                if (item.type !== 'entry') return true;
+                if (item.data.isReflection) return true;
+                return !summarizedIds.has(item.data.id);
+            });
+
+            // Compute date nav range: yesterday back 7 days
             const now = new Date();
             const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            const dateCandidates = [];
+            navDates = [];
             for (let i = 1; i <= 8; i++) {
                 const d = new Date(today);
                 d.setDate(d.getDate() - i);
-                const ds = d.getFullYear() + '-' +
+                navDates.push(d.getFullYear() + '-' +
                     String(d.getMonth() + 1).padStart(2, '0') + '-' +
-                    String(d.getDate()).padStart(2, '0');
-                dateCandidates.push(ds);
+                    String(d.getDate()).padStart(2, '0'));
+            }
+            navDateIndex = 0;
+
+            // Welcome card
+            const { label: firstLabel, fullDate: firstFullDate } = formatDateParts(navDates[0]);
+            let html = `
+                <div class="welcome-card">
+                    <p><strong>Welcome to Hermes</strong>, the privacy-first social notebook ambiently generated by our conversations with AI. These posts are the traces left as people in your community explore, think, and create. Join now to effortlessly stay connected to the communities in your life through their emerging patterns \u2014 or just scroll down to see what\u2019s being discovered right now.</p>
+                    <div class="welcome-actions">
+                        <a href="/join" class="welcome-btn welcome-btn--primary">Get Started</a>
+                        <a href="/prompt" class="welcome-btn welcome-btn--secondary">How Does It Work?</a>
+                    </div>
+                </div>
+            `;
+
+            // Date nav strip
+            html += `
+                <div class="date-nav">
+                    <button class="date-nav-btn nav-older" onclick="navigateDate(-1)" title="Older">&larr;</button>
+                    <div class="date-nav-center">
+                        <span class="date-nav-label">${firstLabel}</span>
+                        <span class="date-nav-date">${firstFullDate}</span>
+                    </div>
+                    <button class="date-nav-btn nav-newer" onclick="navigateDate(1)" title="Newer" disabled>&rarr;</button>
+                </div>
+            `;
+
+            // Render daily summary slots in a sliding track (oldest-first so older days are to the left)
+            const initSlot = navDates.length - 1;
+            html += `<div class="summary-viewport"><div class="summary-track" style="transform: translateX(calc(-${initSlot} * min(700px, 100vw)))">`;
+            for (let i = navDates.length - 1; i >= 0; i--) {
+                const date = navDates[i];
+                const ds = dailySummaryByDate.get(date);
+                html += `<div class="daily-summary-slot" data-date="${date}">`;
+                if (ds) html += renderDailySummaryIntro(ds);
+                html += `</div>`;
+            }
+            html += `</div></div>`;
+
+            // Render flat feed (most recent first)
+            html += filteredItems.map(item => {
+                try {
+                    if (item.type === 'summary') {
+                        return renderSummary(item.data);
+                    } else if (item.type === 'conversation') {
+                        return renderConversation(item.data);
+                    } else {
+                        return renderEntry(item.data);
+                    }
+                } catch (e) {
+                    console.error('Error rendering item:', item, e);
+                    return '';
+                }
+            }).join('');
+
+            // Add "Load more" button if there are more entries
+            if (hasMoreEntries) {
+                html += `
+                    <div class="load-more-container">
+                        <button class="load-more-btn" onclick="loadFeed(true, true)">Load more</button>
+                    </div>
+                `;
             }
 
-            // Filter to dates that have content, preserving newest-first order
-            carouselDates = dateCandidates.filter(d => {
-                const items = itemsByActivityDate.get(d) || [];
-                return items.length > 0;
-            });
-
-            // If no dates have content, fall back to showing all dates with content (excluding today)
-            if (carouselDates.length === 0) {
-                const todayStr = getToday();
-                carouselDates = [...itemsByActivityDate.keys()]
-                    .filter(d => d !== todayStr)
-                    .sort((a, b) => b.localeCompare(a));
-            }
-
-            if (carouselDates.length === 0) {
+            if (!filteredItems.length) {
                 feed.innerHTML = `
                     <div class="empty-state">
                         Nothing yet. The notebook is empty.
                     </div>
                 `;
-                return;
-            }
-
-            // Build carousel panels
-            carouselIndex = 0; // start at newest (yesterday)
-            const { label: firstLabel, fullDate: firstFullDate } = formatDateParts(carouselDates[0]);
-
-            let html = `
-                <div class="date-panel-header">
-                    <div>
-                        <span class="date-panel-label">${firstLabel}</span>
-                        <span class="date-panel-date">${firstFullDate}</span>
-                    </div>
-                    <div class="date-nav-arrows">
-                        <button class="date-nav-btn nav-older" onclick="navigateDate(-1)" title="Older">&larr;</button>
-                        <button class="date-nav-btn nav-newer" onclick="navigateDate(1)" title="Newer" disabled>&rarr;</button>
-                    </div>
-                </div>
-                <div class="date-carousel">
-            `;
-
-            carouselDates.forEach((date, idx) => {
-                const dayItems = itemsByActivityDate.get(date) || [];
-                const dailySummary = dailySummaryByDate.get(date);
-
-                // Build set of summarized entry IDs
-                const summarizedIds = new Set();
-                dayItems.filter(i => i.type === 'summary').forEach(i => {
-                    (i.data.entryIds || []).forEach(id => summarizedIds.add(id));
-                });
-
-                // Filter out summarized entries
-                const filteredItems = dayItems.filter(item => {
-                    if (item.type !== 'entry') return true;
-                    if (item.data.isReflection) return true;
-                    return !summarizedIds.has(item.data.id);
-                });
-
-                // Sort by activity time (most recent first)
-                filteredItems.sort((a, b) => b.activityTime - a.activityTime);
-
-                const panelClass = idx === 0 ? 'active' : (idx === 1 ? 'peek-left' : '');
-
-                html += `<div class="date-panel ${panelClass}" data-date="${date}">`;
-
-                // Render daily summary as intro if it exists
-                if (dailySummary) {
-                    html += renderDailySummaryIntro(dailySummary);
-                }
-
-                // Render all items
-                html += filteredItems.map(item => {
-                    try {
-                        if (item.type === 'summary') {
-                            return renderSummary(item.data);
-                        } else if (item.type === 'conversation') {
-                            return renderConversation(item.data);
-                        } else {
-                            return renderEntry(item.data);
-                        }
-                    } catch (e) {
-                        console.error('Error rendering item:', item, e);
-                        return '';
-                    }
-                }).join('');
-
-                html += `</div>`; // .date-panel
-            });
-
-            html += `</div>`; // .date-carousel
-
-            // Disable older arrow if only one panel
-            if (carouselDates.length <= 1) {
-                html = html.replace('class="date-nav-btn nav-older"', 'class="date-nav-btn nav-older" disabled');
-            }
-
-            feed.innerHTML = html;
-
-            // Set initial carousel height to match active panel
-            const carousel = feed.querySelector('.date-carousel');
-            const activePanel = feed.querySelector('.date-panel.active');
-            if (carousel && activePanel) {
-                carousel.style.height = activePanel.scrollHeight + 'px';
+            } else {
+                feed.innerHTML = html;
             }
         }
 

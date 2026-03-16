@@ -432,7 +432,7 @@
 
         .welcome-card-row {
             position: sticky;
-            top: 69px;
+            top: 69px; /* header-row-1 (68px) + 1px border */
             z-index: 2;
             /* Full-width bg so accent strip slides behind the entire row */
             width: 100vw;
@@ -3501,17 +3501,6 @@
             }
         }
 
-        function renderDayHeader(label, dateStr) {
-            const fullDate = formatFullDate(dateStr);
-            return `
-                <div class="day-header">
-                    <span class="day-header-text">${label}</span>
-                    <span class="day-header-date">${fullDate}</span>
-                    <span class="day-header-line"></span>
-                </div>
-            `;
-        }
-
         function renderDailySummaryIntro(daily) {
             return `
                 <div class="daily-intro">
@@ -3802,7 +3791,9 @@
                 btn.disabled = false;
                 btn.textContent = 'Reply';
             }
-        }        async function loadReplies(entryId, forceRefresh = false) {
+        }
+
+        async function loadReplies(entryId, forceRefresh = false) {
             const entryEl = document.querySelector(`.entry[data-id="${entryId}"]`);
             if (!entryEl) return;
             const toggleBtn = entryEl.querySelector(`.replies-toggle[data-entry-id="${entryId}"]`);
@@ -4042,13 +4033,6 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                     trigger.textContent = original;
                 }, 900);
             }
-        }
-
-        function formatFullDate(dateStr) {
-            // dateStr is YYYY-MM-DD - returns "Tuesday, Dec 17"
-            const [year, month, day] = dateStr.split('-').map(Number);
-            const date = new Date(year, month - 1, day);
-            return date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
         }
 
         function formatDateParts(dateStr) {
@@ -4627,5 +4611,3 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
     </script>
 </body>
 </html>
-
-

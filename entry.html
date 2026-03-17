@@ -651,7 +651,7 @@
                         const repliesData = await repliesRes.json();
                         replies = repliesData.replies || [];
                     }
-                } catch (e) {}
+                } catch (err) { console.warn('Failed to load replies:', err); }
 
                 document.getElementById('content').innerHTML =
                     renderEntry(entry) +

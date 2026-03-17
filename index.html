@@ -1077,13 +1077,6 @@
             cursor: not-allowed;
         }
 
-        /* Loading */
-        .loading {
-            padding: 4rem 0;
-            color: var(--fg-muted);
-            font-style: italic;
-        }
-
         /* Summaries - thread style */
         .summary {
             padding: 2rem 0;
@@ -1901,7 +1894,7 @@
 
         <div class="feed-container">
             <main class="feed" id="feed">
-                <div class="loading">Loading...</div>
+                <div class="loading-state">Loading...</div>
             </main>
         </div>
     </div>
@@ -2043,11 +2036,9 @@
                 } else {
                     const data = await res.json();
                     showJoinStatus(data.error || 'Failed to join channel', 'error', 4000);
-                    alert(data.error || 'Failed to join channel');
                 }
             } catch (err) {
                 showJoinStatus('Failed to join channel', 'error', 4000);
-                alert('Failed to join channel');
             }
         }
 
@@ -2352,7 +2343,7 @@
                         badge.style.display = 'none';
                     }
                 }
-            } catch (err) {}
+            } catch (err) { console.warn('Inbox badge update failed:', err); }
         }
 
         function markInboxSeen() {
@@ -2718,7 +2709,7 @@
                                 isMember = channel.subscribers.some(s => s.handle === identityData.handle);
                             }
                         }
-                    } catch {}
+                    } catch (err) { console.warn('Identity lookup failed:', err); }
                 }
 
                 const memberCount = channel.subscribers ? channel.subscribers.length : 0;
@@ -2797,11 +2788,9 @@
                 } else {
                     const data = await res.json();
                     showJoinStatus(data.error || 'Failed to join channel', 'error', 4000);
-                    alert(data.error || 'Failed to join channel');
                 }
             } catch (err) {
                 showJoinStatus('Failed to join channel', 'error', 4000);
-                alert('Failed to join channel');
             }
         }
 
@@ -3046,7 +3035,7 @@
                     <p class="summary-content">${escapeHtml(summary.content)}</p>
                     <div class="summary-meta">${meta.join(' Â· ')}</div>
                     <div class="summary-entries" id="summary-entries-${summary.id}">
-                        <div class="loading">Loading...</div>
+                        <div class="loading-state">Loading...</div>
                     </div>
                 </div>
             `;

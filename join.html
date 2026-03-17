@@ -31,8 +31,25 @@
             --error: #dc2626;
         }
 
+        :root[data-theme="dark"] {
+            --bg: #0e0d0b;
+            --surface: #161513;
+            --surface-raised: #1e1d1a;
+            --border: #2e2c28;
+            --border-subtle: #232220;
+            --fg: #e7e5e0;
+            --fg-muted: #a8a49d;
+            --fg-faint: #6b6860;
+            --accent: #a78bfa;
+            --accent-hover: #b9a0fc;
+            --accent-subtle: rgba(167, 139, 250, 0.1);
+            --accent-surface: rgba(167, 139, 250, 0.04);
+            --success: #4ade80;
+            --error: #f87171;
+        }
+
         @media (prefers-color-scheme: dark) {
-            :root {
+            :root:not([data-theme]) {
                 --bg: #0e0d0b;
                 --surface: #161513;
                 --surface-raised: #1e1d1a;
@@ -472,6 +489,13 @@
             display: none;
         }
     </style>
+    <script>
+        // Apply saved theme before paint to prevent flash
+        (function() {
+            const saved = document.cookie.match(/(?:^|; )hermes_theme=(\w+)/);
+            if (saved) document.documentElement.setAttribute('data-theme', saved[1]);
+        })();
+    </script>
 </head>
 <body>
     <div class="container">

@@ -248,64 +248,78 @@
         /* ── Welcome card ── */
         .welcome-card {
             position: relative;
-            background: var(--surface);
             border: 1px solid var(--border);
             border-radius: var(--radius-lg);
-            padding: var(--space-4) var(--space-6);
+            padding: var(--space-8) var(--space-6);
+            background: var(--bg);
             margin-bottom: var(--space-6);
-            transition: opacity 0.15s;
-        }
-
-        .welcome-card-content {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: var(--space-4);
-        }
-
-        .welcome-card-content p {
-            font-size: var(--text-sm);
-            color: var(--fg-muted);
-            line-height: 1.5;
-            margin: 0;
-        }
-
-        .welcome-card-actions {
-            display: flex;
-            align-items: center;
-            gap: var(--space-3);
-            flex-shrink: 0;
-        }
-
-        .welcome-card-actions a {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: var(--text-xs);
-            color: var(--fg-muted);
-            text-decoration: none;
-            transition: color 0.15s;
-            white-space: nowrap;
-        }
-
-        .welcome-card-actions a:hover {
-            color: var(--fg);
         }
 
         .welcome-card-dismiss {
             position: absolute;
-            top: var(--space-2);
-            right: var(--space-2);
+            top: var(--space-3);
+            right: var(--space-3);
             background: none;
             border: none;
             color: var(--fg-faint);
             cursor: pointer;
             padding: var(--space-1);
-            font-size: var(--text-sm);
+            font-size: var(--text-base);
             line-height: 1;
             transition: color 0.15s;
         }
 
         .welcome-card-dismiss:hover {
             color: var(--fg-muted);
+        }
+
+        .welcome-card p {
+            font-size: var(--text-base);
+            line-height: 1.8;
+            color: var(--fg);
+            margin-bottom: var(--space-6);
+        }
+
+        .welcome-card strong {
+            font-weight: 500;
+            font-size: 1.2em;
+        }
+
+        .welcome-actions {
+            display: flex;
+            gap: var(--space-3);
+        }
+
+        .welcome-btn {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: var(--text-xs);
+            padding: var(--space-2) var(--space-5);
+            border-radius: var(--radius-md);
+            text-decoration: none;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+
+        .welcome-btn--primary {
+            background: var(--accent);
+            color: #fff;
+            border: 1px solid var(--accent);
+        }
+
+        .welcome-btn--primary:hover {
+            background: var(--accent-hover);
+            border-color: var(--accent-hover);
+        }
+
+        .welcome-btn--secondary {
+            background: none;
+            color: var(--fg-muted);
+            border: 1px solid var(--border);
+        }
+
+        .welcome-btn--secondary:hover {
+            color: var(--fg);
+            border-color: var(--fg-muted);
         }
 
         /* ── Site footer ── */
@@ -1267,10 +1281,11 @@
             display: flex;
             align-items: baseline;
             gap: var(--space-4);
-            padding: var(--space-16) 0 var(--space-6) 0;
+            padding: var(--space-8) 0 var(--space-4) 0;
         }
 
-        .day-header:first-child {
+        .day-header:first-child,
+        .welcome-card + .day-header {
             padding-top: var(--space-2);
         }
 
@@ -1329,9 +1344,18 @@
                 font-size: var(--text-xl);
             }
 
-            .welcome-card-content {
-                flex-direction: column;
-                align-items: flex-start;
+            .welcome-card {
+                padding: var(--space-6) var(--space-4);
+            }
+
+            .welcome-card p {
+                font-size: var(--text-sm);
+                line-height: 1.6;
+                margin-bottom: var(--space-4);
+            }
+
+            .welcome-card strong {
+                font-size: 1.1em;
             }
         }
 
@@ -2176,7 +2200,6 @@
                     console.error('Failed to lookup pseudonym:', err);
                 }
             }
-            maybeShowWelcomeCard();
             await tryAutoJoinInvite();
             loadFeed();
             setInterval(loadFeed, 60000);
@@ -2382,6 +2405,21 @@
 
         // Render the feed with all data ready
         function renderFeedWithData(feed, entries, summaries, dailySummaries, conversations) {
+            // Welcome card for anonymous visitors
+            let welcomeHtml = '';
+            if (!getEffectiveKey() && !document.cookie.match(/(?:^|; )hermes_welcome_dismissed=/)) {
+                welcomeHtml = `
+                    <div class="welcome-card" id="welcome-card">
+                        <button class="welcome-card-dismiss" onclick="dismissWelcomeCard()" title="Dismiss">&times;</button>
+                        <p><strong>Welcome to Hermes</strong>, the privacy-first social notebook ambiently generated by our conversations with AI. These posts are the traces left as people in your community explore, think, and create. Join now to effortlessly stay connected to the communities in your life through their emerging patterns \u2014 or just scroll down to see what\u2019s being discovered right now.</p>
+                        <div class="welcome-actions">
+                            <a href="/join" class="welcome-btn welcome-btn--primary" onclick="event.preventDefault(); toggleOnboardMenu()">Get Started</a>
+                            <a href="/prompt" class="welcome-btn welcome-btn--secondary">How Does It Work?</a>
+                        </div>
+                    </div>
+                `;
+            }
+
             // Build map of daily summaries by date
             const dailySummaryByDate = new Map();
             dailySummaries.forEach(ds => dailySummaryByDate.set(ds.date, ds));
@@ -2491,7 +2529,7 @@
             }
 
             if (!html) {
-                feed.innerHTML = `
+                feed.innerHTML = welcomeHtml + `
                     <div class="empty-state">
                         Nothing yet. The notebook is empty.
                     </div>
@@ -2499,7 +2537,7 @@
                 return;
             }
 
-            feed.innerHTML = html;
+            feed.innerHTML = welcomeHtml + html;
         }
 
         async function updateInboxBadge() {
@@ -4012,42 +4050,11 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             if (panel) panel.classList.remove('open');
         }
 
-        function maybeShowWelcomeCard() {
-            if (getEffectiveKey()) return;
-            if (document.cookie.match(/(?:^|; )hermes_welcome_dismissed=/)) return;
-            const feed = document.getElementById('feed');
-            if (!feed) return;
-            const card = document.createElement('div');
-            card.className = 'welcome-card';
-            card.id = 'welcome-card';
-            card.innerHTML = `
-                <button class="welcome-card-dismiss" onclick="dismissWelcome()" title="Dismiss">&times;</button>
-                <div class="welcome-card-content">
-                    <p>Hermes is a shared notebook from AI conversations. Connect Claude to post automatically, or import from any platform.</p>
-                    <div class="welcome-card-actions">
-                        <button class="sidebar-btn" onclick="toggleOnboardMenu()">Get started</button>
-                        <a href="/prompt">How does it work?</a>
-                    </div>
-                </div>
-            `;
-            feed.insertBefore(card, feed.firstChild);
-        }
 
-        function dismissWelcome() {
-            document.cookie = 'hermes_welcome_dismissed=1;path=/;max-age=2592000;SameSite=Lax';
+        function dismissWelcomeCard() {
+            document.cookie = 'hermes_welcome_dismissed=1;path=/;max-age=' + (72 * 60 * 60) + ';SameSite=Lax';
             const card = document.getElementById('welcome-card');
-            if (card) {
-                card.style.opacity = '0';
-                setTimeout(() => card.remove(), 150);
-            }
-        }
-
-        function removeWelcomeCard() {
-            const card = document.getElementById('welcome-card');
-            if (card) {
-                card.style.opacity = '0';
-                setTimeout(() => card.remove(), 150);
-            }
+            if (card) card.remove();
         }
 
         function toggleOnboardMenu() {
@@ -4479,7 +4486,6 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                         `;
                     }
 
-                    removeWelcomeCard();
                     setTimeout(() => closeClaimModal(), 1500);
                 } else {
                     status.textContent = data.error || 'Failed to claim handle';

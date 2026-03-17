@@ -245,6 +245,69 @@
             background: rgba(0, 0, 0, 0.03);
         }
 
+        /* ── Welcome card ── */
+        .welcome-card {
+            position: relative;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: var(--space-4) var(--space-6);
+            margin-bottom: var(--space-6);
+            transition: opacity 0.15s;
+        }
+
+        .welcome-card-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--space-4);
+        }
+
+        .welcome-card-content p {
+            font-size: var(--text-sm);
+            color: var(--fg-muted);
+            line-height: 1.5;
+            margin: 0;
+        }
+
+        .welcome-card-actions {
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
+            flex-shrink: 0;
+        }
+
+        .welcome-card-actions a {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: var(--text-xs);
+            color: var(--fg-muted);
+            text-decoration: none;
+            transition: color 0.15s;
+            white-space: nowrap;
+        }
+
+        .welcome-card-actions a:hover {
+            color: var(--fg);
+        }
+
+        .welcome-card-dismiss {
+            position: absolute;
+            top: var(--space-2);
+            right: var(--space-2);
+            background: none;
+            border: none;
+            color: var(--fg-faint);
+            cursor: pointer;
+            padding: var(--space-1);
+            font-size: var(--text-sm);
+            line-height: 1;
+            transition: color 0.15s;
+        }
+
+        .welcome-card-dismiss:hover {
+            color: var(--fg-muted);
+        }
+
         /* ── Site footer ── */
         .site-footer {
             max-width: 700px;
@@ -1265,6 +1328,11 @@
             .day-header-text {
                 font-size: var(--text-xl);
             }
+
+            .welcome-card-content {
+                flex-direction: column;
+                align-items: flex-start;
+            }
         }
 
         @media (max-width: 480px) {
@@ -2108,6 +2176,7 @@
                     console.error('Failed to lookup pseudonym:', err);
                 }
             }
+            maybeShowWelcomeCard();
             await tryAutoJoinInvite();
             loadFeed();
             setInterval(loadFeed, 60000);
@@ -3943,6 +4012,44 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             if (panel) panel.classList.remove('open');
         }
 
+        function maybeShowWelcomeCard() {
+            if (getEffectiveKey()) return;
+            if (document.cookie.match(/(?:^|; )hermes_welcome_dismissed=/)) return;
+            const feed = document.getElementById('feed');
+            if (!feed) return;
+            const card = document.createElement('div');
+            card.className = 'welcome-card';
+            card.id = 'welcome-card';
+            card.innerHTML = `
+                <button class="welcome-card-dismiss" onclick="dismissWelcome()" title="Dismiss">&times;</button>
+                <div class="welcome-card-content">
+                    <p>Hermes is a shared notebook from AI conversations. Connect Claude to post automatically, or import from any platform.</p>
+                    <div class="welcome-card-actions">
+                        <button class="sidebar-btn" onclick="toggleOnboardMenu()">Get started</button>
+                        <a href="/prompt">How does it work?</a>
+                    </div>
+                </div>
+            `;
+            feed.insertBefore(card, feed.firstChild);
+        }
+
+        function dismissWelcome() {
+            document.cookie = 'hermes_welcome_dismissed=1;path=/;max-age=2592000;SameSite=Lax';
+            const card = document.getElementById('welcome-card');
+            if (card) {
+                card.style.opacity = '0';
+                setTimeout(() => card.remove(), 150);
+            }
+        }
+
+        function removeWelcomeCard() {
+            const card = document.getElementById('welcome-card');
+            if (card) {
+                card.style.opacity = '0';
+                setTimeout(() => card.remove(), 150);
+            }
+        }
+
         function toggleOnboardMenu() {
             const menu = document.getElementById('onboard-menu');
             const btn = menu.previousElementSibling;
@@ -4372,6 +4479,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
                         `;
                     }
 
+                    removeWelcomeCard();
                     setTimeout(() => closeClaimModal(), 1500);
                 } else {
                     status.textContent = data.error || 'Failed to claim handle';

@@ -15,25 +15,38 @@
         }
 
         :root {
-            --bg: #faf9f7;
-            --surface: #ffffff;
-            --border: #e8e6e3;
-            --fg: #1a1a1a;
-            --fg-muted: #6b6b6b;
+            --bg: #e8e4db;
+            --surface: #f4f2ec;
+            --surface-raised: #fdfcf9;
+            --border: #c9c3b8;
+            --border-subtle: #dbd6cc;
+            --fg: #1c1917;
+            --fg-muted: #57534e;
+            --fg-faint: #78716c;
             --accent: #7c5cbf;
-            --accent-soft: rgba(124, 92, 191, 0.1);
-            --success: #81c784;
+            --accent-hover: #6b4dab;
+            --accent-subtle: rgba(124, 92, 191, 0.08);
+            --accent-surface: rgba(124, 92, 191, 0.04);
+            --success: #16a34a;
+            --warning: #d97706;
         }
 
         @media (prefers-color-scheme: dark) {
             :root {
-                --bg: #0a0a0b;
-                --surface: #111113;
-                --border: #2a2a2e;
-                --fg: #e4e4e7;
-                --fg-muted: #8b8b8b;
+                --bg: #0e0d0b;
+                --surface: #161513;
+                --surface-raised: #1e1d1a;
+                --border: #2e2c28;
+                --border-subtle: #232220;
+                --fg: #e7e5e0;
+                --fg-muted: #a8a49d;
+                --fg-faint: #6b6860;
                 --accent: #a78bfa;
-                --accent-soft: rgba(167, 139, 250, 0.1);
+                --accent-hover: #b9a0fc;
+                --accent-subtle: rgba(167, 139, 250, 0.1);
+                --accent-surface: rgba(167, 139, 250, 0.04);
+                --success: #4ade80;
+                --warning: #fbbf24;
             }
         }
 
@@ -43,6 +56,7 @@
             color: var(--fg);
             min-height: 100vh;
             padding: 2rem;
+            -webkit-font-smoothing: antialiased;
         }
 
         .container {
@@ -94,7 +108,7 @@
 
         /* Key banner */
         .key-banner {
-            background: var(--accent-soft);
+            background: var(--accent-subtle);
             border: 1px solid var(--accent);
             border-radius: 8px;
             padding: 1rem 1.25rem;
@@ -106,8 +120,8 @@
         }
 
         .key-banner.no-key {
-            background: rgba(255, 183, 77, 0.1);
-            border-color: #ffb74d;
+            background: color-mix(in srgb, var(--warning) 10%, transparent);
+            border-color: var(--warning);
         }
 
         .key-banner .label {
@@ -324,7 +338,7 @@
 
         /* Note */
         .note {
-            background: var(--accent-soft);
+            background: var(--accent-subtle);
             border: 1px solid rgba(167, 139, 250, 0.2);
             border-radius: 8px;
             padding: 1rem 1.25rem;

@@ -16,12 +16,18 @@
         }
 
         :root {
-            --bg: #faf9f7;
-            --surface: #ffffff;
-            --border: #e8e6e3;
-            --fg: #1a1a1a;
-            --fg-muted: #6b6b6b;
+            --bg: #e8e4db;
+            --surface: #f4f2ec;
+            --surface-raised: #fdfcf9;
+            --border: #c9c3b8;
+            --border-subtle: #dbd6cc;
+            --fg: #1c1917;
+            --fg-muted: #57534e;
+            --fg-faint: #78716c;
             --accent: #7c5cbf;
+            --accent-hover: #6b4dab;
+            --accent-subtle: rgba(124, 92, 191, 0.08);
+            --accent-surface: rgba(124, 92, 191, 0.04);
         }
 
         body {
@@ -29,11 +35,12 @@
             background: var(--bg);
             color: var(--fg);
             min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
         }
 
         .container {
             display: grid;
-            grid-template-columns: 300px 1fr;
+            grid-template-columns: 320px 1fr;
             min-height: 100vh;
         }
 
@@ -52,10 +59,11 @@
         .back-link {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 0.75rem;
-            color: var(--fg-muted);
+            color: var(--fg-faint);
             text-decoration: none;
             margin-bottom: 1.5rem;
             display: inline-block;
+            transition: color 0.15s;
         }
 
         .back-link:hover {
@@ -70,7 +78,7 @@
             font-size: 1.5rem;
             font-weight: 500;
             font-style: italic;
-            letter-spacing: -0.02em;
+            letter-spacing: -0.03em;
             color: var(--accent);
         }
 
@@ -220,7 +228,7 @@
         }
 
         .delete-btn:hover {
-            color: #e53935;
+            color: #dc2626;
             background: rgba(229, 57, 53, 0.1);
         }
 
@@ -446,7 +454,7 @@
         .reflection-badge {
             display: inline-block;
             padding: 0.15rem 0.4rem;
-            background: rgba(124, 92, 191, 0.1);
+            background: var(--accent-subtle);
             color: var(--accent);
             border-radius: 3px;
             font-family: 'IBM Plex Mono', monospace;
@@ -471,7 +479,7 @@
 
         .error-state {
             padding: 4rem 0;
-            color: #e53935;
+            color: #dc2626;
         }
 
         /* Edit button */
@@ -643,12 +651,18 @@
         /* Dark mode */
         @media (prefers-color-scheme: dark) {
             :root {
-                --bg: #0a0a0b;
-                --surface: #111113;
-                --border: #2a2a2e;
-                --fg: #e4e4e7;
-                --fg-muted: #8b8b8b;
+                --bg: #0e0d0b;
+                --surface: #161513;
+                --surface-raised: #1e1d1a;
+                --border: #2e2c28;
+                --border-subtle: #232220;
+                --fg: #e7e5e0;
+                --fg-muted: #a8a49d;
+                --fg-faint: #6b6860;
                 --accent: #a78bfa;
+                --accent-hover: #b9a0fc;
+                --accent-subtle: rgba(167, 139, 250, 0.1);
+                --accent-surface: rgba(167, 139, 250, 0.04);
             }
         }
     </style>

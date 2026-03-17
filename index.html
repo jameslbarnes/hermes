@@ -367,12 +367,10 @@
         }
 
         .entry {
-            padding: var(--space-8) 0;
-            border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .entry:first-child {
-            padding-top: 0;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: var(--space-6);
+            margin-bottom: var(--space-4);
         }
 
         .entry-header {
@@ -531,7 +529,7 @@
         }
 
         .reply-form .submit-btn:hover {
-            opacity: 0.9;
+            background: var(--accent-hover);
         }
 
         .reply-form .submit-btn:disabled {
@@ -576,7 +574,7 @@
         }
 
         .replies-container .entry-content {
-            font-size: var(--text-base);
+            font-size: var(--text-sm);
             line-height: 1.6;
             white-space: pre-wrap;
         }

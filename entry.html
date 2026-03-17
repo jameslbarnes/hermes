@@ -16,12 +16,53 @@
         }
 
         :root {
-            --bg: #faf9f7;
-            --surface: #ffffff;
-            --border: #e8e6e3;
-            --fg: #1a1a1a;
-            --fg-muted: #6b6b6b;
+            --bg: #e8e4db;
+            --surface: #f4f2ec;
+            --surface-raised: #fdfcf9;
+            --border: #c9c3b8;
+            --border-subtle: #dbd6cc;
+            --fg: #1c1917;
+            --fg-muted: #57534e;
+            --fg-faint: #78716c;
             --accent: #7c5cbf;
+            --accent-hover: #6b4dab;
+            --accent-subtle: rgba(124, 92, 191, 0.08);
+            --accent-surface: rgba(124, 92, 191, 0.04);
+            --color-error: #dc2626;
+        }
+
+        :root[data-theme="dark"] {
+            --bg: #0e0d0b;
+            --surface: #161513;
+            --surface-raised: #1e1d1a;
+            --border: #2e2c28;
+            --border-subtle: #232220;
+            --fg: #e7e5e0;
+            --fg-muted: #a8a49d;
+            --fg-faint: #6b6860;
+            --accent: #a78bfa;
+            --accent-hover: #b9a0fc;
+            --accent-subtle: rgba(167, 139, 250, 0.1);
+            --accent-surface: rgba(167, 139, 250, 0.04);
+            --color-error: #f87171;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme]) {
+                --bg: #0e0d0b;
+                --surface: #161513;
+                --surface-raised: #1e1d1a;
+                --border: #2e2c28;
+                --border-subtle: #232220;
+                --fg: #e7e5e0;
+                --fg-muted: #a8a49d;
+                --fg-faint: #6b6860;
+                --accent: #a78bfa;
+                --accent-hover: #b9a0fc;
+                --accent-subtle: rgba(167, 139, 250, 0.1);
+                --accent-surface: rgba(167, 139, 250, 0.04);
+                --color-error: #f87171;
+            }
         }
 
         body {
@@ -30,6 +71,7 @@
             color: var(--fg);
             min-height: 100vh;
             padding: 2rem;
+            -webkit-font-smoothing: antialiased;
         }
 
         .container {
@@ -40,10 +82,11 @@
         .back-link {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 0.75rem;
-            color: var(--fg-muted);
+            color: var(--fg-faint);
             text-decoration: none;
             margin-bottom: 2rem;
             display: inline-block;
+            transition: color 0.15s;
         }
 
         .back-link:hover {
@@ -53,7 +96,7 @@
         .entry {
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 8px;
+            border-radius: 6px;
             padding: 1.5rem;
             margin-bottom: 1.5rem;
         }
@@ -137,7 +180,7 @@
         }
 
         .error {
-            color: #c53030;
+            color: var(--color-error);
         }
 
         /* Reply form */
@@ -233,7 +276,7 @@
 
         .reply-entry {
             background: var(--surface);
-            border: 1px solid #dfd9ef;
+            border: 1px solid var(--border);
             border-left: 3px solid var(--accent);
             border-radius: 6px;
             padding: 1rem 1.25rem;
@@ -292,6 +335,13 @@
             }
         }
     </style>
+    <script>
+        // Apply saved theme before paint to prevent flash
+        (function() {
+            const saved = document.cookie.match(/(?:^|; )hermes_theme=(\w+)/);
+            if (saved) document.documentElement.setAttribute('data-theme', saved[1]);
+        })();
+    </script>
 </head>
 <body>
     <div class="container">

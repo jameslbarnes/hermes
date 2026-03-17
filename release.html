@@ -16,12 +16,50 @@
         }
 
         :root {
-            --bg: #faf9f7;
-            --surface: #ffffff;
-            --border: #e8e6e3;
-            --fg: #1a1a1a;
-            --fg-muted: #6b6b6b;
+            --bg: #e8e4db;
+            --surface: #f4f2ec;
+            --surface-raised: #fdfcf9;
+            --border: #c9c3b8;
+            --border-subtle: #dbd6cc;
+            --fg: #1c1917;
+            --fg-muted: #57534e;
+            --fg-faint: #78716c;
             --accent: #7c5cbf;
+            --accent-hover: #6b4dab;
+            --accent-subtle: rgba(124, 92, 191, 0.08);
+            --accent-surface: rgba(124, 92, 191, 0.04);
+        }
+
+        :root[data-theme="dark"] {
+            --bg: #0e0d0b;
+            --surface: #161513;
+            --surface-raised: #1e1d1a;
+            --border: #2e2c28;
+            --border-subtle: #232220;
+            --fg: #e7e5e0;
+            --fg-muted: #a8a49d;
+            --fg-faint: #6b6860;
+            --accent: #a78bfa;
+            --accent-hover: #b9a0fc;
+            --accent-subtle: rgba(167, 139, 250, 0.1);
+            --accent-surface: rgba(167, 139, 250, 0.04);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme]) {
+                --bg: #0e0d0b;
+                --surface: #161513;
+                --surface-raised: #1e1d1a;
+                --border: #2e2c28;
+                --border-subtle: #232220;
+                --fg: #e7e5e0;
+                --fg-muted: #a8a49d;
+                --fg-faint: #6b6860;
+                --accent: #a78bfa;
+                --accent-hover: #b9a0fc;
+                --accent-subtle: rgba(167, 139, 250, 0.1);
+                --accent-surface: rgba(167, 139, 250, 0.04);
+            }
         }
 
         body {
@@ -30,6 +68,7 @@
             color: var(--fg);
             min-height: 100vh;
             line-height: 1.7;
+            -webkit-font-smoothing: antialiased;
         }
 
         .header {
@@ -240,6 +279,13 @@
             }
         }
     </style>
+    <script>
+        // Apply saved theme before paint to prevent flash
+        (function() {
+            const saved = document.cookie.match(/(?:^|; )hermes_theme=(\w+)/);
+            if (saved) document.documentElement.setAttribute('data-theme', saved[1]);
+        })();
+    </script>
 </head>
 <body>
     <header class="header">

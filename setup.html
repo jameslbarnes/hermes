@@ -27,6 +27,8 @@
             --accent-hover: #6b4dab;
             --accent-subtle: rgba(124, 92, 191, 0.08);
             --accent-surface: rgba(124, 92, 191, 0.04);
+            --color-error: #dc2626;
+            --color-success: #16a34a;
         }
 
         :root[data-theme="dark"] {
@@ -42,6 +44,8 @@
             --accent-hover: #b9a0fc;
             --accent-subtle: rgba(167, 139, 250, 0.1);
             --accent-surface: rgba(167, 139, 250, 0.04);
+            --color-error: #f87171;
+            --color-success: #4ade80;
         }
 
         @media (prefers-color-scheme: dark) {
@@ -58,6 +62,8 @@
                 --accent-hover: #b9a0fc;
                 --accent-subtle: rgba(167, 139, 250, 0.1);
                 --accent-surface: rgba(167, 139, 250, 0.04);
+                --color-error: #f87171;
+                --color-success: #4ade80;
             }
         }
 
@@ -624,7 +630,7 @@ GET /api/search?q=keyword</code>
 
             if (!/^[a-z]/.test(handle)) {
                 status.textContent = 'Handle must start with a letter';
-                status.style.color = '#e57373';
+                status.style.color = 'var(--color-error)';
                 btn.disabled = true;
                 return;
             }
@@ -639,16 +645,16 @@ GET /api/search?q=keyword</code>
 
                     if (data.available) {
                         status.textContent = '✓ Available';
-                        status.style.color = '#81c784';
+                        status.style.color = 'var(--color-success)';
                         btn.disabled = false;
                     } else {
                         status.textContent = '✗ Already taken';
-                        status.style.color = '#e57373';
+                        status.style.color = 'var(--color-error)';
                         btn.disabled = true;
                     }
                 } catch (err) {
                     status.textContent = 'Error checking availability';
-                    status.style.color = '#e57373';
+                    status.style.color = 'var(--color-error)';
                     btn.disabled = true;
                 }
             }, 300);
@@ -672,7 +678,7 @@ GET /api/search?q=keyword</code>
 
             if (!/^[a-z]/.test(handle)) {
                 status.textContent = 'Handle must start with a letter';
-                status.style.color = '#e57373';
+                status.style.color = 'var(--color-error)';
                 btn.disabled = true;
                 return;
             }
@@ -687,16 +693,16 @@ GET /api/search?q=keyword</code>
 
                     if (data.available) {
                         status.textContent = '✓ Available';
-                        status.style.color = '#81c784';
+                        status.style.color = 'var(--color-success)';
                         btn.disabled = false;
                     } else {
                         status.textContent = '✗ Already taken';
-                        status.style.color = '#e57373';
+                        status.style.color = 'var(--color-error)';
                         btn.disabled = true;
                     }
                 } catch (err) {
                     status.textContent = 'Error checking availability';
-                    status.style.color = '#e57373';
+                    status.style.color = 'var(--color-error)';
                     btn.disabled = true;
                 }
             }, 300);

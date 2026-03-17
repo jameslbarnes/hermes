@@ -28,6 +28,8 @@
             --accent-hover: #6b4dab;
             --accent-subtle: rgba(124, 92, 191, 0.08);
             --accent-surface: rgba(124, 92, 191, 0.04);
+            --color-error: #dc2626;
+            --color-error-soft: rgba(220, 38, 38, 0.1);
         }
 
         body {
@@ -228,8 +230,8 @@
         }
 
         .delete-btn:hover {
-            color: #dc2626;
-            background: rgba(229, 57, 53, 0.1);
+            color: var(--color-error);
+            background: var(--color-error-soft);
         }
 
         .discuss-link {
@@ -479,7 +481,7 @@
 
         .error-state {
             padding: 4rem 0;
-            color: #dc2626;
+            color: var(--color-error);
         }
 
         /* Edit button */
@@ -662,6 +664,8 @@
             --accent-hover: #b9a0fc;
             --accent-subtle: rgba(167, 139, 250, 0.1);
             --accent-surface: rgba(167, 139, 250, 0.04);
+            --color-error: #f87171;
+            --color-error-soft: rgba(248, 113, 113, 0.1);
         }
 
         /* Dark mode — system preference (when no manual override) */
@@ -679,6 +683,8 @@
                 --accent-hover: #b9a0fc;
                 --accent-subtle: rgba(167, 139, 250, 0.1);
                 --accent-surface: rgba(167, 139, 250, 0.04);
+                --color-error: #f87171;
+                --color-error-soft: rgba(248, 113, 113, 0.1);
             }
         }
     </style>

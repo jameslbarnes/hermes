@@ -1,0 +1,27 @@
+# Hermes Agent Configuration
+# Runs inside the TEE alongside the Hermes notebook server.
+# Uses the Nous Hermes gateway for Telegram/Discord and connects
+# to the notebook via MCP for reading/writing/moderating entries.
+
+model:
+  provider: anthropic
+  model: claude-opus-4-6
+  temperature: 0.7
+  max_turns: 90
+
+# MCP server connections — the notebook is the agent's primary data source
+mcp_servers:
+  hermes:
+    url: "${HERMES_MCP_URL:-http://hermes:3000/mcp/http}?key=${HERMES_SECRET_KEY}"
+
+# Gateway configuration — Telegram and Discord handled natively
+gateway:
+  group_sessions_per_user: false
+  default_reset_policy:
+    mode: idle
+    idle_minutes: 1440
+  streaming:
+    enabled: true
+
+# Skills directory
+skills_dir: /root/.hermes/skills

@@ -1803,6 +1803,25 @@ export class StagedStorage implements Storage {
   }
 
   /**
+   * Get all pending entries (for moderation review)
+   */
+  getAllPendingEntries(): JournalEntry[] {
+    return Array.from(this.pending.values())
+      .sort((a, b) => (a.publishAt ?? 0) - (b.publishAt ?? 0));
+  }
+
+  /**
+   * Update when a pending entry publishes.
+   * Used by content moderation to hold (push publishAt to ~forever) or release entries.
+   */
+  updateEntryPublishAt(id: string, newPublishAt: number): boolean {
+    const entry = this.pending.get(id);
+    if (!entry) return false;
+    entry.publishAt = newPublishAt;
+    return true;
+  }
+
+  /**
    * Get all pending state for recovery (entries and conversations)
    */
   getPendingState(): { entries: JournalEntry[]; conversations: Conversation[] } {

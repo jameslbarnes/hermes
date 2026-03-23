@@ -993,4 +993,114 @@ describe.skipIf(!hasFirestore)('StagedStorage', () => {
       expect(entry2.publishAt! - entry1.publishAt!).toBeLessThanOrEqual(longBuffer - shortBuffer + 100);
     });
   });
+
+  describe('Content moderation methods', () => {
+    it('getAllPendingEntries should return all staged entries sorted by publishAt', async () => {
+      const storage = new StagedStorage(60 * 60 * 1000);
+
+      await storage.addEntry({
+        pseudonym: 'User A#aaa',
+        handle: 'alice',
+        client: 'desktop',
+        content: 'First entry',
+        timestamp: Date.now(),
+      });
+
+      await storage.addEntry({
+        pseudonym: 'User B#bbb',
+        handle: 'bob',
+        client: 'desktop',
+        content: 'Second entry',
+        timestamp: Date.now(),
+      });
+
+      const pending = storage.getAllPendingEntries();
+      expect(pending.length).toBe(2);
+      // Sorted by publishAt ascending
+      expect(pending[0].publishAt).toBeLessThanOrEqual(pending[1].publishAt!);
+    });
+
+    it('getAllPendingEntries should return empty array when nothing is pending', async () => {
+      const storage = new StagedStorage(60 * 60 * 1000);
+      const pending = storage.getAllPendingEntries();
+      expect(pending.length).toBe(0);
+    });
+
+    it('updateEntryPublishAt should modify the publishAt of a pending entry', async () => {
+      const storage = new StagedStorage(60 * 60 * 1000);
+
+      const entry = await storage.addEntry({
+        pseudonym: 'User#aaa',
+        handle: 'alice',
+        client: 'desktop',
+        content: 'Test entry',
+        timestamp: Date.now(),
+      });
+
+      const originalPublishAt = entry.publishAt!;
+      const FOREVER = Date.now() + (999999 * 365.25 * 24 * 60 * 60 * 1000);
+
+      const result = storage.updateEntryPublishAt(entry.id, FOREVER);
+      expect(result).toBe(true);
+
+      // Verify the entry's publishAt was updated
+      const updated = await storage.getEntry(entry.id);
+      expect(updated).toBeDefined();
+      expect(updated!.publishAt).toBe(FOREVER);
+      expect(updated!.publishAt).toBeGreaterThan(originalPublishAt);
+    });
+
+    it('updateEntryPublishAt should return false for non-existent entry', async () => {
+      const storage = new StagedStorage(60 * 60 * 1000);
+      const result = storage.updateEntryPublishAt('nonexistent-id', Date.now());
+      expect(result).toBe(false);
+    });
+
+    it('held entries should not auto-publish', async () => {
+      const storage = new StagedStorage(1); // 1ms delay — publishes almost instantly
+
+      const entry = await storage.addEntry({
+        pseudonym: 'User#aaa',
+        handle: 'alice',
+        client: 'desktop',
+        content: 'Sensitive content',
+        timestamp: Date.now(),
+      });
+
+      // Hold the entry
+      const FOREVER = Date.now() + (999999 * 365.25 * 24 * 60 * 60 * 1000);
+      storage.updateEntryPublishAt(entry.id, FOREVER);
+
+      // Wait a bit for the publish loop to run
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Entry should still be pending
+      expect(storage.isPending(entry.id)).toBe(true);
+
+      // Clean up
+      storage.stop();
+    });
+
+    it('released entries should publish immediately via publishEntry', async () => {
+      const storage = new StagedStorage(60 * 60 * 1000);
+
+      const entry = await storage.addEntry({
+        pseudonym: 'User#aaa',
+        handle: 'alice',
+        client: 'desktop',
+        content: 'Safe content',
+        timestamp: Date.now(),
+      });
+
+      expect(storage.isPending(entry.id)).toBe(true);
+
+      // Publish immediately
+      const published = await storage.publishEntry(entry.id);
+      expect(published).toBeDefined();
+      expect(storage.isPending(entry.id)).toBe(false);
+
+      // Clean up
+      storage.stop();
+    });
+  });
 });

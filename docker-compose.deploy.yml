@@ -1,0 +1,50 @@
+services:
+  hermes:
+    image: docker.io/generalsemantics/hermes:fcb160f
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - STAGING_DELAY_MS=3600000
+      - MODERATOR_HANDLES=${MODERATOR_HANDLES:-hermes}
+    volumes:
+      - hermes-data:/data
+    restart: unless-stopped
+
+  hermes-agent:
+    build: ./agent
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - HERMES_MCP_URL=http://hermes:3000/mcp/http
+      - HERMES_SECRET_KEY=${HERMES_AGENT_SECRET_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+    volumes:
+      - agent-data:/root/.hermes
+    depends_on:
+      - hermes
+    restart: unless-stopped
+
+  dstack-ingress:
+    image: socrates1024/dstack-ingress:20251231-namecheap-fix@sha256:a11cdeaa58efc75f83d294bbfd54f599ddf29ae6926152389bce2f3710d4cfe6
+    ports:
+      - "443:443"
+    environment:
+      - DOMAIN=hermes.teleport.computer
+      - DNS_PROVIDER=namecheap
+      - GATEWAY_DOMAIN=_.dstack-pha-prod9.phala.network
+      - CERTBOT_EMAIL=james@generalsemantics.nyc
+      - SET_CAA=false
+      - TARGET_ENDPOINT=http://hermes:3000
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - cert-data:/etc/letsencrypt
+    depends_on:
+      - hermes
+    restart: unless-stopped
+
+volumes:
+  hermes-data:
+  agent-data:
+  cert-data:

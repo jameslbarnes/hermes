@@ -1,17 +1,24 @@
 #!/bin/bash
-set -e
+
+echo "[entrypoint] Starting Hermes agent..."
+echo "[entrypoint] ANTHROPIC_API_KEY set: $(test -n "$ANTHROPIC_API_KEY" && echo yes || echo no)"
+echo "[entrypoint] TELEGRAM_BOT_TOKEN set: $(test -n "$TELEGRAM_BOT_TOKEN" && echo yes || echo no)"
+echo "[entrypoint] HERMES_SECRET_KEY set: $(test -n "$HERMES_SECRET_KEY" && echo yes || echo no)"
+echo "[entrypoint] HERMES_MCP_URL: ${HERMES_MCP_URL:-not set}"
+echo "[entrypoint] GITHUB_TOKEN set: $(test -n "$GITHUB_TOKEN" && echo yes || echo no)"
 
 # Write secrets to .env (gateway reads from here)
 cat > /root/.hermes/.env << EOF
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
 GITHUB_TOKEN=${GITHUB_TOKEN}
 GATEWAY_ALLOW_ALL_USERS=true
 EOF
+echo "[entrypoint] Wrote .env"
 
-# Merge defaults with existing state — never overwrite agent-learned state
+# Merge defaults with existing state
 cp /app/defaults/config.yaml /root/.hermes/config.yaml
+echo "[entrypoint] Copied config.yaml"
 
 # Skills: copy ours only if they don't already exist on the volume
 mkdir -p /root/.hermes/skills
@@ -27,15 +34,6 @@ done
 rm -rf /root/.hermes/sessions 2>/dev/null || true
 mkdir -p /root/.hermes/sessions
 
-# Morning digest: Opus, daily at 13:00 UTC
-hermes cron create "0 13 * * *" \
-  --name "morning-digest" \
-  --deliver telegram \
-  --skill morning-digest \
-  "Compose a morning digest of yesterday's notebook activity." 2>/dev/null || true
-
-# Content moderation runs server-side (Haiku, inline in the staging pipeline).
-# No cron job needed — every entry is evaluated before it enters the buffer.
-
-# Start the gateway — blocks forever
-exec hermes gateway run
+# Skip cron setup for now — gateway is the priority
+echo "[entrypoint] Starting gateway..."
+exec hermes gateway run --verbose 2>&1

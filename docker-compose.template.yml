@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
 
   hermes-agent:
-    image: docker.io/generalsemantics/hermes-agent:latest@sha256:bee5250c6a4d7b0d063799c35306d299bd066e50ad97e50d6a2585a8141cb2d0
+    image: docker.io/generalsemantics/hermes-agent:latest@sha256:b71d584434b7f1845f2064c23690fc07dd821ccee01b8189f2143292cb3d97cb
     environment:
       # Names only — values injected via encrypted --env-file at deploy time
       - ANTHROPIC_API_KEY
@@ -31,7 +31,7 @@ services:
       - TELEGRAM_BOT_TOKEN
       - GITHUB_TOKEN
     volumes:
-      - agent-data:/root/.hermes
+      - hermes-data:/data
     depends_on:
       - hermes
     restart: unless-stopped
@@ -57,5 +57,4 @@ services:
 
 volumes:
   hermes-data:
-  agent-data:
   cert-data-cf:

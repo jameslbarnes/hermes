@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
 
   hermes-agent:
-    image: docker.io/generalsemantics/hermes-agent:latest
+    image: docker.io/generalsemantics/hermes-agent:latest@sha256:4662351bcccc157a319cf40675a9b610976511de9975cd236201c0f7d78b4f0e
     environment:
       # Names only — values injected via encrypted --env-file at deploy time
       - ANTHROPIC_API_KEY

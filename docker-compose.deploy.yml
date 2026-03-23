@@ -1,25 +1,35 @@
+version: '3.8'
+
 services:
   hermes:
-    image: docker.io/generalsemantics/hermes:fcb160f
+    image: docker.io/generalsemantics/hermes:9081484@sha256:ed09f91306096b769d90f2dc59f1b17673235defa379b5fde8ce039b74ef0a93
     ports:
       - "3000:3000"
     environment:
       - PORT=3000
       - STAGING_DELAY_MS=3600000
-      - MODERATOR_HANDLES=${MODERATOR_HANDLES:-hermes}
+      - GIT_SHA=9081484
+      - IMAGE_DIGEST=sha256:ed09f91306096b769d90f2dc59f1b17673235defa379b5fde8ce039b74ef0a93
+      - MODERATOR_HANDLES=hermes
+      # Names only — values injected via encrypted --env-file at deploy time
+      - BASE_URL
+      - FIREBASE_SERVICE_ACCOUNT_BASE64
+      - ANTHROPIC_API_KEY
+      - SENDGRID_API_KEY
+      - SENDGRID_FROM_EMAIL
     volumes:
       - hermes-data:/data
     restart: unless-stopped
 
   hermes-agent:
-    build: ./agent
+    image: docker.io/generalsemantics/hermes-agent:latest
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Names only — values injected via encrypted --env-file at deploy time
+      - ANTHROPIC_API_KEY
       - HERMES_MCP_URL=http://hermes:3000/mcp/http
-      - HERMES_SECRET_KEY=${HERMES_AGENT_SECRET_KEY}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - HERMES_SECRET_KEY
+      - TELEGRAM_BOT_TOKEN
+      - GITHUB_TOKEN
     volumes:
       - agent-data:/root/.hermes
     depends_on:
@@ -27,19 +37,20 @@ services:
     restart: unless-stopped
 
   dstack-ingress:
-    image: socrates1024/dstack-ingress:20251231-namecheap-fix@sha256:a11cdeaa58efc75f83d294bbfd54f599ddf29ae6926152389bce2f3710d4cfe6
+    image: dstacktee/dstack-ingress:20250929@sha256:2b47b3e538df0b3e7724255b89369194c8c83a7cfba64d2faf0115ad0a586458
     ports:
       - "443:443"
     environment:
       - DOMAIN=hermes.teleport.computer
-      - DNS_PROVIDER=namecheap
+      - DNS_PROVIDER=cloudflare
+      - CLOUDFLARE_API_TOKEN
       - GATEWAY_DOMAIN=_.dstack-pha-prod9.phala.network
       - CERTBOT_EMAIL=james@generalsemantics.nyc
-      - SET_CAA=false
+      - SET_CAA=true
       - TARGET_ENDPOINT=http://hermes:3000
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
-      - cert-data:/etc/letsencrypt
+      - cert-data-cf:/etc/letsencrypt
     depends_on:
       - hermes
     restart: unless-stopped
@@ -47,4 +58,4 @@ services:
 volumes:
   hermes-data:
   agent-data:
-  cert-data:
+  cert-data-cf:

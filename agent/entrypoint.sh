@@ -38,8 +38,13 @@ cat > "$HERMES_HOME/.env" << EOF
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
 GITHUB_TOKEN=${GITHUB_TOKEN}
+GH_TOKEN=${GITHUB_TOKEN}
 GATEWAY_ALLOW_ALL_USERS=true
 EOF
+
+# Export GITHUB_TOKEN so the agent's terminal tool can use it
+export GITHUB_TOKEN
+export GH_TOKEN="${GITHUB_TOKEN}"
 echo "[entrypoint] Wrote .env"
 
 # Merge MCP config into existing config.yaml (preserve gateway state like home channel)
@@ -56,6 +61,11 @@ if os.path.exists(config_path):
 config['model'] = {'provider': 'anthropic', 'model': 'claude-opus-4-6', 'temperature': 0.7, 'max_turns': 90}
 config['mcp_servers'] = {'hermes': {'url': '$MCP_URL'}}
 config['skills_dir'] = '$HERMES_HOME/skills'
+
+# Hide tool use from Telegram messages
+if 'display' not in config:
+    config['display'] = {}
+config['display']['tool_progress'] = 'off'
 
 # Set gateway defaults only if not already configured
 if 'gateway' not in config:

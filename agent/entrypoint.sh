@@ -67,6 +67,11 @@ if 'display' not in config:
     config['display'] = {}
 config['display']['tool_progress'] = 'off'
 
+# Forward secrets into the terminal sandbox (Docker-in-Docker)
+if 'terminal' not in config:
+    config['terminal'] = {}
+config['terminal']['docker_forward_env'] = ['GITHUB_TOKEN', 'GH_TOKEN', 'ANTHROPIC_API_KEY', 'TELEGRAM_BOT_TOKEN']
+
 # Set gateway defaults only if not already configured
 if 'gateway' not in config:
     config['gateway'] = {}

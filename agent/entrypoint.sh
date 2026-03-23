@@ -16,9 +16,30 @@ GATEWAY_ALLOW_ALL_USERS=true
 EOF
 echo "[entrypoint] Wrote .env"
 
-# Merge defaults with existing state
-cp /app/defaults/config.yaml /root/.hermes/config.yaml
-echo "[entrypoint] Copied config.yaml"
+# Write config with resolved env vars (YAML doesn't do shell interpolation)
+MCP_URL="${HERMES_MCP_URL:-http://hermes:3000/mcp/http}?key=${HERMES_SECRET_KEY}"
+cat > /root/.hermes/config.yaml << EOF
+model:
+  provider: anthropic
+  model: claude-opus-4-6
+  temperature: 0.7
+  max_turns: 90
+
+mcp_servers:
+  hermes:
+    url: "${MCP_URL}"
+
+gateway:
+  group_sessions_per_user: false
+  default_reset_policy:
+    mode: idle
+    idle_minutes: 1440
+  streaming:
+    enabled: true
+
+skills_dir: /root/.hermes/skills
+EOF
+echo "[entrypoint] Wrote config.yaml with MCP URL: ${HERMES_MCP_URL:-http://hermes:3000/mcp/http}"
 
 # Skills: copy ours only if they don't already exist on the volume
 mkdir -p /root/.hermes/skills
@@ -34,6 +55,6 @@ done
 rm -rf /root/.hermes/sessions 2>/dev/null || true
 mkdir -p /root/.hermes/sessions
 
-# Skip cron setup for now — gateway is the priority
+# Start the gateway
 echo "[entrypoint] Starting gateway..."
 exec hermes gateway run --verbose 2>&1

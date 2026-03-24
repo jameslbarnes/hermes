@@ -25,9 +25,11 @@
     "firebase-admin": "^13.6.0",
     "jsonwebtoken": "^9.0.3",
     "resend": "^6.7.0",
+    "better-sqlite3": "^11.7.0",
     "telegraf": "^4.16.3"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.10.0",
     "tsx": "^4.7.0",

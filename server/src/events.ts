@@ -4,7 +4,25 @@
  * The server pushes events (entry staged, entry published, chat message,
  * mention, etc.) and the agent polls them via the hermes_poll_events MCP tool.
  * Events are held in memory with a rolling window.
+ *
+ * Platform messages (platform_message, platform_mention) are also persisted
+ * to a local SQLite database via the message store for durable history.
  */
+
+import { initMessageStore, storeMessage as dbStoreMessage } from './message-store.js';
+
+// Lazily initialise the message store on first platform event
+let messageStoreReady = false;
+function ensureMessageStore(): void {
+  if (!messageStoreReady) {
+    try {
+      initMessageStore();
+      messageStoreReady = true;
+    } catch (err) {
+      console.error('[Events] Failed to initialise message store:', err);
+    }
+  }
+}
 
 export type EventType =
   | 'entry_staged'
@@ -40,6 +58,17 @@ export function pushEvent(type: EventType, data: Record<string, any>): HermesEve
   // Trim old events
   while (events.length > MAX_EVENTS) {
     events.shift();
+  }
+
+  // Persist platform messages to SQLite (fire-and-forget)
+  if (type === 'platform_message' || type === 'platform_mention') {
+    try {
+      ensureMessageStore();
+      dbStoreMessage(event);
+    } catch (err) {
+      // Never let a DB error break the event flow
+      console.error('[Events] Failed to persist message to SQLite:', err);
+    }
   }
 
   return event;

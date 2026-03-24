@@ -28,6 +28,7 @@ import { createNotificationService, createSendGridClient, verifyUnsubscribeToken
 import { deliverEntry, getDefaultVisibility, canViewEntry, canView, normalizeEntry, isDefaultAiOnly, isEntryAiOnly, type DeliveryConfig } from './delivery.js';
 import { startTelegramBot, postToTelegram } from './telegram.js';
 import { pushEvent, getEventsSince, getLatestCursor, type EventType } from './events.js';
+import { execFile } from 'child_process';
 
 // Security: Check if a URL points to internal/private IP ranges
 function isInternalUrl(urlString: string): boolean {
@@ -697,6 +698,100 @@ export const SYSTEM_SKILLS: Skill[] = [
     instructions: '',
     handlerType: 'builtin',
     inputSchema: { type: 'object', properties: {} },
+    createdAt: 0,
+  },
+  {
+    id: 'system_hermes_query_messages',
+    name: 'hermes_query_messages',
+    description: 'Query the Telegram message history database. Supports flexible filtering by chat, sender, topic, and time range. Use action "query" to search messages, "stats" to get aggregate counts, or "analytics" to get a full analytics snapshot (word counts, response probability, participant geometry, conversation velocity).',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['query', 'stats', 'analytics'],
+          description: 'Action to perform: "query" returns matching messages, "stats" returns aggregate counts, "analytics" returns full chat analytics snapshot.',
+        },
+        chat_id: {
+          type: 'string',
+          description: 'Filter by Telegram chat ID (required for analytics action).',
+        },
+        sender_id: {
+          type: 'string',
+          description: 'Filter by sender user ID (optional, for query/stats).',
+        },
+        topic_id: {
+          type: 'number',
+          description: 'Filter by forum topic/thread ID (optional).',
+        },
+        since: {
+          type: 'string',
+          description: 'Only return messages after this ISO 8601 timestamp (optional, for query/stats).',
+        },
+        until: {
+          type: 'string',
+          description: 'Only return messages before this ISO 8601 timestamp (optional, for query/stats).',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum messages to return (default 50, max 200, for query action).',
+        },
+        offset: {
+          type: 'number',
+          description: 'Offset for pagination (default 0, for query action).',
+        },
+        bot_sender_id: {
+          type: 'string',
+          description: 'Bot sender ID for analytics response probability (default: "hermes").',
+        },
+        window_minutes: {
+          type: 'number',
+          description: 'Rolling window for analytics in minutes (default: 30).',
+        },
+      },
+      required: [],
+    },
+    createdAt: 0,
+  },
+  {
+    id: 'system_hermes_chat_analytics',
+    name: 'hermes_chat_analytics',
+    description: 'Query chat analytics and response shaping configuration. Returns rolling statistics about message patterns, word counts, response probability, participant geometry, and conversation velocity. Use "config" action to read or update response shaping parameters.',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['word_count_stats', 'response_probability', 'participant_geometry', 'conversation_velocity', 'config'],
+          description: 'Analytics action to perform. "config" reads/updates the response shaping configuration; all others query live chat statistics.',
+        },
+        chat_id: {
+          type: 'string',
+          description: 'Telegram chat ID (required for analytics actions, not needed for config).',
+        },
+        topic_id: {
+          type: 'number',
+          description: 'Forum topic/thread ID (optional, filters analytics to a specific topic).',
+        },
+        bot_sender_id: {
+          type: 'string',
+          description: 'Bot sender ID for response probability calculation (default: "hermes").',
+        },
+        window_minutes: {
+          type: 'number',
+          description: 'Rolling window size in minutes (default: 30).',
+        },
+        config_updates: {
+          type: 'object',
+          description: 'For "config" action: partial config object to merge into current config. Omit to just read.',
+        },
+      },
+      required: ['action'],
+    },
     createdAt: 0,
   },
 ];
@@ -1391,7 +1486,7 @@ function createMCPServer(secretKey: string) {
           }
         }
         // Moderation tools: only show to moderators (or if no moderators configured, show to all)
-        if (['hermes_poll_events', 'hermes_review_staged', 'hermes_hold_entry', 'hermes_release_entry'].includes(skill.name)) {
+        if (['hermes_poll_events', 'hermes_review_staged', 'hermes_hold_entry', 'hermes_release_entry', 'hermes_chat_analytics', 'hermes_query_messages'].includes(skill.name)) {
           if (!(storage instanceof StagedStorage)) return false;
           if (MODERATOR_HANDLES.size > 0 && (!handle || !MODERATOR_HANDLES.has(handle))) return false;
         }
@@ -3504,6 +3599,203 @@ HOLD:private business information`,
       return {
         content: [{ type: 'text' as const, text: `${events.length} events (cursor ${nextCursor}):\n\n${formatted}` }],
       };
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Message query tool (with analytics action)
+    // ─────────────────────────────────────────────────────────────
+
+    if (name === 'hermes_query_messages') {
+      const handle = await getHandle();
+      const isModerator = handle && MODERATOR_HANDLES.has(handle);
+      if (MODERATOR_HANDLES.size > 0 && !isModerator) {
+        return {
+          content: [{ type: 'text' as const, text: 'Only the Hermes agent can query messages.' }],
+          isError: true,
+        };
+      }
+
+      const params = args as {
+        action?: string;
+        chat_id?: string;
+        sender_id?: string;
+        topic_id?: number;
+        since?: string;
+        until?: string;
+        limit?: number;
+        offset?: number;
+        bot_sender_id?: string;
+        window_minutes?: number;
+      };
+
+      const action = params.action || 'query';
+
+      // Analytics action: full snapshot via Python bridge
+      if (action === 'analytics') {
+        if (!params.chat_id) {
+          return {
+            content: [{ type: 'text' as const, text: 'chat_id is required for the analytics action.' }],
+            isError: true,
+          };
+        }
+
+        const bridgePath = join(dirname(new URL(import.meta.url).pathname), '..', 'analytics', 'mcp_bridge.py');
+        const bridgeArgs = [
+          bridgePath,
+          'full_snapshot',
+          '--chat_id', params.chat_id,
+        ];
+        if (params.topic_id !== undefined) {
+          bridgeArgs.push('--topic_id', String(params.topic_id));
+        }
+        if (params.bot_sender_id) {
+          bridgeArgs.push('--bot_sender_id', params.bot_sender_id);
+        }
+        if (params.window_minutes !== undefined) {
+          bridgeArgs.push('--window_minutes', String(params.window_minutes));
+        }
+
+        return new Promise((resolve) => {
+          execFile('python3', bridgeArgs, { timeout: 15000 }, (error, stdout, stderr) => {
+            if (error) {
+              resolve({
+                content: [{ type: 'text' as const, text: `Analytics error: ${error.message}${stderr ? '\n' + stderr : ''}` }],
+                isError: true,
+              });
+              return;
+            }
+            try {
+              const result = JSON.parse(stdout);
+              resolve({
+                content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+              });
+            } catch {
+              resolve({
+                content: [{ type: 'text' as const, text: stdout || 'No output from analytics.' }],
+              });
+            }
+          });
+        });
+      }
+
+      // For query/stats actions: these require the message-store module
+      // (available when PR #16 feat/telegram-message-db is merged)
+      return {
+        content: [{ type: 'text' as const, text: `Action "${action}" requires the message-store module. Use hermes_chat_analytics for analytics queries, or wait for the message-store integration to land.` }],
+        isError: true,
+      };
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Chat analytics tool
+    // ─────────────────────────────────────────────────────────────
+
+    if (name === 'hermes_chat_analytics') {
+      const handle = await getHandle();
+      const isModerator = handle && MODERATOR_HANDLES.has(handle);
+      if (MODERATOR_HANDLES.size > 0 && !isModerator) {
+        return {
+          content: [{ type: 'text' as const, text: 'Only the Hermes agent can access chat analytics.' }],
+          isError: true,
+        };
+      }
+
+      const params = args as {
+        action?: string;
+        chat_id?: string;
+        topic_id?: number;
+        bot_sender_id?: string;
+        window_minutes?: number;
+        config_updates?: Record<string, any>;
+      };
+
+      const action = params.action || 'config';
+
+      // Handle config action: read/update response shaping config
+      if (action === 'config') {
+        const configPath = join(dirname(new URL(import.meta.url).pathname), '..', 'analytics', 'config.json');
+        try {
+          let config: Record<string, any> = {};
+          if (existsSync(configPath)) {
+            config = JSON.parse(readFileSync(configPath, 'utf-8'));
+          }
+
+          if (params.config_updates) {
+            // Deep merge updates into config
+            const deepMerge = (target: any, source: any): any => {
+              for (const key of Object.keys(source)) {
+                if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+                  target[key] = deepMerge(target[key] || {}, source[key]);
+                } else {
+                  target[key] = source[key];
+                }
+              }
+              return target;
+            };
+            config = deepMerge(config, params.config_updates);
+            writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+            return {
+              content: [{ type: 'text' as const, text: `Config updated successfully.\n\n${JSON.stringify(config, null, 2)}` }],
+            };
+          }
+
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(config, null, 2) }],
+          };
+        } catch (error: any) {
+          return {
+            content: [{ type: 'text' as const, text: `Error reading/writing config: ${error.message}` }],
+            isError: true,
+          };
+        }
+      }
+
+      // Analytics actions require chat_id
+      if (!params.chat_id) {
+        return {
+          content: [{ type: 'text' as const, text: 'chat_id is required for analytics actions.' }],
+          isError: true,
+        };
+      }
+
+      // Call the Python bridge script
+      const bridgePath = join(dirname(new URL(import.meta.url).pathname), '..', 'analytics', 'mcp_bridge.py');
+      const bridgeArgs = [
+        bridgePath,
+        action,
+        '--chat_id', params.chat_id,
+      ];
+      if (params.topic_id !== undefined) {
+        bridgeArgs.push('--topic_id', String(params.topic_id));
+      }
+      if (params.bot_sender_id) {
+        bridgeArgs.push('--bot_sender_id', params.bot_sender_id);
+      }
+      if (params.window_minutes !== undefined) {
+        bridgeArgs.push('--window_minutes', String(params.window_minutes));
+      }
+
+      return new Promise((resolve) => {
+        execFile('python3', bridgeArgs, { timeout: 15000 }, (error, stdout, stderr) => {
+          if (error) {
+            resolve({
+              content: [{ type: 'text' as const, text: `Analytics error: ${error.message}${stderr ? '\n' + stderr : ''}` }],
+              isError: true,
+            });
+            return;
+          }
+          try {
+            const result = JSON.parse(stdout);
+            resolve({
+              content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+            });
+          } catch {
+            resolve({
+              content: [{ type: 'text' as const, text: stdout || 'No output from analytics.' }],
+            });
+          }
+        });
+      });
     }
 
     // (Telegram send/get_messages removed — handled by Nous Hermes gateway)

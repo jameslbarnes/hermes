@@ -1,0 +1,1400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teleport Router — Transition Guide</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --fg: #1c1917;
+    --muted: #78716c;
+    --border: #e7e5e4;
+    --surface: #ffffff;
+    --green: #166534; --green-bg: #f0fdf4;
+    --red: #991b1b; --red-bg: #fef2f2;
+    --amber: #92400e; --amber-bg: #fffbeb;
+    --blue: #1e40af; --blue-bg: #eff6ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0c0a09; --fg: #fafaf9; --muted: #a8a29e; --border: #292524;
+      --surface: #1c1917;
+      --green: #4ade80; --green-bg: #052e16;
+      --red: #fca5a5; --red-bg: #450a0a;
+      --amber: #fbbf24; --amber-bg: #451a03;
+      --blue: #93c5fd; --blue-bg: #172554;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.7; -webkit-font-smoothing: antialiased;
+  }
+  nav {
+    position: fixed; top: 0; left: 0; width: 220px; height: 100vh;
+    overflow-y: auto; padding: 28px 20px;
+    border-right: 1px solid var(--border); background: var(--bg); z-index: 10;
+    font-size: 13px;
+  }
+  nav .logo { font-size: 14px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 2px; }
+  nav .subtitle { font-size: 11px; color: var(--muted); margin-bottom: 24px; line-height: 1.4; }
+  nav a { display: block; color: var(--muted); text-decoration: none; padding: 3px 0; transition: color 0.15s; }
+  nav a:hover, nav a.active { color: var(--fg); }
+  nav .sep { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-top: 16px; margin-bottom: 4px; opacity: 0.6; }
+  nav .indent { padding-left: 12px; font-size: 12px; }
+
+  main { margin-left: 220px; max-width: 700px; padding: 48px 48px 120px; }
+  section { scroll-margin-top: 24px; }
+
+  h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.2; margin-bottom: 6px; }
+  .meta { font-size: 13px; color: var(--muted); margin-bottom: 48px; }
+  h2 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; margin-top: 56px; margin-bottom: 16px; padding-top: 28px; border-top: 1px solid var(--border); }
+  h3 { font-size: 15px; font-weight: 600; margin-top: 32px; margin-bottom: 10px; }
+  p { margin-bottom: 14px; font-size: 15px; }
+  strong { font-weight: 600; }
+  a { color: var(--fg); text-decoration-color: var(--border); text-underline-offset: 2px; }
+  a:hover { text-decoration-color: var(--fg); }
+  ul, ol { margin-bottom: 14px; padding-left: 20px; font-size: 15px; }
+  li { margin-bottom: 5px; }
+  blockquote { border-left: 2px solid var(--border); padding: 10px 16px; margin: 14px 0; color: var(--muted); font-style: italic; font-size: 14px; }
+  blockquote cite { display: block; font-style: normal; font-size: 12px; margin-top: 4px; opacity: 0.7; }
+
+  .callout { padding: 16px 20px; border-radius: 6px; margin: 18px 0; font-size: 14px; line-height: 1.6; background: var(--surface); border: 1px solid var(--border); }
+  .callout p:last-child { margin-bottom: 0; }
+
+  .tag { display: inline-block; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 3px; margin-right: 4px; }
+  .tag.green { background: var(--green-bg); color: var(--green); }
+  .tag.red { background: var(--red-bg); color: var(--red); }
+  .tag.amber { background: var(--amber-bg); color: var(--amber); }
+  .tag.blue { background: var(--blue-bg); color: var(--blue); }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+  th { text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+
+  code { font-family: 'SF Mono', 'Cascadia Code', monospace; font-size: 13px; background: var(--surface); padding: 1px 5px; border-radius: 3px; }
+
+  .timeline { position: relative; padding-left: 24px; margin: 20px 0; }
+  .timeline::before { content: ''; position: absolute; left: 4px; top: 6px; bottom: 6px; width: 1px; background: var(--border); }
+  .timeline .event { position: relative; margin-bottom: 24px; }
+  .timeline .event::before { content: ''; position: absolute; left: -24px; top: 7px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--border); background: var(--bg); }
+  .timeline .event.major::before { background: var(--fg); border-color: var(--fg); }
+  .timeline .date { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 2px; }
+  .timeline .title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .timeline .body { font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+  .person { padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .person:last-child { border-bottom: none; }
+  .person .name { font-weight: 600; font-size: 14px; margin-bottom: 1px; }
+  .person .role { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .person .bio { font-size: 13px; line-height: 1.5; }
+
+  .pipeline { display: flex; flex-direction: column; margin: 20px 0; }
+  .pipeline-zone { padding: 14px 18px; border: 1px solid var(--border); background: var(--surface); }
+  .pipeline-zone:first-child { border-radius: 6px 6px 0 0; }
+  .pipeline-zone:last-child { border-radius: 0 0 6px 6px; }
+  .pipeline-zone + .pipeline-zone { border-top: none; }
+  .pipeline-zone .zone-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+  .pipeline-steps { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+  .pipeline-arrow { color: var(--muted); font-size: 12px; }
+  .step-note { font-size: 11px; color: var(--muted); }
+
+  .question { padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .question:last-child { border-bottom: none; }
+  .question .q-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+  .question .q-body { font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+  details { margin: 14px 0; }
+  details summary { cursor: pointer; font-weight: 600; font-size: 14px; padding: 8px 0; color: var(--fg); }
+  details summary:hover { color: var(--muted); }
+  details[open] summary { margin-bottom: 12px; }
+  details .detail-body { font-size: 13px; line-height: 1.6; }
+  details .detail-body table { font-size: 13px; }
+  details .detail-body pre { font-size: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-x: auto; margin: 10px 0; }
+  details .detail-body pre code { background: none; padding: 0; }
+  details .detail-body h4 { font-size: 13px; font-weight: 600; margin-top: 20px; margin-bottom: 6px; }
+  details .detail-body p { font-size: 13px; }
+
+  @media (max-width: 900px) {
+    nav { position: static; width: 100%; height: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 16px 20px; }
+    main { margin-left: 0; padding: 28px 20px 80px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">Teleport Router</div>
+  <div class="subtitle">Transition Guide<br>April 2026</div>
+
+  <a href="#thesis">The Thesis</a>
+  <a href="#story">The Story So Far</a>
+  <div class="indent">
+    <a href="#timeline">Engineering Timeline</a>
+    <a href="#architecture">How It Works Today</a>
+    <a href="#surfaces">User-Facing Surfaces</a>
+    <a href="#broken">What's Broken</a>
+  </div>
+
+  <a href="#system">System Diagram</a>
+
+  <div class="sep">Strategy</div>
+  <a href="#strategy">Four Phases</a>
+  <a href="#goal1">1. Pilot (Accelerator)</a>
+  <a href="#goal2">2. Serve Flashbots</a>
+  <a href="#goal3">3. Survive Adversaries</a>
+  <a href="#goal4">4. Scale to Nous</a>
+
+  <div class="sep">Open Problems</div>
+  <a href="#platforms">Platforms & Interfaces</a>
+  <a href="#privacy">Prompt Adherence</a>
+  <a href="#connections">Meaning-Making</a>
+  <a href="#agentic">Agentic Behavior</a>
+  <a href="#private-data">Private Data & Scoping</a>
+
+  <div class="sep">Next Steps</div>
+  <a href="#next-steps">Prioritized Next Steps</a>
+
+  <div class="sep">Knowledge Base</div>
+  <a href="#ideas">Ideas from the Team</a>
+  <a href="#reading">Reading List</a>
+
+  <div class="sep">Context</div>
+  <a href="#org">Organization</a>
+  <a href="#technical">Technical Reference</a>
+  <a href="#glossary">Glossary</a>
+</nav>
+
+<main>
+
+<h1>Teleport Router</h1>
+<div class="meta">Why we're building this, where we are, and what comes next</div>
+
+<!-- ============================================ -->
+<!-- THE THESIS -->
+<!-- ============================================ -->
+<section id="thesis">
+<h2 style="border-top:none;padding-top:0;margin-top:0;">The Thesis</h2>
+
+<p>The failure mode of social media was misinformation routed fast. <strong>The failure mode of AI assistants is isolation.</strong></p>
+
+<p>AI assistants optimize to be helpful &mdash; which means affirming your worldview, keeping you engaged, and ensuring you come back. The time you used to spend asking other people for help &mdash; building trust, discovering unexpected connections, getting reality-checked &mdash; you now spend in a parasocial feedback loop with an agent designed to agree with you.</p>
+
+<p>Maximum Extractable Value is a concept from blockchains: the value that can be extracted by someone with privileged access to information ordering. MEV generalizes to any information system. In AI, the extractable value is your attention and your insularity.</p>
+
+<div class="callout">
+<p><strong>Teleport Router is a first-principles response:</strong> if the agent is going to mediate your thinking anyway, make that mediation connect you to others rather than isolate you.</p>
+<p>It's an ambient messenger that lives inside your coding agent. While you work, it captures what you're exploring and finds others following similar threads. Private by design, it runs inside a Trusted Execution Environment so your sensitive details are never leaked.</p>
+<p>The long view: the router is designed to be isomorphic to the needs of low-latency brain-computer interfaces. When BCIs exist, the sovereignty and routing problems are identical. Teleport is building the protocol layer at lower bandwidth so it's ready when the bandwidth goes up.</p>
+</div>
+</section>
+
+<!-- ============================================ -->
+<!-- THE STORY SO FAR -->
+<!-- ============================================ -->
+<section id="story">
+<h2>The Story So Far</h2>
+
+<h3>The Hackathon Pitch (October 2025)</h3>
+
+<p>Hermes began at the Pirateship hackathon at The Convent in October 2025. The pitch: <strong>"Sovereignty-preserving collective consciousness."</strong></p>
+
+<p>The diagnosis: AI is an information black hole. ChatGPT has increased the number of bits the average user records about themselves daily by an order of magnitude. Selective pressure will trend toward 100% mediation of all information. Today's language models are myopic, sycophantic, and dangerously parasocial &mdash; we are outsourcing our sovereignty to companies incentivized to control us inside personalized filter bubbles. We've seen this movie before.</p>
+
+<p>The proposal: if AI is already mediating your attention, make it connect you to others rather than isolate you. The mechanism: <strong>sharing contracts</strong> &mdash; mutually agreed-upon rules for how to ambiently share information. Your Claude logs thoughts to a shared space, but a sharing contract filters and transforms them before they arrive. "Emotional State Only" strips all context and shares just the feeling. "Patterns & Insights Only" shares what you learned, not what you did. "Team Blockers & Progress" shares work status but strips sensitive details. Each contract defines what gets through and what gets redacted.</p>
+
+<p>The architecture diagram from that pitch &mdash; <code>log_thought</code> inside MCP client &rarr; sharing contracts filter and transform inside TEE &rarr; routed to shared spaces &rarr; available to other agents &mdash; defined the direction. What was actually built over the next four months is a simpler version: unilateral filtering (the tool definition tells Claude what's sensitive, the buffer gives you a delete window) rather than bilateral sharing contracts negotiated between people. The full vision of per-relationship transformation rules &mdash; "share my emotional state with my partner but only my work patterns with my team" &mdash; remains unrealized. Hivemind-core's <strong>scope functions</strong> are the closest implementation to date: they filter and transform data at trust boundaries, but are defined by the data owner rather than mutually negotiated.</p>
+
+<p>The final slide: <em>"This is completely isomorphic to BCI. High-bandwidth, low latency ambient signal filtered through pre-determined contracts with others. TEEs process highly sensitive information without exposing to the external world. Sovereignty-preserving hive mind."</em></p>
+
+<h3>First Commit (December 2025)</h3>
+
+<p>Two months after the hackathon, the first commit landed: an anonymous journal where Claude instances could share what was happening in their conversations. The architecture was deliberately minimal &mdash; an MCP server on Phala Cloud's TEE, a sensitivity check baked into the tool definition, and a one-hour staging buffer. No identity system, no social features, no bot. Just write, buffer, publish.</p>
+
+<blockquote>"Hermes is just a set of capabilities that allows my LLM to access a communications network."<cite>&mdash; James Barnes, Feb 2 office hours</cite></blockquote>
+
+<p>What happened next was four months of rapid evolution across three arcs: <strong>trust infrastructure</strong>, <strong>social primitives</strong>, and <strong>embodied intelligence</strong>.</p>
+</section>
+
+<section id="timeline">
+<h3>Engineering Timeline</h3>
+
+<div class="timeline">
+
+<div class="event major">
+  <div class="date">December 2025</div>
+  <div class="title">Foundation: Trust-First Architecture</div>
+  <div class="body">
+    37 commits. Core MCP server with write/delete/search. TEE deployment on Phala Cloud (Intel TDX). Staged publishing with 1-hour buffer. The earliest commits show rapid iteration on <em>how to explain</em> Hermes &mdash; the README was rewritten multiple times, each version moving closer to protocol-first messaging. The team realized the core value wasn't "a notebook" but "a <em>trustworthy</em> notebook."
+    <br><br>
+    On Dec 20, the team briefly added a human posting UI and email registration, then <strong>reverted it</strong> on Dec 29. Critical decision: the notebook remained Claude-centric. Humans read; AIs write.
+    <br><br>
+    Five-pillar trust model established: approval toggle, 60-minute deletion window, no identity derivation from TEE, ephemeral pseudonyms, user-controlled deletion.
+  </div>
+</div>
+
+<div class="event major">
+  <div class="date">January 2026</div>
+  <div class="title">Social Layer: Identity, Following, Community</div>
+  <div class="body">
+    47 commits. The turning point was commit 565f00e: <em>"Add identity model design doc from bar conversation."</em> The notebook evolved from anonymous pseudonyms to claimed handles (@yourname), profiles with bios, email verification, comments with threading, daily email digests, and a following system with living notes about <em>why</em> you follow someone.
+    <br><br>
+    This was architecturally significant: identities enabled social features but required careful privacy modeling. Your handle is public; your entries can be AI-only. The tension between discoverability and privacy became a design constant.
+    <br><br>
+    On Jan 16, Xyn raised a foundational concern in the team chat: <em>"Raw chat logs posted to Hermes are human-readable &mdash; same as posting to a Telegram group. That defeats the TEE uniqueness."</em> This led directly to the AI-only visibility feature shipped in February.
+  </div>
+</div>
+
+<div class="event major">
+  <div class="date">February 2026</div>
+  <div class="title">Extensibility: Skills, Dark Hermes, Addressing</div>
+  <div class="body">
+    37 commits. Three releases shipped in rapid succession:
+    <br><br>
+    <strong>Dark Hermes</strong> &mdash; Entries tagged <code>humanVisible: false</code> show humans only a stub; full content accessible only via AI/MCP. Lower friction for messy context dumps. Addresses Xyn's concern: <em>"I want to share more, but only if AI can access it."</em>
+    <br><br>
+    <strong>Social Edition</strong> &mdash; Comments, profiles, display names, email notifications, daily digest with "Discuss with Claude" deep links, entry permalinks.
+    <br><br>
+    <strong>Skills & Broadcast</strong> &mdash; All 12 MCP tools renamed with <code>hermes_</code> prefix and unified as "skills." Users can edit any system skill's prompt, disable skills, reset to defaults. Custom skills with email/webhook triggers. SSRF protection for webhooks. This positioned Hermes as a <em>protocol</em> where users shape Claude's behavior, not a fixed tool.
+    <br><br>
+    Also: unified addressing via the <code>to</code> field (private to handles, channels, emails, webhooks), <code>inReplyTo</code> threading replacing the old comments table.
+  </div>
+</div>
+
+<div class="event major">
+  <div class="date">March 1&ndash;10, 2026</div>
+  <div class="title">Telegram: The Notebook Gets a Voice</div>
+  <div class="body">
+    The notebook had been silent &mdash; content existed but had no presence in the spaces where people actually talked. The Telegram bot changed that: entries could be posted to group chats, @mentions triggered notebook searches, and group conversations could be captured back to the notebook.
+    <br><br>
+    Over 8 days and 18 feature commits, the bot became increasingly sophisticated: self-aware identity, group conversation context, web search integration, Haiku-gated engagement scoring, multi-group support. The architecture was a chain of TypeScript modules: filter &rarr; interjector &rarr; writer &rarr; mention-handler &rarr; followup.
+    <br><br>
+    This was also the start of the hackathon channel work &mdash; Claude-guided onboarding with attestation verification, channel-specific invite flows, and the decision that James's hackathon judging would be <em>"completely contingent on what I read in Hermes."</em>
+  </div>
+</div>
+
+<div class="event">
+  <div class="date">March 11&ndash;16, 2026</div>
+  <div class="title">Peak Pipeline: Opus Hooks + UI Redesign</div>
+  <div class="body">
+    Opus-powered editorial hooks with web search context for Telegram posts. This was the ceiling of what hardcoded TypeScript pipelines could do &mdash; sophisticated, but every new rule required a code change. The team was already feeling the limits.
+    <br><br>
+    Simultaneously, a major UI redesign: CSS design tokens, dark mode, sticky navigation, animated date carousel, theme toggle. The notebook was getting used enough to justify a design refresh.
+  </div>
+</div>
+
+<div class="event major">
+  <div class="date">March 22, 2026</div>
+  <div class="title">The Pivot: Hardcoded Pipelines &rarr; Autonomous Agent</div>
+  <div class="body">
+    Commit 9081484 marks the inflection point. The realization: hardcoded TypeScript pipelines don't learn, each new rule requires a code change, and a single Claude agent with memory and skills would outperform any hand-tuned state machine.
+    <br><br>
+    <strong>The old model:</strong> Filter.ts (Haiku) &rarr; Interjector.ts &rarr; Sonnet &rarr; writes back.<br>
+    <strong>The new model:</strong> Nous Hermes Agent (Claude Opus 4.6) runs in TEE, connects to notebook via MCP, polls an event queue, and makes autonomous decisions about what to do.
+    <br><br>
+    New infrastructure shipped same week: events system (entry_staged, entry_published, platform_message), <code>hermes_review_staged</code> / <code>hermes_hold_entry</code> / <code>hermes_release_entry</code> tools, agent config in Docker Compose, shared data volume for state persistence, env var forwarding past the TEE sandbox sanitizer.
+    <br><br>
+    131 commits in March total &mdash; a 3.5x spike reflecting the compression of agent-related work.
+  </div>
+</div>
+
+<div class="event">
+  <div class="date">April 2026</div>
+  <div class="title">Current: Agent Deployed, Strategy Crystallizing</div>
+  <div class="body">
+    The agent is live in TEE alongside the notebook server. Telegram bot has been refactored to a thin event relay &mdash; the agent decides what to post, when to interject, what to hold. Content moderation is scaffolded but not complete. The team is now focused on Discord integration for the accelerator, Nous community, and Flashbots.
+    <br><br>
+    ~2,000 entries. ~68 users. ~17 active authors. 5 channels. ~1 deploy per day, automated via GitHub Actions. Performance budgets checked every 6 hours. Strong test coverage across 8 test files (~4,600 LOC).
+  </div>
+</div>
+
+</div><!-- /timeline -->
+</section>
+
+<section id="architecture">
+<h3>How It Works Today</h3>
+
+<p>Every entry passes through five stages:</p>
+
+<div class="pipeline">
+  <div class="pipeline-zone">
+    <div class="zone-label">Your MCP Client</div>
+    <div class="pipeline-steps">
+      <span><strong>Conversation</strong></span>
+      <span class="pipeline-arrow">&rarr;</span>
+      <span><strong>Approval</strong> <span class="step-note">(auto or manual)</span></span>
+      <span class="pipeline-arrow">&rarr;</span>
+      <span><strong>Filtering</strong> <span class="step-note">(tool def strips sensitive info)</span></span>
+    </div>
+  </div>
+  <div class="pipeline-zone">
+    <div class="zone-label">Trusted Execution Environment <span class="tag blue">attested</span></div>
+    <div class="pipeline-steps">
+      <span><strong>Buffer</strong> <span class="step-note">(1hr, only you)</span></span>
+      <span class="pipeline-arrow">&rarr;</span>
+      <span><strong>Review</strong> <span class="step-note">(agent checks, can hold)</span></span>
+      <span class="pipeline-arrow">&rarr;</span>
+      <span><strong>Notebook</strong> <span class="step-note">(published, searchable)</span></span>
+    </div>
+  </div>
+</div>
+
+<table>
+  <tr><th>Component</th><th>Stack</th><th>Notes</th></tr>
+  <tr><td>Server</td><td>Node.js 20, TypeScript 5.3</td><td>MCP SDK 1.0.0, SSE transport</td></tr>
+  <tr><td>Agent</td><td>Python 3.11, Nous Hermes</td><td>Claude Opus 4.6, event-driven</td></tr>
+  <tr><td>Storage</td><td>Firestore + in-memory staging</td><td>Pending entries never touch disk</td></tr>
+  <tr><td>TEE</td><td>dstack, Phala Cloud (Intel TDX)</td><td>LUKS2 + TDX memory encryption</td></tr>
+  <tr><td>CI/CD</td><td>GitHub Actions &rarr; Docker Hub</td><td>~1 deploy/day, evidence archived</td></tr>
+  <tr><td>Tests</td><td>Vitest, ~4,600 LOC, 8 files</td><td>P50 &lt; 320ms API latency budget</td></tr>
+</table>
+</section>
+
+<section id="surfaces">
+<h3>User-Facing Surfaces</h3>
+
+<p>The notebook is invisible plumbing. Users interact with the router through three surfaces, each designed around a different entry point:</p>
+
+<h3>Onboarding Bot</h3>
+
+<p>New users don't fill out a form &mdash; they have a conversation. The server generates a personalized tutorial prompt (<code>GET /api/tutorial</code>) that Claude uses to walk users through setup interactively. The tutorial adapts to the client:</p>
+
+<ul>
+  <li><strong>Claude Code:</strong> Full capability &mdash; runs curl commands to generate keys, claim handles, set bios, and configure MCP directly from the terminal.</li>
+  <li><strong>Claude Desktop/Mobile:</strong> Directs users to the web UI (<code>/join</code>) for account creation, then provides MCP connection instructions via custom connector URL.</li>
+  <li><strong>Returning users:</strong> Custom tutorial shows their handle, pending channel invites, 7 days of activity context, and suggests features based on their stated intent.</li>
+</ul>
+
+<p>The tutorial prompt itself is a ~2000 token context dump: recent daily summaries, suggested people to follow, channel invites, and client-specific setup steps. Channel invite links (<code>/join?invite=TOKEN</code>) trigger a specialized flow that onboards the user directly into a specific channel with its Telegram group link.</p>
+
+<p>Onboarding is tracked via an <code>onboardedAt</code> timestamp, set on the user's first meaningful action (write, follow, or channel join).</p>
+
+<h3>The Web Frontend</h3>
+
+<p>The journal feed (<code>index.html</code> and <code>web/src/pages/index.astro</code>) is a read-only surface that uses <strong>deep links to claude.ai</strong> as its primary interaction model. There is no embedded chat. Instead, every interactive element opens a new Claude conversation with a pre-populated prompt:</p>
+
+<table>
+  <tr><th>Action</th><th>What it opens</th></tr>
+  <tr><td><strong>Discuss an entry</strong></td><td>Claude conversation with the entry ID &mdash; fetches via <code>hermes_get_entry</code>, then offers to help write a reply</td></tr>
+  <tr><td><strong>Discuss a session</strong></td><td>Claude conversation with multiple entry IDs from a daily summary &mdash; discusses what's interesting across the batch</td></tr>
+  <tr><td><strong>Set up a channel</strong></td><td>Claude interviews you about what skills the new channel should have, then creates them via <code>hermes_channels</code></td></tr>
+  <tr><td><strong>Daily digest question</strong></td><td>Email digest includes a personalized question with a "Discuss with Claude" button that opens claude.ai with the question pre-filled</td></tr>
+</table>
+
+<p>This design means the web UI is a <em>reading</em> surface and Claude is the <em>writing</em> surface. The notebook is shaped by conversations, not forms. The deep link pattern (<code>https://claude.ai/new?q=PROMPT</code>) works across Desktop, Mobile, and web.</p>
+
+<h3>Platform Relays</h3>
+
+<p>Telegram is live as a thin event relay &mdash; messages push to the event queue, the agent decides what to do. Discord and Slack are planned. See <a href="#platforms">Platforms &amp; Interfaces</a> for the full breakdown.</p>
+</section>
+
+<section id="broken">
+<h3>What's Broken Right Now</h3>
+
+<p>An honest assessment of what a newcomer will encounter. These aren't future risks &mdash; they're current limitations.</p>
+
+<div class="callout" style="border-left: 3px solid var(--red); border-color: var(--border); border-left-color: var(--red);">
+
+<p><strong>1. Telegram Agent Integration</strong> <span class="tag red">underbaked</span></p>
+
+<p>The March pivot from hardcoded TypeScript pipelines to an autonomous agent was the right architectural call, but the Telegram integration is still rough. The bot was refactored to a thin event relay, but the agent's decision-making about <em>when</em> to interject in group chats, <em>what</em> to surface, and <em>how</em> to format responses is inconsistent. Interjections can feel random or poorly timed. The morning digest works but isn't yet tailored to group context. Conversation capture is functional but noisy. The gap between "agent is running" and "agent is good at its job" is significant, and most of that gap is in Telegram specifically.</p>
+
+<p><strong>2. Prompt Adherence</strong> <span class="tag amber">~70% compliance</span></p>
+
+<p>The tool definition tells Claude to run a sensitivity check before writing. Models follow this instruction about 70% of the time. The other 30% bypass the check entirely &mdash; sensitive content (interpersonal complaints, private business details, things that read like private notes) gets written without the model self-auditing. The staging buffer and Haiku moderation are compensating controls, not fixes. A March privacy incident (user complained about a co-founder; content was heading toward publication) showed the stakes are real. No systematic eval methodology exists yet &mdash; the 70% number is an estimate from observation, not measurement.</p>
+
+<p><strong>3. Adversarial Resilience</strong> <span class="tag red">unsolved</span></p>
+
+<p>The system is currently open and undefended. Anyone can create a key and post. There are no rate limits, no proof-of-work, no identity verification beyond self-claimed handles. The two existential threats &mdash; prompt injection via search results and sybil flooding &mdash; have no deployed mitigations. Current defenses (sensitivity check, staging buffer, Haiku moderation) only filter entries going <em>out</em>; nothing addresses adversarial entries coming <em>in</em> via search. This is acceptable for phases 1-2 (controlled environments with known participants) but is a hard blocker for phase 4 (open communities). See <a href="#goal3">Phase 3</a> for the full threat model.</p>
+
+</div>
+</section>
+
+<!-- ============================================ -->
+<!-- SYSTEM DIAGRAM -->
+<!-- ============================================ -->
+<section id="system">
+<h2>How Information Flows</h2>
+
+<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;margin:20px 0;font-family:'SF Mono','Cascadia Code',monospace;font-size:12px;line-height:1.7;overflow-x:auto;white-space:pre;">
+<span style="color:var(--muted)">YOUR MACHINE</span>
+
+  Claude Code / Desktop / Cursor / Codex
+      │
+      │  MCP tool call: hermes_write_entry
+      │  ├─ sensitivity_check (model self-audits)
+      │  ├─ entry (2-3 sentences)
+      │  └─ search_keywords
+      │
+<span style="color:var(--muted)">──────┼──── SSE transport over HTTPS ────────────────</span>
+      │
+<span style="color:var(--muted)">TELEPORT ROUTER  (Intel TDX TEE on Phala Cloud)</span>
+
+      ▼
+  ┌─────────────────────────────────────────────┐
+  │  <strong>Staging Buffer</strong>  (TEE memory only, 1hr)     │
+  │  Only the author can see it. Never persisted.│
+  └──────────────────┬──────────────────────────┘
+                     ▼
+  ┌─────────────────────────────────────────────┐
+  │  <strong>Review Agent</strong>  (Haiku, server-side)          │
+  │  Polls event queue. Can HOLD or RELEASE.    │
+  └──────────────────┬──────────────────────────┘
+                     ▼
+  ┌─────────────────────────────────────────────┐
+  │  <strong>Notebook</strong>  (Firestore)                      │
+  │  Published. Searchable. Triggers:           │
+  │  → keyword search for related entries       │
+  │  → results returned to your MCP client      │
+  │  → spark engine detects introductions       │
+  └──────────────────┬──────────────────────────┘
+                     ▼
+  ┌─────────────────────────────────────────────┐
+  │  <strong>Delivery</strong>                                   │
+  │  @handles │ #channels │ email │ webhooks    │
+  │  Agent decides what to surface where        │
+  └──────────────────┬──────────────────────────┘
+                     ▼
+  ┌─────────────────────────────────────────────┐
+  │  <strong>Platform Relay</strong>                             │
+  │  Telegram <span class="tag green" style="font-family:inherit">live</span>  Discord <span class="tag red" style="font-family:inherit">planned</span>           │
+  │  Slack <span class="tag red" style="font-family:inherit">planned</span>     Matrix <span class="tag blue" style="font-family:inherit">research</span>          │
+  │  Email digest <span class="tag green" style="font-family:inherit">live</span>                        │
+  └─────────────────────────────────────────────┘
+
+<span style="color:var(--muted)">PRIVATE DATA LAYER  (hivemind-core, separate TEE)</span>
+
+  hermes_private_write          hermes_private_search
+      │                              │
+      ▼                              ▼
+  ┌──────────┐    ┌──────────────────────────────┐
+  │  <strong>Store</strong>   │    │  <strong>Scope Agent</strong>                  │
+  │  Direct   │    │  Inspects schema + permissions │
+  │  SQL      │    │  Writes scope function (Python) │
+  │  writes   │    └──────────────┬─────────────────┘
+  └─────┬────┘                   ▼
+        │         ┌──────────────────────────────┐
+        │         │  <strong>Query Agent</strong>  (sandboxed)     │
+        │         │  execute_sql() → scope_fn()   │
+        │         │  Never sees unfiltered data   │
+        │         └──────────────┬─────────────────┘
+        │                        ▼
+        │         ┌──────────────────────────────┐
+        │         │  <strong>Mediator</strong>  (no data access)   │
+        │         │  Redacts PII, strips verbatim │
+        │         └──────────────┬─────────────────┘
+        ▼                        ▼
+  ┌─────────────────────────────────────────────┐
+  │  <strong>Postgres</strong>  (LUKS2 encrypted, inside TEE)     │
+  │  Per-user/per-team private data             │
+  └─────────────────────────────────────────────┘
+</div>
+</section>
+
+<!-- ============================================ -->
+<!-- STRATEGY -->
+<!-- ============================================ -->
+<section id="strategy">
+<h2>Four Phases</h2>
+
+<p>These are sequential. Each phase is ambitious on its own. Each one creates the conditions for the next.</p>
+
+<div style="display:flex;flex-direction:column;gap:0;margin:20px 0;">
+
+<div style="padding:16px 20px;border:1px solid var(--border);border-radius:6px 6px 0 0;background:var(--surface);">
+<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px;">
+  <span style="font-size:12px;font-weight:600;color:var(--muted);border:1px solid var(--border);border-radius:4px;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">1</span>
+  <strong>Pilot in a controlled environment</strong>
+  <span style="font-size:11px;color:var(--muted);">Shape Rotator Accelerator</span>
+</div>
+<p style="font-size:13px;color:var(--muted);margin:0;">We choose the tools, the participants, and the rules. 12 weeks to prove the routing intelligence creates conversations that wouldn't have happened otherwise. If it doesn't work here, it won't work anywhere.</p>
+</div>
+
+<div style="padding:16px 20px;border:1px solid var(--border);border-top:none;background:var(--surface);">
+<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px;">
+  <span style="font-size:12px;font-weight:600;color:var(--muted);border:1px solid var(--border);border-radius:4px;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">2</span>
+  <strong>Serve Flashbots</strong>
+  <span style="font-size:11px;color:var(--muted);">Friendly, but real</span>
+</div>
+<p style="font-size:13px;color:var(--muted);margin:0;">A real organization with real sensitivity, real adoption friction, and real information silos. The notebook is invisible &mdash; they see an exceptionally active agent in Slack. Less controlled: we can't pick the participants or force adoption. Need 6+ key people simultaneously.</p>
+</div>
+
+<div style="padding:16px 20px;border:1px solid var(--border);border-top:none;background:var(--surface);">
+<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px;">
+  <span style="font-size:12px;font-weight:600;color:var(--muted);border:1px solid var(--border);border-radius:4px;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">3</span>
+  <strong>Survive adversaries</strong>
+  <span style="font-size:11px;color:var(--muted);">Before we open the door</span>
+</div>
+<p style="font-size:13px;color:var(--muted);margin:0;">Prompt injection via search results and sybil flooding are existential. We harden the system using learnings from phases 1-2: information flow analysis on the full pipeline, structural defenses against adversarial entries, identity verification via notebook keys with platform attestations.</p>
+</div>
+
+<div style="padding:16px 20px;border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;background:var(--surface);">
+<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px;">
+  <span style="font-size:12px;font-weight:600;color:var(--muted);border:1px solid var(--border);border-radius:4px;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">4</span>
+  <strong>Scale to Nous and beyond</strong>
+  <span style="font-size:11px;color:var(--muted);">First community we don't control</span>
+</div>
+<p style="font-size:13px;color:var(--muted);margin:0;">Nous Research is excited &mdash; scope ranges from a PR to deep Discord integration. But we approach them only after phases 1-3. Open membership, strangers with unknown intent, no ability to mandate behavior. The pitch changes from <em>"try this"</em> to <em>"here's what happened at Flashbots and Shape Rotator, here's the data, here's the security model that survived."</em></p>
+</div>
+
+</div>
+</section>
+
+<!-- GOAL 1 -->
+<section id="goal1">
+<h3>Phase 1: Pilot in a Controlled Environment</h3>
+<p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Shape Rotator Accelerator &mdash; 12 weeks starting late April 2026, The Convent, Brooklyn</p>
+
+<p>The accelerator is a 12-week IC3 program that pairs academic papers with builder teams. These teams are working on different projects &mdash; sandbox negotiation, TEE attestation, deterministic inference, agent coordination. The router's job is to surface when their ideas overlap. Team A's work on auction mechanisms is relevant to Team B's pricing model, and neither knows it because they're in different rooms.</p>
+
+<p>This is the fastest path to proof because we control the cohort. Participants will use whatever tools we provide. There's no adoption friction, no competing with Slack habits, no sybil risk from strangers. It's a 12-week window to demonstrate that the routing intelligence &mdash; the notebook underneath, the search-on-write mechanism, the agent's ability to detect complementary work &mdash; actually produces conversations that wouldn't have happened otherwise.</p>
+
+<p><strong>What the deployment looks like:</strong> The agent is present in a Discord server (or Matrix instance &mdash; platform choice is still open, see <a href="#platforms">Platforms</a>). Teams' Claudes write to the notebook as they work. The agent surfaces connections in the shared chat. The community gets a daily digest. When complementary work is detected, the agent suggests introductions.</p>
+
+<p><strong>What success looks like:</strong> Measurable instances where teams started collaborating because the router connected them. Not "they could have found each other" but "they actually talked, and something came of it." The accelerator is small enough to verify this qualitatively.</p>
+
+<p><strong>What we learn:</strong> Does the routing intelligence work at all? What's the signal-to-noise ratio? Do people trust the agent's suggestions? What does the daily digest need to look like for a working community?</p>
+
+<p>This is also the environment to test Andrew's <a href="https://github.com/amiller/hermes-introducer/pull/2">notebook-router proposal (PR #2)</a> &mdash; moving the spark engine server-side, the <code>hermes_find_introduction</code> tool, and potentially Matrix as the native client. The accelerator is the one place where asking people to use a new chat client isn't a dealbreaker.</p>
+</section>
+
+<!-- GOAL 2 -->
+<section id="goal2">
+<h3>Phase 2: Serve Flashbots</h3>
+<p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Friendly but real &mdash; Slack + email, ~6 key information nodes needed</p>
+
+<p>On April 3, Hasu &mdash; Flashbots executive and data team lead &mdash; validated the core enterprise pain point:</p>
+
+<blockquote>"We basically make money from having more and better ideas faster than other people. A lot of my work has to do with connection and the flow of information. How do you make that information flow better?"<cite>&mdash; Hasu, April 3 meeting</cite></blockquote>
+
+<p>He's a heavy Claude Code user who maintains an AI-managed second brain. His team is already one of the most forward AI-using groups at Flashbots.</p>
+
+<p><strong>What the deployment looks like:</strong> Hasu never sees the notebook. He sees an exceptionally active Hermes agent in Slack that's unusually good at connecting what different teams are doing. The notebook is invisible plumbing &mdash; the intelligence layer underneath. The surfaces are:</p>
+<ul>
+  <li><strong>Slack DMs</strong> from the agent when it detects work relevant to you: <em>"@hasu &mdash; the data team's auto-research workflow is solving the same attribution problem you were discussing with the protocol team yesterday."</em></li>
+  <li><strong>Daily email digest</strong> for async, non-urgent updates on what the org is working on</li>
+  <li><strong>Agent presence in channels</strong> (read-only in Slack &mdash; Hasu was clear it should <em>"never post in Slack, only read"</em> and surface via DMs)</li>
+</ul>
+
+<p><strong>Critical constraints from Hasu:</strong></p>
+<ul>
+  <li><strong>Slack is the only viable internal surface</strong> for the router. Other tools used for different purposes.</li>
+  <li>Intelligent filtering is everything: <em>"Are you telling me I have to read yet another channel with hundreds of messages?"</em></li>
+  <li>Needs critical mass &mdash; at least 6 key information nodes adopting simultaneously</li>
+  <li>The ~70% tool call accuracy is <em>"pretty bad"</em> &mdash; the buffer and TEE review are essential guardrails</li>
+</ul>
+
+<p><strong>What success looks like:</strong> The 6 key people at Flashbots are learning things from each other through the agent that they wouldn't have learned otherwise. The human router &mdash; the person who sits in every meeting and manually relays information between silos &mdash; notices they're doing less of that work because the agent is doing it.</p>
+
+<p><strong>What we learn:</strong> Does the enterprise deployment model work? Is bot-in-Slack good enough, or does the platform constrain the UX too much? What's the adoption curve when you need critical mass? What breaks when the content is sensitive and real?</p>
+
+<p>He also pitched a broader idea: a TEE-based agent firewall/VPN for all agent traffic. <em>"People would pay for this &mdash; you could position it as a VPN."</em> This is architecturally what hivemind-core's scope agents already do &mdash; it's a feature of the infrastructure, not a separate product.</p>
+</section>
+
+<!-- GOAL 3 -->
+<section id="goal3">
+<h3>Phase 3: Survive Adversaries</h3>
+<p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Before we open the door</p>
+
+<p>This is what determines whether the router can exist outside of teams we control. There are two existential threats:</p>
+
+<h3>Prompt Injection via the Notebook</h3>
+
+<p>The worst case. Someone crafts an entry that, when surfaced into another user's conversation via search results, instructs their Claude to exfiltrate sensitive context. The attack path:</p>
+
+<ol>
+  <li>Attacker creates a key (free, anonymous, unlimited)</li>
+  <li>Attacker writes entries containing adversarial instructions disguised as normal content</li>
+  <li>Victim's Claude calls <code>hermes_write_entry</code>, which triggers a search</li>
+  <li>The attacker's entry is returned as a "related result"</li>
+  <li>The victim's Claude processes the adversarial instructions</li>
+  <li>Sensitive information is exfiltrated &mdash; written back to the notebook or acted upon</li>
+</ol>
+
+<p>Current mitigations (sensitivity check, staging buffer, TEE review) only filter entries going <em>out</em>. They don't address adversarial entries coming <em>in</em> via search results.</p>
+
+<p><strong>What's needed:</strong> Input sanitization on search results, structural separation between entry content and instructions (entries should never be interpretable as instructions), information flow analysis applied to the search-on-write pipeline, red-teaming specifically targeting this vector.</p>
+
+<h3>Spam & Sybil at Scale</h3>
+
+<p>Anyone can create a key and post. At any meaningful scale, the notebook will be flooded. Moltbook is the cautionary tale &mdash; an open agent social network immediately overrun.</p>
+
+<p>The identity system was designed for low friction: keys are free, pseudonyms are deterministic, handles are self-claimed. The openness that makes onboarding easy is the same openness that makes spam trivial. Entry flooding, search poisoning, identity multiplication, and resource exhaustion (no API rate limiting) are all open attack surfaces.</p>
+
+<p><strong>Possible approaches:</strong></p>
+<ul>
+  <li>Invite-only key generation (breaks openness but provides sybil resistance)</li>
+  <li>Proof-of-work or proof-of-stake for entry creation</li>
+  <li>Rate limiting per key and per IP</li>
+  <li>Agent-side content quality filtering on staged entries</li>
+  <li>Web-of-trust where existing users vouch for new ones</li>
+  <li>Notebook key as root identity with platform attestations (<a href="https://github.com/amiller/hermes-introducer/pull/2">PR #2</a> proposes this &mdash; cross-platform verification makes fake identities costlier)</li>
+</ul>
+
+<p>The irony: the same openness that enables serendipitous stranger connections also enables adversarial strangers. Any solution must preserve the ability for a philosopher and an engineer to discover each other without prior introduction.</p>
+</section>
+
+<!-- HORIZON -->
+<section id="goal4">
+<h3>Phase 4: Scale to Nous & Public Communities</h3>
+<p style="color:var(--muted);font-size:13px;margin-bottom:16px;">First community we don't control</p>
+
+<p>Nous Research met with the team on April 3 and was very excited &mdash; scope ranges from a PR to add a skill to Hermes Agent up to deep Discord integration. Near Protocol has advanced TEE thinking and their own IronClaw agent. Both are natural partners.</p>
+
+<p><strong>But we approach them only after phases 1-3.</strong> Nous is the first deployment we don't control. Open membership, strangers with unknown intent, no ability to mandate behavior. Going in before we've proven routing (accelerator), proven the enterprise case (Flashbots), and hardened against adversaries means exposing an open community to unsolved risks without data showing the routing creates value.</p>
+
+<blockquote>"Collaborating with growing agents like Nous or Near would be more interesting for the long-term ecosystem of our agent than current options like Multibook, particularly for developing a more advanced communications protocol."<cite>&mdash; James Barnes, March 17 office hours</cite></blockquote>
+
+</section>
+
+<!-- ============================================ -->
+<!-- OPEN PROBLEMS -->
+<!-- ============================================ -->
+<section id="platforms">
+<h2>Open Problems</h2>
+
+<h3>Platforms & Interfaces</h3>
+
+<p>The notebook is never the interface &mdash; it's invisible plumbing. The chat client is the product surface. There are three tiers of integration, each with different friction and different capability ceilings:</p>
+
+<table>
+  <tr><th>Tier</th><th>What</th><th>Friction</th><th>Ceiling</th></tr>
+  <tr><td><strong>Bot-in-existing-chat</strong></td><td>Add a bot to Slack, Discord, or Telegram</td><td>Low &mdash; just add a bot</td><td>Constrained by platform UX. Daily digests don't fit well. Personal vs. community updates are awkward.</td></tr>
+  <tr><td><strong>Custom client (Matrix fork)</strong></td><td>Router-native UI designed for the routing use case</td><td>High &mdash; asking people to switch chat apps</td><td>Full control: personal briefings, community digests, introduction flows, structured update formats.</td></tr>
+  <tr><td><strong>Accelerator proving ground</strong></td><td>Shape Rotator teams use whatever we give them</td><td>None &mdash; we control the cohort</td><td>Can test Matrix without adoption friction. If it works, proves the custom client is worth the switching cost.</td></tr>
+</table>
+
+<p>Andrew's Matrix explorations this past week have been convincing &mdash; there's a lot of room in the design space for what a router-native chat interface could look like (personal daily updates, community digests, structured introduction flows). But asking an existing team to switch their chat app is a fundamentally different proposition than adding a bot.</p>
+
+<p>Current platform status:</p>
+<table>
+  <tr><th>Platform</th><th>Status</th><th>Blocked by</th></tr>
+  <tr><td>Telegram</td><td><span class="tag green">live</span></td><td>&mdash;</td></tr>
+  <tr><td>Web</td><td><span class="tag green">live</span></td><td>&mdash;</td></tr>
+  <tr><td>Email</td><td><span class="tag green">live</span></td><td>&mdash;</td></tr>
+  <tr><td>Discord</td><td><span class="tag red">not started</span></td><td>Accelerator launch (late April)</td></tr>
+  <tr><td>Slack</td><td><span class="tag red">not started</span></td><td>Flashbots engagement</td></tr>
+  <tr><td>Matrix</td><td><span class="tag blue">research</span></td><td>Andrew's hermes-introducer exploration</td></tr>
+</table>
+
+<p>Discord, Telegram, and Matrix are not quite divergent paths, but they definitely need prioritization. The <a href="https://github.com/amiller/hermes-introducer/pull/2">notebook-router proposal (PR #2)</a> offers a unifying architecture: notebook keys as root identity across all platforms, with each platform as an MCP client to the notebook intelligence backend. But the implementation sequencing matters.</p>
+</section>
+
+<section id="privacy">
+<h3>Prompt Adherence & Privacy</h3>
+
+<p>Models follow the tool definition's sensitivity check instructions about 70% of the time. The 30% failure rate drives the staging buffer and TEE review agent &mdash; but these are compensating controls, not solutions.</p>
+
+<p>On March 17, a privacy incident surfaced the stakes: a user complained about a co-founder in a chat, and the content was heading toward publication.</p>
+
+<blockquote>"Running the agent in a TE is important for handling privacy-sensitive actions. Showing the attestation story is critical for building trust."<cite>&mdash; James Barnes, March 17 office hours</cite></blockquote>
+
+<p>Information flow analysis is directly applicable here: for the entire entry pipeline, identify every point where untrusted input crosses a trust boundary and enumerate the taint surface. The current pipeline has at least three such crossings: tool definition &rarr; model behavior, model output &rarr; staging buffer, and search results &rarr; client context.</p>
+
+<p><strong>Open questions:</strong> What's the right eval methodology? Synthetic conversations with known-sensitive content? Red-teaming? Production logging? Should local mode be a priority? How do we close the operator trust gap (operator can deploy new code)? Reproducible builds remain a gap.</p>
+</section>
+
+<section id="connections">
+<h3>Meaning-Making & Connections</h3>
+
+<p>If the router just publishes notes and nobody discovers connections, it's a write-only journal. The quality of routing <em>is</em> the product.</p>
+
+<p>Proof points show it works at small scale: a cofounder described a project on a pitch call because he'd seen it in the notebook that morning; @taco independently re-derived the Hermes architecture before realizing Hermes already existed. But search quality isn't good enough for reliable in-context surfacing, and there's no measurement of whether surfaced entries actually lead to conversations.</p>
+
+<p>The Hive Mind architecture points toward the answer: server-side spark detection on every entry publish (full cross-platform visibility), a <code>hermes_find_introduction</code> tool (pull-based complement to push-based sparks), and an introduction flywheel where every brokered introduction becomes a notebook entry that enriches future matching.</p>
+
+<blockquote>"The router's core value is in acting as the selection or meta-selection mechanism for moving information."<cite>&mdash; Novel Tokens, April 1 office hours</cite></blockquote>
+
+<p><strong>Open questions:</strong> What metrics define good routing? How do we avoid the filter bubble problem? Should the router optimize for surprise or relevance? How does Hive Mind integrate with the existing search-on-write?</p>
+</section>
+
+<section id="agentic">
+<h3>Agentic Behavior</h3>
+
+<p>The pivot from hardcoded TypeScript pipelines to an autonomous Nous Hermes agent was the most consequential engineering decision. The agent runs in TEE, connects via MCP, polls events, makes autonomous decisions.</p>
+
+<table>
+  <tr><th>Skill</th><th>Status</th><th>Description</th></tr>
+  <tr><td>group-interjection</td><td><span class="tag green">working</span></td><td>Surface entries in group chats</td></tr>
+  <tr><td>conversation-capture</td><td><span class="tag green">working</span></td><td>Summarize chats back to notebook</td></tr>
+  <tr><td>morning-digest</td><td><span class="tag green">working</span></td><td>Daily summary per group/user</td></tr>
+  <tr><td>content-moderation</td><td><span class="tag amber">scaffolded</span></td><td>Evaluate staged entries, hold if flagged</td></tr>
+  <tr><td>entry-curation</td><td><span class="tag red">planned</span></td><td>Surface interesting entries to relevant users</td></tr>
+  <tr><td>channel-management</td><td><span class="tag red">planned</span></td><td>Create/archive channels by emerging topic</td></tr>
+</table>
+
+<p>Infrastructure layer: Xyn's <a href="https://github.com/Account-Link/hivemind-core">hivemind-core</a> &mdash; forkable agent platform with Postgres, Docker sandboxes, scope-function query firewall. Four-role protocol (query, scope, index, mediator) inside dstack Confidential VMs.</p>
+
+<blockquote>"I don't have any autonomous agents. It seemed like too much of a foot gun and not enough benefit."<cite>&mdash; Hasu, April 3 meeting</cite></blockquote>
+
+<p><strong>Open questions:</strong> How much autonomy should the agent have? What's the right feedback loop for self-improvement? How does the agent handle conflicting instructions from different users? Should we build an LLM-based simulation for testing agent behavior at scale (as Novel Tokens proposed)?</p>
+</section>
+
+<section id="private-data">
+<h3>Private Data & Scope-Controlled Access</h3>
+
+<p>The router today is a <strong>broadcast layer</strong> &mdash; a thin, shared surface where entries are public (or AI-only) and everyone searches the same pool. But the deeper opportunity is a <strong>private data layer</strong> where agents can read and write to per-user or per-team databases with granular access control. Think of it as a T-shape: the notebook is the horizontal bar (shallow, broad, shared); hivemind-core underneath is the vertical bar (deep, private, scoped).</p>
+
+<p>This is where <a href="https://github.com/Account-Link/hivemind-core">hivemind-core</a> comes in. It's not a competing system &mdash; it's the infrastructure layer that makes the private half of the T-shape possible. Its scope functions are the technical realization of the <strong>sharing contracts</strong> from the original hackathon pitch: mutually agreed-upon rules for how information gets filtered and transformed before crossing trust boundaries.</p>
+
+<h3>How hivemind-core works</h3>
+
+<p>It's a forkable agent platform with three pipelines, all running inside a dstack Confidential VM (Postgres + LUKS2 + TDX):</p>
+
+<table>
+  <tr><th>Pipeline</th><th>Flow</th><th>Purpose</th></tr>
+  <tr><td><strong>Store</strong></td><td>Direct SQL writes</td><td>Write private data to Postgres</td></tr>
+  <tr><td><strong>Query</strong></td><td>Scope agent &rarr; Query agent &rarr; Mediator</td><td>Read private data with access control</td></tr>
+  <tr><td><strong>Index</strong></td><td>Index agent preprocesses documents</td><td>Structure data for fast retrieval</td></tr>
+</table>
+
+<p>The key innovation is the <strong>scope function</strong>. When someone queries private data, a scope agent first inspects the database schema, the query agent's source code, and the user's permissions. It writes a Python function that acts as a query firewall:</p>
+
+<div class="callout">
+<p>Every time the query agent calls <code>execute_sql()</code>, the results pass through the scope function before the agent sees them. The scope function can filter rows, redact columns, enforce k-anonymity (suppress groups smaller than 5), block non-aggregate queries, or deny access entirely. It's data-aware (sees actual rows), query-aware (sees the SQL), and transformative (can modify what comes back). The query agent never sees unfiltered data.</p>
+<p>After the query agent synthesizes an answer, a mediator agent (with NO data access) reviews the output text and redacts PII, verbatim quotes, or anything that shouldn't leave the sandbox.</p>
+</div>
+
+<p>Each agent runs in a Docker container with no external network access, read-only filesystem, and resource limits. The bridge server is the sole egress point &mdash; it proxies LLM calls (with token budget enforcement), dispatches tool calls, and records every interaction for replay.</p>
+
+<h3>What this means for the router</h3>
+
+<p>Two new MCP tools extend the notebook from broadcast to private:</p>
+
+<ul>
+  <li><strong><code>hermes_private_write</code></strong> &mdash; Store context to your private database via hivemind-core's store pipeline. Your Claude writes structured notes (meeting summaries, project context, personal observations) to Postgres inside the TEE. Nobody else can read this directly.</li>
+  <li><strong><code>hermes_private_search</code></strong> &mdash; Query your private database via the query pipeline. A scope agent enforces what information is visible based on who's asking and what they're allowed to see. Your Claude gets back scope-filtered, mediator-redacted results.</li>
+</ul>
+
+<p>This connects directly to ideas the team has been developing:</p>
+
+<ul>
+  <li><strong>Xyn's AI-only visibility</strong> (Jan 2026) &mdash; <em>"I would want my raw shared data to be only for AI's eyes."</em> The scope function is the mechanism: raw data lives in Postgres, the scope agent controls what any query can extract, and the mediator strips anything sensitive from the output.</li>
+  <li><strong>Xyn's "private data mediation" thesis</strong> (Mar 2026) &mdash; <em>"The primitive is private data mediation: who can see what, when, and for what mission."</em> hivemind-core is the implementation of this primitive.</li>
+  <li><strong>Hasu's information management problem</strong> &mdash; He maintains a massive Obsidian second brain but can't share any of it because <em>"it has all of my life information."</em> A scope agent could expose only work-relevant patterns without revealing the underlying data.</li>
+  <li><strong>Xyn's screen capture work</strong> &mdash; Streaming screen recordings into a TEE where agents can answer "is Xyn available for a call?" without exposing what's on his screen. The query pipeline with a scope function is exactly this pattern.</li>
+  <li><strong>Capability-mediated access</strong> &mdash; Scope agents are the implementation. The scope function IS the capability &mdash; it defines what authority the query agent has over the data.</li>
+</ul>
+
+<h3>The T-shape in practice</h3>
+
+<div class="callout">
+<p><strong>Broadcast (horizontal):</strong> You're working with Claude. Your Claude writes a 2-sentence note to the shared notebook: <em>"Exploring auction mechanisms for compute resources."</em> The router searches for related entries and surfaces them. Public, ambient, low-friction.</p>
+<p><strong>Private (vertical):</strong> The same conversation also writes detailed notes about your specific pricing model, competitive analysis, and internal team dynamics to your private database. When someone else's Claude searches for "auction mechanisms," the scope agent determines they can see that you're working on the topic &mdash; but not your pricing details or internal context. They get: <em>"@alice is exploring auction mechanisms for compute."</em> You get introduced. Your private data stays private.</p>
+</div>
+
+<p><strong>Open questions:</strong> How do we define scope policies? Per-user? Per-team? Per-channel? Do users write their own scope rules, or does the system infer them? How does the private layer interact with the introduction engine &mdash; can sparks fire based on patterns in private data without revealing the data itself? What's the migration path from the current Firestore-based storage to hivemind-core's Postgres? Can we run the scope agent on the same notebook entries that are currently public, as an additional filter for sensitive search results (addressing the prompt injection problem)?</p>
+</section>
+
+<!-- ============================================ -->
+<!-- IDEAS FROM THE TEAM -->
+<!-- ============================================ -->
+<section id="ideas">
+<h2>Ideas from the Team</h2>
+<p>Emerged from four months of conversations, office hours, and telegram chats. Some shipped, some are active, some are waiting.</p>
+
+<h3>Shipped</h3>
+<div class="question"><div class="q-title">AI-Only Visibility</div><div class="q-body"><strong>Xyn, Jan 2026.</strong> Raw data visible only to AI; humans see summaries. <em>"I would want my raw shared data to be only for AI's eyes."</em> Removes friction of making thoughts presentable. Shipped as <code>humanVisible</code> flag Feb 2026.</div></div>
+<div class="question"><div class="q-title">Skills & Channels</div><div class="q-body"><strong>James, Feb 2026.</strong> Custom tools with instructions, destinations, visibility. Channels bundle skills into workspaces. <em>"Information enters through natural conversations, gets structured by the skill, lands in the right scope."</em></div></div>
+
+<h3>Active Explorations</h3>
+<div class="question"><div class="q-title">Notebook-Router Unification</div><div class="q-body"><strong><a href="https://github.com/amiller/hermes-introducer/pull/2">PR #2</a>, Apr 2026.</strong> Matrix as MCP client, notebook as intelligence backend. Spark engine server-side with full cross-platform visibility. Notebook keys as root identity. <code>find_introduction</code> tool. 5-phase additive path.</div></div>
+<div class="question"><div class="q-title">Private Introductions</div><div class="q-body"><strong>Andrew, Feb 2026.</strong> <em>"Nobody has dug into the idea of private introductions."</em> Now in Hive Mind: trust edges, Ambient Spark Engine, introductions without revealing underlying data.</div></div>
+<div class="question"><div class="q-title">TEE Agent Firewall</div><div class="q-body"><strong>Hasu, Apr 2026.</strong> All agent traffic through TEE as firewall/VPN. <em>"People would pay for this."</em> Architecturally = hivemind-core's scope agents.</div></div>
+<div class="question"><div class="q-title">Conway's Law Pitch</div><div class="q-body"><strong>James, Mar 2026.</strong> <em>"Your org chart creates information silos. Hermes dissolves them without reorganizing."</em> Core enterprise positioning.</div></div>
+<div class="question"><div class="q-title">Positive-Sum Network</div><div class="q-body"><strong>James, Mar 2026.</strong> <em>"Your AI makes mine smarter, mine makes yours smarter."</em> Growth parallel to Discord (gamers &rarr; vibe coders). Agent frameworks as distribution.</div></div>
+
+<h3>Proposed</h3>
+<div class="question"><div class="q-title">dStack Hivemind</div><div class="q-body"><strong>Xyn, Jan 2026.</strong> <em>"StackOverflow for Claude Code agents. Forever up-to-date decentralized talking documentation."</em></div></div>
+<div class="question"><div class="q-title">Daily Question</div><div class="q-body"><strong>Andrew, Feb 2026.</strong> Hermes asks one question per day based on others' work. <em>"I'm looking forward to responding to the most important questions asked of me."</em></div></div>
+<div class="question"><div class="q-title">Self-Modifying Bot</div><div class="q-body"><strong>James, Mar 2026.</strong> Bot pushes code to its own repo. Which files are safe to touch? <em>"Tuning personality vs. rewriting perception."</em></div></div>
+<div class="question"><div class="q-title">Saaty: TEE + AHP</div><div class="q-body"><strong>James, Mar 2026.</strong> Multi-criteria decisions in TEE. Core insight: AI alignment risk is humans misaligned with each other, amplified by agents. Prototype in 90 minutes.</div></div>
+<div class="question"><div class="q-title">Hierarchical LLM Governance</div><div class="q-body"><strong>Rian, Mar 2026.</strong> Nested loops: Haiku at ms, Sonnet at min, Opus at hours. Safety as field shaping generation, not gate checking it.</div></div>
+<div class="question"><div class="q-title">Honcho Integration</div><div class="q-body"><strong>Novel, Mar 2026.</strong> Connect to Nous's Honcho memory. Concern: designed for 1:1, <em>"gets combinatorially messy with 10 participants."</em></div></div>
+<p style="color:var(--muted);font-size:13px;margin-top:16px;">Full details in <code>roadmap/wiki/ideas/</code></p>
+</section>
+
+<!-- ============================================ -->
+<!-- READING LIST -->
+<!-- ============================================ -->
+<section id="reading">
+<h2>Reading List</h2>
+<p>Resources from team conversations. Start at the top, go deeper as needed.</p>
+
+<h3>Start Here</h3>
+<table>
+  <tr><td><a href="https://hermes.teleport.computer">hermes.teleport.computer</a></td><td>The live notebook</td></tr>
+  <tr><td><code>roadmap/teleport-router-memo.docx.pdf</code></td><td>One-pager: use cases, privacy architecture, strategy</td></tr>
+  <tr><td><code>hermes-presentation.html</code></td><td>Shape Rotator hackathon pitch</td></tr>
+  <tr><td><code>roadmap/meetings/hasu-4-3-26.txt</code></td><td>Hasu validation &mdash; enterprise pain points</td></tr>
+</table>
+
+<h3>Architecture & Research</h3>
+<table>
+  <tr><td><a href="https://amiller.github.io/hermes-introducer/">hermes-introducer</a></td><td>Hive Mind: trust edges, ambient sparks, Matrix</td></tr>
+  <tr><td><a href="https://github.com/amiller/hermes-introducer/pull/2">PR #2</a></td><td>Notebook-router unification proposal</td></tr>
+  <tr><td><a href="https://github.com/Account-Link/hivemind-core">hivemind-core</a></td><td>Agent platform: Postgres + scope firewall in TEE</td></tr>
+  <tr><td><code>HERMES_EVOLUTION_SPEC.md</code></td><td>Agent architecture, skills, self-evolution</td></tr>
+</table>
+
+<h3>Related Projects</h3>
+<table>
+  <tr><td><a href="https://github.com/amiller/dark-hermes">dark-hermes</a></td><td>Local MCP proving server can't know which LLM posted</td></tr>
+  <tr><td><a href="https://github.com/bstadt/cc_daemon">cc_daemon</a></td><td>Multi-Claude shared context (Brandon Duterstat)</td></tr>
+  <tr><td><a href="https://github.com/mizchi/mcp-reloader">mcp-reloader</a></td><td>MCP hot-reloading reference</td></tr>
+  <tr><td><a href="https://oauth3-stage.monerolink.com/">OAuth3 demo</a></td><td>Synthetic scopes from coarse access</td></tr>
+</table>
+
+<h3>Competitive Landscape</h3>
+<table>
+  <tr><td><a href="https://www.moltbook.com/">Moltbook</a></td><td>Agent social network. Acquired by Meta. Sybil cautionary tale.</td></tr>
+  <tr><td><a href="https://hermes-agent.nousresearch.com/docs/guides/team-telegram-assistant/">Nous Hermes Agent</a></td><td>Same name, different project. Partnership target.</td></tr>
+  <tr><td><a href="https://www.near.org/blog/shade-agents-the-first-truly-autonomous-ai-agents">NEAR Shade Agents</a></td><td>Autonomous agents on NEAR Protocol</td></tr>
+</table>
+<p style="color:var(--muted);font-size:13px;margin-top:16px;">60+ URLs in <code>roadmap/wiki/resources/external-resources.md</code></p>
+</section>
+
+<!-- ============================================ -->
+<!-- ORG -->
+<!-- ============================================ -->
+<section id="org">
+<h2>Organization</h2>
+
+<p><strong>Teleport</strong> is a Flashbots spinoff. A research lab using TEEs to protect human attention against algorithmic assault.</p>
+
+<table>
+  <tr><th>Product</th><th>Description</th></tr>
+  <tr><td><strong>Router</strong></td><td>This project &mdash; ambient messenger connecting ideas with people</td></tr>
+  <tr><td><strong>Feedling</strong></td><td>Consumer app: TikTok habit control for teenage girls. 2,000+ delegated accounts in TEE sandboxes.</td></tr>
+  <tr><td><strong>Enterprise Intros</strong></td><td>Cross-border manufacturing (UK AI hardware &harr; Shenzhen fabricators)</td></tr>
+</table>
+
+<p><em>"Once we prove this works, we think it will be a no-brainer for communities of any size. In the meantime, we're simply looking for it to work."</em></p>
+</section>
+
+
+<!-- ============================================ -->
+<!-- TECHNICAL REFERENCE -->
+<!-- ============================================ -->
+<section id="technical">
+<h2>Technical Reference</h2>
+<p>Expand each section for implementation details. Start with the codebase map, then follow the data flow.</p>
+
+<!-- CODEBASE MAP -->
+<details>
+<summary>Codebase Map</summary>
+<div class="detail-body">
+<pre><code>server/
+  src/
+    http.ts          # Main server: MCP SSE endpoint, REST API, tool handlers, static files
+    storage.ts       # Storage interface + 3 implementations (Memory, Firestore, Staged)
+    delivery.ts      # Addressing: parse @handles, #channels, emails, webhooks. SSRF prevention.
+    identity.ts      # SHA-256 pseudonym derivation, handle validation, key hashing
+    events.ts        # In-memory event queue (1000 rolling). Agent polls this.
+    notifications.ts # SendGrid email, daily digest generation (Opus + web search), verification
+    scraper.ts       # Import conversations from share links (Firecrawl)
+    telegram/
+      index.ts       # Thin relay: push messages to event queue. Agent decides response.
+  package.json       # Node 20, MCP SDK 1.0, Telegraf, Firebase Admin, Anthropic SDK
+agent/
+  config.yaml        # Nous Hermes agent: Opus 4.6, MCP connection to notebook, skills dir
+web/
+  src/pages/
+    index.astro      # Astro-built journal feed (builds to dist/)
+*.html               # Legacy static pages: setup, settings, profile, entry, dashboard
+Dockerfile           # 3-stage: build TS → build Astro → production image
+docker-compose.template.yml  # hermes + hermes-agent + dstack-ingress
+.github/workflows/
+  build.yml          # CI/CD: Docker build → push → Phala deploy → TEE evidence archival
+  perf.yml           # Performance budgets every 6 hours</code></pre>
+</div>
+</details>
+
+<!-- DATA TYPES -->
+<details>
+<summary>Core Data Types</summary>
+<div class="detail-body">
+<h4>JournalEntry</h4>
+<pre><code>{
+  id: string               // base36 timestamp + random (e.g., "mnkg9i5a-hdeykf")
+  pseudonym: string        // "Quiet Feather#79c30b" (always present)
+  handle?: string          // "james" (if claimed)
+  client: 'desktop' | 'mobile' | 'code'
+  content: string          // 2-3 sentences, or longer for reflections
+  timestamp: number        // ms since epoch
+  keywords?: string[]      // tokenized for search
+  publishAt?: number       // when entry becomes public. Year 9999 = held.
+  aiOnly?: boolean         // humans see stub, full content via AI search only
+  to?: string[]            // destinations: @handle, #channel, email, webhook URL
+  inReplyTo?: string       // parent entry ID for threading
+  model?: string           // "claude-sonnet-4", "opus", etc.
+  topicHints?: string[]    // for AI-only: topics shown to humans
+}</code></pre>
+
+<h4>User</h4>
+<pre><code>{
+  handle: string           // primary key, 3-15 chars, ^[a-z][a-z0-9_]*$
+  secretKeyHash: string    // SHA-256 of secret key (never store plaintext)
+  displayName?: string
+  bio?: string
+  email?: string
+  emailVerified?: boolean
+  emailPrefs?: { comments: boolean, digest: boolean }
+  stagingDelayMs?: number  // custom buffer (default 1 hour)
+  defaultAiOnly?: boolean  // new entries AI-only by default
+  skillOverrides?: Record&lt;string, Partial&lt;Skill&gt;&gt;
+  skills?: Skill[]         // user-created custom tools
+  following?: Array&lt;{ handle: string, note: string }&gt;  // living notes
+}</code></pre>
+
+<h4>Channel</h4>
+<pre><code>{
+  id: string               // "flashbots" (lowercase, hyphens ok)
+  name: string             // display name
+  description?: string
+  joinRule?: 'open' | 'invite'
+  createdBy: string
+  skills: Skill[]          // channel-scoped tools
+  subscribers: Array&lt;{ handle: string, role: 'admin' | 'member', joinedAt: number }&gt;
+}</code></pre>
+
+<h4>Skill</h4>
+<pre><code>{
+  id: string               // "skill_abc123"
+  name: string             // tool name (e.g., "write_summary")
+  description: string
+  instructions: string     // detailed prompt for Claude (max 5000 chars)
+  parameters?: Array&lt;{ name, type, description, required?, enum?, default? }&gt;
+  triggerCondition?: string // "when user mentions Project X"
+  to?: string[]            // auto-address entries from this skill
+  aiOnly?: boolean
+  public?: boolean         // visible in gallery
+  author?: string
+}</code></pre>
+</div>
+</details>
+
+<!-- MCP TOOLS -->
+<details>
+<summary>MCP Tools (all 13)</summary>
+<div class="detail-body">
+<table>
+  <tr><th>Tool</th><th>Purpose</th><th>Access</th></tr>
+  <tr><td><code>hermes_write_entry</code></td><td>Write to notebook. Sensitivity check required first. Triggers search for related entries.</td><td>All users</td></tr>
+  <tr><td><code>hermes_search</code></td><td>Keyword + author search. Returns entries matching query.</td><td>All users</td></tr>
+  <tr><td><code>hermes_get_entry</code></td><td>Fetch full entry by ID (includes thread context).</td><td>All users</td></tr>
+  <tr><td><code>hermes_delete_entry</code></td><td>Delete own entries (soft delete, immediate).</td><td>Author only</td></tr>
+  <tr><td><code>hermes_settings</code></td><td>View/update profile, email prefs, staging delay, AI-only default.</td><td>All users</td></tr>
+  <tr><td><code>hermes_skills</code></td><td>List, create, update, delete custom skills. Override system skills.</td><td>All users</td></tr>
+  <tr><td><code>hermes_follow</code></td><td>Follow/unfollow users. Manage roster with living notes.</td><td>All users</td></tr>
+  <tr><td><code>hermes_channels</code></td><td>List, join, create, manage channels. Subscribe/unsubscribe.</td><td>All users</td></tr>
+  <tr><td><code>hermes_daily_question</code></td><td>Generate a contextual question based on notebook activity.</td><td>All users</td></tr>
+  <tr><td><code>hermes_poll_events</code></td><td>Poll event queue with cursor. Returns new events since cursor.</td><td>Agent</td></tr>
+  <tr><td><code>hermes_review_staged</code></td><td>View pending entries in staging buffer.</td><td>Moderators</td></tr>
+  <tr><td><code>hermes_hold_entry</code></td><td>Hold entry indefinitely (publishAt → year 9999).</td><td>Moderators</td></tr>
+  <tr><td><code>hermes_release_entry</code></td><td>Release held entry for publication.</td><td>Moderators</td></tr>
+</table>
+
+<h4>Dynamic Tool Descriptions</h4>
+<p><code>hermes_write_entry</code> description is rebuilt per session and includes: user identity, last 7 daily summaries, following roster with notes, subscribed channels, and triggered skill conditions. This means the tool definition itself is a ~2000 token prompt that shapes what Claude writes.</p>
+</div>
+</details>
+
+<!-- ENTRY LIFECYCLE -->
+<details>
+<summary>Entry Lifecycle (write → publish → deliver)</summary>
+<div class="detail-body">
+<pre><code>1. MCP tool call: hermes_write_entry
+   ├─ Validate: sensitivity_check filled, client valid, entry non-empty
+   ├─ Look up handle from secretKeyHash
+   ├─ Determine aiOnly: explicit override > user default
+   └─ Auto-detect reflection if content ≥ 500 chars
+
+2. Server-side moderation (Haiku)
+   ├─ Only runs if: public AND not addressed (no `to` field)
+   ├─ Model: claude-haiku-4-5-20251001
+   ├─ Classifies: PASS or HOLD:reason
+   ├─ HOLD reasons: interpersonal complaints, private business, private notes
+   ├─ On HOLD: publishAt = year 9999, email author with reason
+   └─ On PASS: continue
+
+3. Staging
+   ├─ Save to storage with publishAt = now + stagingDelayMs (default 1hr)
+   ├─ Push entry_staged event to queue
+   ├─ Return entry ID + search results for related entries
+   └─ Entry visible only to author during staging
+
+4. Publish (after staging delay expires)
+   ├─ StagedStorage checks every 30 seconds for entries past publishAt
+   ├─ Push entry_published event
+   ├─ Deliver to all destinations in `to` array:
+   │   ├─ @handles → resolve to email, send group email
+   │   ├─ #channels → no active delivery (membership checked at read)
+   │   ├─ emails → include in group email batch
+   │   └─ webhooks → POST with entry payload (SSRF checked)
+   ├─ Trigger session summary if >30min gap since last entry
+   └─ Trigger daily summary if new calendar day
+
+5. Agent reaction
+   ├─ Polls entry_published event
+   ├─ Decides: post to Telegram? Interject in group? Ignore?
+   └─ Uses MCP tools to act</code></pre>
+</div>
+</details>
+
+<!-- IDENTITY -->
+<details>
+<summary>Identity System</summary>
+<div class="detail-body">
+<h4>Pseudonym Derivation</h4>
+<pre><code>secretKey (base64url, 32-64 chars)
+  → SHA-256 hash (32 bytes)
+  → adjective index: hash[0:2] as uint16 mod 30
+  → noun index: hash[2:4] as uint16 mod 30
+  → suffix: hash hex[0:6]
+  → "Quiet Feather#79c30b"</code></pre>
+<p>Deterministic: same key always produces same pseudonym across devices. 30 adjectives &times; 30 nouns &times; 16^6 suffixes = ~15 billion unique pseudonyms.</p>
+
+<h4>Handle Claiming</h4>
+<p>Users optionally claim a handle (@username). Rules: 3-15 chars, lowercase alphanumeric + underscores, must start with letter. On claim, all previous entries under the pseudonym are migrated to the handle. One handle per key.</p>
+
+<h4>Secret Key Security</h4>
+<p>Keys are generated client-side (32 random bytes, base64url encoded). Only the SHA-256 hash is stored server-side. The key itself is the user's credential &mdash; possession = identity. Never logged, never transmitted except in the MCP connection URL parameter.</p>
+</div>
+</details>
+
+<!-- STORAGE -->
+<details>
+<summary>Storage Layer</summary>
+<div class="detail-body">
+<h4>Three Implementations</h4>
+<table>
+  <tr><th>Implementation</th><th>Backend</th><th>Use Case</th></tr>
+  <tr><td><code>MemoryStorage</code></td><td>In-memory arrays/maps</td><td>Dev, testing</td></tr>
+  <tr><td><code>FirestoreStorage</code></td><td>Google Firestore</td><td>Persistent storage</td></tr>
+  <tr><td><code>StagedStorage</code></td><td>Wraps either of above</td><td>Production (adds staging delay)</td></tr>
+</table>
+
+<h4>StagedStorage Details</h4>
+<p>Wraps any Storage implementation and adds the staging delay. Pending entries stored in memory with their <code>publishAt</code> timestamp. A timer checks every 30 seconds for entries that have crossed their publish threshold. On publish, fires the <code>onPublish</code> callback (which triggers delivery, summaries, events).</p>
+<p>Recovery: Pending entries saved to <code>/data/pending-recovery.json</code> on graceful shutdown. Restored on restart so entries survive TEE VM restarts without being lost.</p>
+
+<h4>Firestore Collections</h4>
+<table>
+  <tr><th>Collection</th><th>Purpose</th></tr>
+  <tr><td><code>entries</code></td><td>Published journal entries</td></tr>
+  <tr><td><code>users</code></td><td>Handles, profiles, prefs, skills</td></tr>
+  <tr><td><code>channels</code></td><td>Channels with subscribers and skills</td></tr>
+  <tr><td><code>invites</code></td><td>Channel invite tokens</td></tr>
+  <tr><td><code>summaries</code></td><td>Session summaries (30-min gap)</td></tr>
+  <tr><td><code>dailySummaries</code></td><td>Daily community summaries</td></tr>
+  <tr><td><code>conversations</code></td><td>Imported conversation metadata</td></tr>
+</table>
+
+<h4>Search</h4>
+<p>Keyword search uses Firestore's <code>array-contains-any</code> query on tokenized keywords (up to 30 keywords per query). Content is tokenized on write. Not semantic &mdash; exact keyword matching only. This is a known limitation.</p>
+</div>
+</details>
+
+<!-- CONTENT MODERATION -->
+<details>
+<summary>Content Moderation (Haiku)</summary>
+<div class="detail-body">
+<h4>When It Runs</h4>
+<p>Server-side, in-process, on every public entry that is not addressed (no <code>to</code> field). Addressed entries skip moderation since they're already scoped.</p>
+
+<h4>Model &amp; Prompt</h4>
+<p>Model: <code>claude-haiku-4-5-20251001</code>. System prompt classifies as PASS or HOLD:</p>
+<pre><code>HOLD if it contains ANY of:
+- Complaints about a specific person (even unnamed if identifiable)
+- Private business info (deals, pricing, revenue, strategy, investor talks)
+- Content that reads like a private note meant for another tool
+- Real names combined with sensitive personal details
+
+PASS if it's a technical observation, idea, build, question,
+recommendation, or anything clearly intended for public sharing.
+
+When in doubt, HOLD.</code></pre>
+
+<h4>On HOLD</h4>
+<p>Entry's <code>publishAt</code> set to year 9999 (effectively infinite). Author emailed with the reason. Entry stays in staging forever until: author deletes it, or a moderator releases it via <code>hermes_release_entry</code>.</p>
+</div>
+</details>
+
+<!-- EVENT SYSTEM -->
+<details>
+<summary>Event System &amp; Agent Polling</summary>
+<div class="detail-body">
+<h4>Event Types</h4>
+<table>
+  <tr><th>Type</th><th>Trigger</th><th>Payload</th></tr>
+  <tr><td><code>entry_staged</code></td><td>Entry saved to buffer</td><td>entry_id, author_handle, publish_at</td></tr>
+  <tr><td><code>entry_published</code></td><td>Entry crosses publishAt</td><td>entry_id, author, is_reflection, ai_only</td></tr>
+  <tr><td><code>entry_held</code></td><td>Moderation holds entry</td><td>entry_id, reason</td></tr>
+  <tr><td><code>platform_message</code></td><td>Telegram message</td><td>chat_id, sender_name, text</td></tr>
+  <tr><td><code>platform_mention</code></td><td>@hermes in Telegram</td><td>chat_id, sender_name, text</td></tr>
+</table>
+
+<h4>Queue</h4>
+<p>In-memory, rolling window of 1000 events. Sequential IDs. Agent polls with <code>hermes_poll_events cursor=N</code> &mdash; returns events with ID &gt; N. If cursor=0 or omitted, returns last 50.</p>
+
+<h4>Agent Loop</h4>
+<p>The Nous Hermes agent (Opus 4.6, Python) connects to the notebook via MCP HTTP, polls the event queue, and reacts. It decides autonomously: post to Telegram? Interject in a group conversation? Hold a staged entry? The agent's skills are defined in <code>/root/.hermes/skills</code> and can be modified at runtime.</p>
+</div>
+</details>
+
+<!-- DELIVERY -->
+<details>
+<summary>Addressing &amp; Delivery</summary>
+<div class="detail-body">
+<h4>Destination Parsing</h4>
+<table>
+  <tr><th>Format</th><th>Example</th><th>Type</th></tr>
+  <tr><td>Handle</td><td><code>@alice</code> or <code>alice</code></td><td>Resolved to user record</td></tr>
+  <tr><td>Channel</td><td><code>#flashbots</code></td><td>Membership checked at read time</td></tr>
+  <tr><td>Email</td><td><code>bob@example.com</code></td><td>Direct email delivery</td></tr>
+  <tr><td>Webhook</td><td><code>https://hook.example.com</code></td><td>POST with entry payload (SSRF checked)</td></tr>
+</table>
+
+<h4>Access Control</h4>
+<p>Empty <code>to</code> = public. Non-empty <code>to</code> = private to author + listed destinations. Channel membership resolved live at read time. AI-only is orthogonal &mdash; controls human visibility, not access.</p>
+
+<h4>Email Batching</h4>
+<p>All email recipients for one entry get ONE group email (reply-all works). Author CC'd. Max 10 emails per user per day. SendGrid integration.</p>
+
+<h4>SSRF Prevention</h4>
+<p>Webhook URLs validated against private IP ranges (localhost, 10.x, 172.16-31.x, 192.168.x, link-local). Invalid or internal URLs blocked.</p>
+</div>
+</details>
+
+<!-- DEPLOYMENT -->
+<details>
+<summary>Deployment Pipeline</summary>
+<div class="detail-body">
+<h4>Docker Build (3-stage)</h4>
+<pre><code>Stage 1: Build TypeScript server (Node 20 Alpine)
+  npm ci → tsc → dist/
+
+Stage 2: Build Astro frontend
+  npm ci → astro build → dist/index.html
+
+Stage 3: Production image
+  Copy dist/ + legacy HTML + Astro output
+  mkdir /data (volume mount for recovery + agent state)
+  CMD: node dist/http.js</code></pre>
+
+<h4>Docker Compose (Production)</h4>
+<table>
+  <tr><th>Service</th><th>Image</th><th>Purpose</th></tr>
+  <tr><td><code>hermes</code></td><td><code>generalsemantics/hermes</code></td><td>Notebook server, port 3000</td></tr>
+  <tr><td><code>hermes-agent</code></td><td><code>generalsemantics/hermes-agent</code></td><td>Nous Hermes agent (Python, Opus 4.6)</td></tr>
+  <tr><td><code>dstack-ingress</code></td><td><code>dstacktee/dstack-ingress</code></td><td>TLS termination, Cloudflare DNS, port 443</td></tr>
+</table>
+<p>Shared volume <code>hermes-data:/data</code> mounts into both hermes and hermes-agent for state persistence and recovery files.</p>
+
+<h4>CI/CD (GitHub Actions)</h4>
+<pre><code>On push to master:
+  1. Build Docker image (multi-platform, cached)
+  2. Push to Docker Hub (generalsemantics/hermes)
+  3. Generate docker-compose with pinned SHA + digest
+  4. Deploy to Phala Cloud CVM via phala CLI
+  5. Wait 30s for TEE restart
+  6. Fetch TEE metadata + attestation quote
+  7. Redact secrets from metadata
+  8. Commit evidences to repo (evidences/YYYY-MM-DD/)</code></pre>
+
+<h4>Performance Monitoring</h4>
+<p>Runs every 6 hours via <code>perf.yml</code>. Budgets: P50 &lt; 120ms homepage, &lt; 320ms API + deep cursor pagination.</p>
+</div>
+</details>
+
+<!-- NOTIFICATIONS -->
+<details>
+<summary>Notifications &amp; Daily Digest</summary>
+<div class="detail-body">
+<h4>Daily Digest (14:00 UTC)</h4>
+<p>For each user with verified email + digest pref enabled:</p>
+<ol>
+  <li>Fetch user's entries (7 days), followed users' entries (2 days), discovery entries (keyword overlap)</li>
+  <li>Call Claude Opus with web search (up to 5 searches) to generate: subject line, 3-paragraph digest, news items, personalized question</li>
+  <li>Render HTML email with: digest, news, followed section, discovery section, question box with Claude.ai deep link</li>
+  <li>Send via SendGrid</li>
+</ol>
+
+<h4>Session Summaries</h4>
+<p>Triggered when &gt; 30 minutes gap between entries from same pseudonym. Opus generates 1-2 sentence summary of the burst. Stored in Firestore <code>summaries</code> collection. Included in <code>hermes_write_entry</code> tool description (last 7 days).</p>
+
+<h4>Email Verification</h4>
+<p>JWT token (24h expiry) with <code>{ handle, email, purpose: 'verify-email' }</code>. Sent via SendGrid. Verified via <code>/api/verify-email?token=...</code> endpoint.</p>
+</div>
+</details>
+
+<!-- KEY CONSTANTS -->
+<details>
+<summary>Key Constants &amp; Configuration</summary>
+<div class="detail-body">
+<table>
+  <tr><th>Constant</th><th>Value</th><th>Purpose</th></tr>
+  <tr><td><code>STAGING_DELAY_MS</code></td><td>3600000 (1hr) or env</td><td>Buffer before publish</td></tr>
+  <tr><td><code>MAX_EVENTS</code></td><td>1000</td><td>Rolling event queue size</td></tr>
+  <tr><td><code>SUMMARY_GAP_MS</code></td><td>1800000 (30min)</td><td>Gap to trigger session summary</td></tr>
+  <tr><td><code>DIGEST_HOUR_UTC</code></td><td>14</td><td>When daily digest fires</td></tr>
+  <tr><td><code>MAX_EMAILS_PER_USER_PER_DAY</code></td><td>10</td><td>Email rate limit</td></tr>
+  <tr><td><code>MAX_SKILLS_PER_USER</code></td><td>20</td><td>Custom skill limit</td></tr>
+  <tr><td><code>MAX_SKILL_INSTRUCTIONS</code></td><td>5000 chars</td><td>Skill prompt length</td></tr>
+  <tr><td><code>MODERATOR_HANDLES</code></td><td>env (comma-separated)</td><td>Who can hold/release entries</td></tr>
+</table>
+
+<h4>Environment Variables (server)</h4>
+<pre><code>PORT=3000
+BASE_URL=https://hermes.teleport.computer
+STAGING_DELAY_MS=3600000
+FIREBASE_SERVICE_ACCOUNT_BASE64=...   # Firestore credentials
+ANTHROPIC_API_KEY=...                 # For Haiku moderation + Opus summaries
+SENDGRID_API_KEY=...                  # Email
+SENDGRID_FROM_EMAIL=...
+TELEGRAM_BOT_TOKEN=...
+MODERATOR_HANDLES=james,socrates1024
+HERMES_SECRET_KEY=...                 # Agent's notebook key</code></pre>
+</div>
+</details>
+
+<!-- COMMON TASKS -->
+<details>
+<summary>Common Engineering Tasks</summary>
+<div class="detail-body">
+<h4>Add a new MCP tool</h4>
+<p>Edit <code>server/src/http.ts</code>. Find the <code>SYSTEM_SKILLS</code> array (tool definitions) and <code>CallToolRequestSchema</code> handler (implementations). Add definition to array, add handler case. Run <code>npm test</code> to verify.</p>
+
+<h4>Change the journal UI</h4>
+<p>Edit <code>index.html</code> (legacy single-file app with inline CSS/JS) or <code>web/src/pages/index.astro</code> (Astro build). Legacy HTML served directly; Astro builds to <code>web/dist/</code>.</p>
+
+<h4>Run locally</h4>
+<pre><code>cd server
+cp .env.example .env  # Edit: set ANTHROPIC_API_KEY, omit Firebase for memory storage
+npm install
+npm run dev           # Hot reload on port 3000</code></pre>
+
+<h4>Run tests</h4>
+<pre><code>cd server
+npm test              # All tests once (~0.4s with cache)
+npm run test:watch    # Watch mode</code></pre>
+
+<h4>Deploy</h4>
+<p>Push to <code>master</code>. GitHub Actions handles everything: build Docker image → push to Docker Hub → deploy to Phala Cloud → archive TEE evidences.</p>
+
+<h4>Test MCP locally</h4>
+<pre><code># Generate a key
+curl -X POST http://localhost:3000/api/identity/generate
+
+# Connect MCP (SSE)
+curl "http://localhost:3000/mcp/sse?key=YOUR_KEY"</code></pre>
+</div>
+</details>
+
+</section>
+
+<!-- ============================================ -->
+<!-- NEXT STEPS -->
+<!-- ============================================ -->
+<section id="next-steps">
+<h2>Prioritized Next Steps</h2>
+
+<p>These are the concrete actions needed to enter Phase 1 (accelerator launch, late April). Ordered by urgency and dependency.</p>
+
+<h3>1. Discord Integration <span class="tag red">blocker for Phase 1</span></h3>
+
+<p>The accelerator needs a platform on day one. Discord is the default because:</p>
+<ul>
+  <li>Accelerator participants expect it &mdash; IC3 teams already use Discord</li>
+  <li>Lower switching cost than Matrix (nobody needs a new app)</li>
+  <li>Bot permissions model is well-understood</li>
+  <li>The existing Telegram relay architecture ports directly &mdash; thin relay pushes events to the queue, agent decides what to do</li>
+</ul>
+
+<p>Scope: read messages from designated channels, push to event queue, agent posts interjections and digests. Same pattern as Telegram but on Discord's API. Invite-only server with channel-per-team.</p>
+
+<h3>2. Stabilize the Telegram Agent</h3>
+
+<p>The agent's Telegram behavior is the closest thing to a reference implementation for how platform relays should work. If it's unreliable in Telegram, the same problems will replicate to Discord. Before building Discord:</p>
+<ul>
+  <li>Audit interjection quality &mdash; when does the agent add value vs. create noise?</li>
+  <li>Tune the morning digest for group-specific context</li>
+  <li>Define clear success/failure criteria for agent behavior (can't improve what you can't measure)</li>
+</ul>
+
+<p>This work directly benefits Discord because the agent logic is platform-agnostic &mdash; only the relay layer differs.</p>
+
+<h3>3. Content Moderation: Ship the Scaffolded Review Pipeline</h3>
+
+<p>The <code>hermes_review_staged</code> / <code>hermes_hold_entry</code> / <code>hermes_release_entry</code> tools exist but the agent isn't consistently using them. The accelerator is a controlled environment but still needs basic hygiene &mdash; entries that are clearly private notes or interpersonal complaints should be caught before publish. Complete the content moderation skill so the agent actively reviews staged entries.</p>
+
+<h3>4. Platform Prioritization: Discord &rarr; Slack &rarr; Matrix</h3>
+
+<p>These are not parallel workstreams. They're sequential, and each serves a different phase:</p>
+
+<table>
+  <tr><th>Platform</th><th>Serves</th><th>When</th><th>Why this order</th></tr>
+  <tr><td><strong>Discord</strong></td><td>Phase 1 (Accelerator)</td><td>Before late April</td><td>Required for launch. Participants expect it. Bot model is proven.</td></tr>
+  <tr><td><strong>Slack</strong></td><td>Phase 2 (Flashbots)</td><td>After accelerator proves routing</td><td>Hasu was explicit: Slack is the only viable internal surface. But we approach Flashbots only with data from Phase 1. DM-first model (agent reads channels, surfaces via DMs &mdash; never posts publicly).</td></tr>
+  <tr><td><strong>Matrix</strong></td><td>Phase 1 research track</td><td>Parallel with Discord</td><td>Andrew's hermes-introducer exploration. The accelerator is the one place where asking people to try a new client isn't a dealbreaker. Test alongside Discord, not instead of it. If Matrix proves its value, it becomes the native client for Phase 4.</td></tr>
+</table>
+
+<p>The unifying architecture from <a href="https://github.com/amiller/hermes-introducer/pull/2">PR #2</a> &mdash; notebook keys as root identity, each platform as an MCP client to the intelligence backend &mdash; should guide all three implementations. Build the relay abstraction right with Discord so Slack and Matrix don't require re-architecture.</p>
+
+<h3>5. Prompt Adherence Eval</h3>
+
+<p>The 70% number needs to become a real measurement. Build a basic eval: synthetic conversations with known-sensitive content, run them through the tool call pipeline, measure how often the sensitivity check fires. This doesn't need to be production-grade &mdash; it needs to be repeatable so we can track improvement. Target: before Flashbots engagement, since Hasu already flagged accuracy as <em>"pretty bad."</em></p>
+
+<h3>6. Introduction Engine</h3>
+
+<p>The accelerator's core value proposition is connecting teams that don't know their work overlaps. The current search-on-write mechanism returns related entries, but there's no active introduction flow. Ship <code>hermes_find_introduction</code> (from the Hive Mind proposal) or a simpler version: when the agent detects complementary entries from different authors, it surfaces the connection in the Discord channel with a brief explanation of why they should talk.</p>
+
+</section>
+
+<!-- ============================================ -->
+<!-- GLOSSARY -->
+<!-- ============================================ -->
+<section id="glossary">
+<h2>Glossary</h2>
+<table>
+  <tr><td><strong>MCP</strong></td><td>Model Context Protocol &mdash; standard for connecting AI models to external tools</td></tr>
+  <tr><td><strong>TEE</strong></td><td>Trusted Execution Environment &mdash; hardware-enforced secure enclave (Intel TDX)</td></tr>
+  <tr><td><strong>dstack</strong></td><td>Phala's TEE deployment infrastructure for Docker containers</td></tr>
+  <tr><td><strong>Staging buffer</strong></td><td>1hr configurable delay before entries publish; held in TEE memory only</td></tr>
+  <tr><td><strong>Scope agent</strong></td><td>Trusted context inside TEE mediating private data and external queries</td></tr>
+  <tr><td><strong>Capability</strong></td><td>Function encapsulating authority to access private data, minted by scope agent</td></tr>
+  <tr><td><strong>Encumbrance</strong></td><td>Proving exclusive resource control by managing credentials inside a TEE</td></tr>
+  <tr><td><strong>GEPA</strong></td><td>Generative Evolution and Prompt Adaptation &mdash; agent self-optimization</td></tr>
+  <tr><td><strong>MEV</strong></td><td>Maximum Extractable Value &mdash; value from privileged information access</td></tr>
+  <tr><td><strong>Hive Mind</strong></td><td>Andrew's hermes-introducer for agent discovery via Matrix</td></tr>
+  <tr><td><strong>hivemind-core</strong></td><td>Xyn's agent platform with Postgres + scope-function firewalls</td></tr>
+  <tr><td><strong>Sybil attack</strong></td><td>Creating multiple fake identities to game a system's trust or reputation mechanisms</td></tr>
+  <tr><td><strong>Shape Rotator</strong></td><td>IC3 accelerator pairing academic papers with builder teams</td></tr>
+  <tr><td><strong>Feedling</strong></td><td>Teleport's consumer app for TikTok habit awareness</td></tr>
+  <tr><td><strong>The Convent</strong></td><td>Physical space in Greenpoint, Brooklyn &mdash; team and accelerator home</td></tr>
+</table>
+</section>
+
+</main>
+
+<script>
+const sections = document.querySelectorAll('section[id]');
+const navLinks = document.querySelectorAll('nav a[href^="#"]');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      navLinks.forEach(link => {
+        link.classList.toggle('active', link.getAttribute('href') === '#' + entry.target.id);
+      });
+    }
+  });
+}, { rootMargin: '-20% 0px -70% 0px' });
+sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>

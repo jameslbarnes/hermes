@@ -15,6 +15,7 @@ services:
       - BASE_URL
       - FIREBASE_SERVICE_ACCOUNT_BASE64
       - ANTHROPIC_API_KEY
+      - NEAR_AI_API_KEY
       - SENDGRID_API_KEY
       - SENDGRID_FROM_EMAIL
     volumes:

@@ -1736,7 +1736,7 @@ BLOCK:spam`;
             },
             body: JSON.stringify({
               model: 'Qwen/Qwen3.5-122B-A10B',
-              max_tokens: 128,
+              max_tokens: 2000,
               messages: [
                 { role: 'system', content: modSystem },
                 { role: 'user', content: entry.trim().slice(0, 2000) },

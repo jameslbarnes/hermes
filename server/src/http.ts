@@ -28,6 +28,7 @@ import { createNotificationService, createSendGridClient, verifyUnsubscribeToken
 import { deliverEntry, getDefaultVisibility, canViewEntry, canView, normalizeEntry, isDefaultAiOnly, isEntryAiOnly, type DeliveryConfig } from './delivery.js';
 import { startTelegramBot, postToTelegram } from './telegram.js';
 import { pushEvent, getEventsSince, getLatestCursor, type EventType } from './events.js';
+import { queryMessages, getStats as getMessageStats, close as closeMessageStore } from './message-store.js';
 
 // Security: Check if a URL points to internal/private IP ranges
 function isInternalUrl(urlString: string): boolean {
@@ -697,6 +698,53 @@ export const SYSTEM_SKILLS: Skill[] = [
     instructions: '',
     handlerType: 'builtin',
     inputSchema: { type: 'object', properties: {} },
+    createdAt: 0,
+  },
+  {
+    id: 'system_hermes_query_messages',
+    name: 'hermes_query_messages',
+    description: 'Query the Telegram message history database. Supports flexible filtering by chat, sender, topic, and time range. Use action "query" to search messages or "stats" to get aggregate counts.',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['query', 'stats'],
+          description: 'Action to perform: "query" returns matching messages, "stats" returns aggregate counts by chat/sender/topic.',
+        },
+        chat_id: {
+          type: 'string',
+          description: 'Filter by Telegram chat ID (optional).',
+        },
+        sender_id: {
+          type: 'string',
+          description: 'Filter by sender user ID (optional).',
+        },
+        topic_id: {
+          type: 'number',
+          description: 'Filter by forum topic/thread ID (optional).',
+        },
+        since: {
+          type: 'string',
+          description: 'Only return messages after this ISO 8601 timestamp (optional).',
+        },
+        until: {
+          type: 'string',
+          description: 'Only return messages before this ISO 8601 timestamp (optional).',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum messages to return (default 50, max 200).',
+        },
+        offset: {
+          type: 'number',
+          description: 'Offset for pagination (default 0).',
+        },
+      },
+      required: [],
+    },
     createdAt: 0,
   },
 ];
@@ -1391,7 +1439,7 @@ function createMCPServer(secretKey: string) {
           }
         }
         // Moderation tools: only show to moderators (or if no moderators configured, show to all)
-        if (['hermes_poll_events', 'hermes_review_staged', 'hermes_hold_entry', 'hermes_release_entry'].includes(skill.name)) {
+        if (['hermes_poll_events', 'hermes_review_staged', 'hermes_hold_entry', 'hermes_release_entry', 'hermes_query_messages'].includes(skill.name)) {
           if (!(storage instanceof StagedStorage)) return false;
           if (MODERATOR_HANDLES.size > 0 && (!handle || !MODERATOR_HANDLES.has(handle))) return false;
         }
@@ -3500,6 +3548,62 @@ function createMCPServer(secretKey: string) {
       const nextCursor = events[events.length - 1].id;
       return {
         content: [{ type: 'text' as const, text: `${events.length} events (cursor ${nextCursor}):\n\n${formatted}` }],
+      };
+    }
+
+    if (name === 'hermes_query_messages') {
+      const handle = await getHandle();
+      const isModerator = handle && MODERATOR_HANDLES.has(handle);
+      if (MODERATOR_HANDLES.size > 0 && !isModerator) {
+        return {
+          content: [{ type: 'text' as const, text: 'Only the Hermes agent can query messages.' }],
+          isError: true,
+        };
+      }
+
+      const params = args as {
+        action?: string;
+        chat_id?: string;
+        sender_id?: string;
+        topic_id?: number;
+        since?: string;
+        until?: string;
+        limit?: number;
+        offset?: number;
+      };
+
+      const action = params.action || 'query';
+
+      if (action === 'stats') {
+        const stats = getMessageStats();
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(stats, null, 2) }],
+        };
+      }
+
+      // Default: query
+      const messages = queryMessages({
+        chatId: params.chat_id,
+        senderId: params.sender_id,
+        topicId: params.topic_id,
+        since: params.since,
+        until: params.until,
+        limit: params.limit,
+        offset: params.offset,
+      });
+
+      if (messages.length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: 'No messages found matching the query.' }],
+        };
+      }
+
+      const formatted = messages.map(m =>
+        `[${m.timestamp}] ${m.sender_name} (${m.sender_id}) in ${m.chat_id}${m.topic_id ? ` topic:${m.topic_id}` : ''}: ${m.text ?? `[${m.message_type}]`}`
+      ).join('\n');
+
+      return {
+        content: [{ type: 'text' as const, text: `${messages.length} messages:\n\n${formatted}` }],
       };
     }
 
@@ -7208,6 +7312,13 @@ server.listen(PORT, () => {
 
 process.on('SIGTERM', () => {
   console.log('[Shutdown] SIGTERM received, saving pending state...');
+
+  // Close the message store DB cleanly
+  try {
+    closeMessageStore();
+  } catch {
+    // Ignore — store may not have been initialised
+  }
 
   if (storage instanceof StagedStorage) {
     try {

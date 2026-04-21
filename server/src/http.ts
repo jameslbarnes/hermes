@@ -6305,6 +6305,134 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // POST /api/sparks/accept - Accept a spark and execute the introduction
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/sparks/accept') {
+      const body = await readBody(req);
+      const { secret_key, target_handle, reason, evidence } = JSON.parse(body);
+
+      if (!isValidSecretKey(secret_key)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const accepterKeyHash = hashSecretKey(secret_key);
+      const accepter = await storage.getUserByKeyHash(accepterKeyHash);
+      if (!accepter?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Account required' }));
+        return;
+      }
+
+      const target = await storage.getUser(target_handle);
+      if (!target) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: `User @${target_handle} not found` }));
+        return;
+      }
+
+      const sourceHandle = accepter.handle;
+      const targetHandle = target.handle;
+
+      // Determine strategy based on linked accounts
+      const sourceMatrix = (accepter.linkedAccounts || []).find(a => a.platform === 'matrix');
+      const targetMatrix = (target.linkedAccounts || []).find(a => a.platform === 'matrix');
+
+      let strategy: 'matrix_room' | 'matrix_invite_email' | 'notebook_thread' = 'notebook_thread';
+      let result: any = { ok: true };
+
+      try {
+        if (sourceMatrix && targetMatrix) {
+          strategy = 'matrix_room';
+          // Create encrypted Matrix room with both users
+          const matrix = getPlatform('matrix');
+          if (matrix) {
+            const room = await matrix.createRoom(
+              `@${sourceHandle} ↔ @${targetHandle}`,
+              {
+                type: 'group',
+                topic: reason || `Introduction between @${sourceHandle} and @${targetHandle}`,
+                encrypted: true,
+              },
+            );
+            // Invite both by their linked Matrix IDs directly
+            await matrix.inviteToRoom(room.id, sourceMatrix.platformUserId);
+            await matrix.inviteToRoom(room.id, targetMatrix.platformUserId);
+
+            // Post spark context if MatrixPlatform
+            if ('postSparkContext' in matrix) {
+              await (matrix as any).postSparkContext(room.id, {
+                sourceHandle,
+                targetHandle,
+                reason: reason || 'Connected by the Router',
+                evidence: evidence || [],
+              });
+            }
+
+            // Send warm introduction
+            if (accepter.interestProfile && target.interestProfile) {
+              const anthropic = process.env.ANTHROPIC_API_KEY
+                ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+                : null;
+              if (anthropic) {
+                const { craftIntroduction } = await import('./intelligence/profiles.js');
+                const entries = await storage.getEntriesByHandle(sourceHandle, 1);
+                const triggerEntry = entries[0];
+                if (triggerEntry) {
+                  const intro = await craftIntroduction(
+                    accepter.interestProfile, sourceHandle,
+                    target.interestProfile, targetHandle,
+                    triggerEntry, anthropic,
+                  );
+                  if (intro) {
+                    await matrix.sendMessage(room.id, intro);
+                  }
+                }
+              }
+            }
+
+            result = { ok: true, strategy, room_id: room.id };
+          }
+        } else if (sourceMatrix || targetMatrix) {
+          strategy = 'matrix_invite_email';
+          // One is on Matrix, one isn't. Create a notebook thread addressed to both,
+          // and email the one who isn't.
+          await storage.addEntry({
+            pseudonym: sourceHandle,
+            handle: sourceHandle,
+            client: 'code' as const,
+            content: `🔗 Introduction to @${targetHandle}\n\n${reason || 'I thought we should connect.'}\n\n(The Router suggested we might find common ground.)`,
+            timestamp: Date.now(),
+            to: [`@${targetHandle}`, `@${sourceHandle}`],
+          });
+          result = { ok: true, strategy };
+        } else {
+          strategy = 'notebook_thread';
+          // Neither on Matrix — create notebook thread addressed to both
+          await storage.addEntry({
+            pseudonym: sourceHandle,
+            handle: sourceHandle,
+            client: 'code' as const,
+            content: `🔗 Introduction to @${targetHandle}\n\n${reason || 'I thought we should connect.'}\n\n(The Router suggested we might find common ground.)`,
+            timestamp: Date.now(),
+            to: [`@${targetHandle}`, `@${sourceHandle}`],
+          });
+          result = { ok: true, strategy };
+        }
+
+        res.writeHead(200);
+        res.end(JSON.stringify(result));
+        return;
+      } catch (err: any) {
+        console.error('[Sparks] Accept failed:', err);
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Spark accept failed', detail: err.message }));
+        return;
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // POST /api/matrix/provision - Provision Matrix account from Hermes key
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'POST' && url.pathname === '/api/matrix/provision') {

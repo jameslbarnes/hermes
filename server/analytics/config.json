@@ -1,0 +1,27 @@
+{
+  "response_shaping": {
+    "enabled": true,
+    "min_response_delay_ms": 2000,
+    "word_count": {
+      "window_minutes": 30,
+      "trim_percentile": 10,
+      "cap_sigma_multiplier": 1.5
+    },
+    "response_probability": {
+      "decay_alpha": 0.5,
+      "participant_boost_threshold": 3,
+      "participant_boost_3_4": 1.2,
+      "participant_boost_5_plus": 1.4,
+      "silence_threshold_minutes": 120,
+      "min_probability_to_respond": 0.3
+    },
+    "speech_act_aggregation": {
+      "burst_window_seconds": 30,
+      "evaluation_delay_seconds": 3
+    },
+    "participant_geometry": {
+      "dyadic_backoff_multiplier": 0.3,
+      "window_minutes": 10
+    }
+  }
+}

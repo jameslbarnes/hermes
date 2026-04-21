@@ -25,6 +25,17 @@ const MAX_EVENTS = 1000;
 let nextId = 1;
 const events: HermesEvent[] = [];
 
+// Hook dispatcher integration — set by server startup
+type DispatchFn = (event: HermesEvent) => Promise<void>;
+let dispatchToHooks: DispatchFn | null = null;
+
+/**
+ * Set the hook dispatcher callback. Called once during server startup.
+ */
+export function setDispatcher(fn: DispatchFn): void {
+  dispatchToHooks = fn;
+}
+
 /**
  * Push a new event to the queue.
  */
@@ -40,6 +51,13 @@ export function pushEvent(type: EventType, data: Record<string, any>): HermesEve
   // Trim old events
   while (events.length > MAX_EVENTS) {
     events.shift();
+  }
+
+  // Dispatch to hook handlers (non-blocking)
+  if (dispatchToHooks) {
+    dispatchToHooks(event).catch(err => {
+      console.error('[Events] Hook dispatch failed:', err);
+    });
   }
 
   return event;

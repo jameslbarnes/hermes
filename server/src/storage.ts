@@ -141,6 +141,32 @@ export interface User {
   following?: { handle: string; note: string }[];  // Users this person follows, with living notes
   onboardedAt?: number;  // Set on first meaningful action (write, follow, clone)
   lastDailyQuestionAt?: number;  // UTC timestamp of last daily question trigger, resets by calendar day
+  /** The agent's living model of who this person is — updated incrementally as they write entries. */
+  interestProfile?: InterestProfile;
+}
+
+/**
+ * A living model of a user's interests, expertise, and current work.
+ * Updated by the agent every time the user writes an entry.
+ * Powers personalized digests, smart introductions, and discovery.
+ */
+export interface InterestProfile {
+  /** 2-3 sentence summary of who this person is and what they care about */
+  summary: string;
+  /** What they're currently working on (updated frequently) */
+  currentWork: string[];
+  /** What they're expert in (accumulated over time) */
+  expertise: string[];
+  /** What they're curious about or learning */
+  curious: string[];
+  /** What they need help with right now */
+  needs: string[];
+  /** What they can offer to others */
+  offers: string[];
+  /** When this profile was last updated */
+  updatedAt: number;
+  /** How many entries have been processed into this profile */
+  entryCount: number;
 }
 
 // ─────────────────────────────────────────────────────────────

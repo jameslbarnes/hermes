@@ -27,7 +27,12 @@ import { scrapeConversation, detectPlatform, isValidShareUrl, ScrapeError } from
 import { createNotificationService, createSendGridClient, verifyUnsubscribeToken, verifyEmailToken, type NotificationService } from './notifications.js';
 import { deliverEntry, getDefaultVisibility, canViewEntry, canView, normalizeEntry, isDefaultAiOnly, isEntryAiOnly, type DeliveryConfig } from './delivery.js';
 import { startTelegramBot, postToTelegram } from './telegram.js';
-import { pushEvent, getEventsSince, getLatestCursor, type EventType } from './events.js';
+import { pushEvent, getEventsSince, getLatestCursor, setDispatcher, type EventType } from './events.js';
+import { registerPlatform, getPlatform, getAllPlatforms, startAllPlatforms, stopAllPlatforms } from './platform/registry.js';
+import { MatrixPlatform } from './platform/matrix.js';
+import { getDispatcher } from './hooks/dispatcher.js';
+import { registerAgentHooks } from './hooks/agent.js';
+import { startCronJobs, stopCronJobs } from './hooks/cron.js';
 
 // Security: Check if a URL points to internal/private IP ranges
 function isInternalUrl(urlString: string): boolean {
@@ -697,6 +702,79 @@ export const SYSTEM_SKILLS: Skill[] = [
     instructions: '',
     handlerType: 'builtin',
     inputSchema: { type: 'object', properties: {} },
+    createdAt: 0,
+  },
+  {
+    id: 'system_hermes_platform_send',
+    name: 'hermes_platform_send',
+    description: 'Send a message to a room on any connected platform (Matrix, Telegram, etc.).',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        platform: { type: 'string', description: 'Platform name (e.g. "matrix", "telegram")' },
+        room_id: { type: 'string', description: 'Room/chat ID to send to' },
+        text: { type: 'string', description: 'Message text (markdown supported)' },
+        reply_to: { type: 'string', description: 'Message ID to reply to (optional)' },
+      },
+      required: ['platform', 'room_id', 'text'],
+    },
+    createdAt: 0,
+  },
+  {
+    id: 'system_hermes_platform_create_room',
+    name: 'hermes_platform_create_room',
+    description: 'Create a new room on a platform. Use for introductions, channels, or ad-hoc groups.',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        platform: { type: 'string', description: 'Platform name (e.g. "matrix")' },
+        name: { type: 'string', description: 'Room name' },
+        type: { type: 'string', enum: ['dm', 'group', 'channel'], description: 'Room type' },
+        invite_handles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Hermes handles to invite',
+        },
+        topic: { type: 'string', description: 'Room topic/description' },
+        encrypted: { type: 'boolean', description: 'Enable encryption (default true for DMs/groups)' },
+      },
+      required: ['platform', 'name', 'type'],
+    },
+    createdAt: 0,
+  },
+  {
+    id: 'system_hermes_search_sparks',
+    name: 'hermes_search_sparks',
+    description: 'Search for potential introduction opportunities (sparks) between notebook users. Returns pairs of people with overlapping interests and their connection status.',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        handle: { type: 'string', description: 'Find sparks for this user (optional — searches broadly if omitted)' },
+        query: { type: 'string', description: 'Topic to search for sparks around (optional)' },
+      },
+      required: [],
+    },
+    createdAt: 0,
+  },
+  {
+    id: 'system_hermes_connection_graph',
+    name: 'hermes_connection_graph',
+    description: 'Get a user\'s connection graph — who they\'re connected to, shared channels, mutual follows, and interaction history.',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        handle: { type: 'string', description: 'The user handle to get connections for' },
+      },
+      required: ['handle'],
+    },
     createdAt: 0,
   },
 ];
@@ -3816,6 +3894,103 @@ function createMCPServer(secretKey: string) {
       }
     }
 
+    // ── Platform Tools ──────────────────────────────────────
+    if (name === 'hermes_platform_send') {
+      const a = args as { platform: string; room_id: string; text: string; reply_to?: string };
+      const platform = getPlatform(a.platform);
+      if (!platform) {
+        return { content: [{ type: 'text' as const, text: `Platform "${a.platform}" not connected.` }], isError: true };
+      }
+      try {
+        const messageId = await platform.sendMessage(a.room_id, a.text, { replyTo: a.reply_to });
+        return { content: [{ type: 'text' as const, text: `Message sent (${messageId})` }] };
+      } catch (err: any) {
+        return { content: [{ type: 'text' as const, text: `Send failed: ${err.message}` }], isError: true };
+      }
+    }
+
+    if (name === 'hermes_platform_create_room') {
+      const a = args as { platform: string; name: string; type?: string; invite_handles?: string[]; topic?: string; encrypted?: boolean };
+      const platform = getPlatform(a.platform);
+      if (!platform) {
+        return { content: [{ type: 'text' as const, text: `Platform "${a.platform}" not connected.` }], isError: true };
+      }
+      try {
+        const room = await platform.createRoom(a.name, {
+          type: (a.type as any) || 'group',
+          invite: a.invite_handles,
+          topic: a.topic,
+          encrypted: a.encrypted !== false,
+        });
+        return { content: [{ type: 'text' as const, text: `Room created: ${room.id} (${room.name || a.name})` }] };
+      } catch (err: any) {
+        return { content: [{ type: 'text' as const, text: `Room creation failed: ${err.message}` }], isError: true };
+      }
+    }
+
+    if (name === 'hermes_search_sparks') {
+      try {
+        const a = args as { handle?: string; query?: string };
+        const { detectSparks: detect } = await import('./intelligence/sparks.js');
+        let results: string[] = [];
+
+        if (a.handle) {
+          const entries = await storage.getEntriesByHandle(a.handle, 5);
+          for (const entry of entries.slice(0, 2)) {
+            const candidates = await detect(entry, storage);
+            for (const c of candidates) {
+              results.push(`@${a.handle} ↔ @${c.handle}: ${c.overlapTopics.join(', ')} (${c.matchingEntries.length} matching entries)`);
+            }
+          }
+        } else if (a.query) {
+          const entries = await storage.searchEntries(a.query, 10);
+          const handles = [...new Set(entries.map(e => e.handle).filter(Boolean))] as string[];
+          if (handles.length >= 2) {
+            for (let i = 0; i < handles.length - 1; i++) {
+              for (let j = i + 1; j < Math.min(handles.length, i + 3); j++) {
+                results.push(`@${handles[i]} ↔ @${handles[j]}: both writing about "${a.query}"`);
+              }
+            }
+          }
+        }
+
+        return {
+          content: [{ type: 'text' as const, text: results.length > 0 ? `Found ${results.length} potential sparks:\n\n${results.join('\n')}` : 'No sparks found.' }],
+        };
+      } catch (err: any) {
+        return { content: [{ type: 'text' as const, text: `Spark search failed: ${err.message}` }], isError: true };
+      }
+    }
+
+    if (name === 'hermes_connection_graph') {
+      try {
+        const a = args as { handle: string };
+        const user = await storage.getUser(a.handle);
+        if (!user) {
+          return { content: [{ type: 'text' as const, text: `User @${a.handle} not found.` }], isError: true };
+        }
+
+        const following = user.following || [];
+        const channels = await storage.listChannels();
+        const userChannels = channels.filter(c => c.subscribers.some(s => s.handle === a.handle));
+        const entries = await storage.getEntriesByHandle(a.handle, 20);
+        const addressedTo = new Set<string>();
+        for (const e of entries) {
+          e.to?.filter(d => d.startsWith('@')).forEach(d => addressedTo.add(d));
+        }
+
+        let text = `Connection graph for @${a.handle}:\n\n`;
+        text += `Following (${following.length}): ${following.map(f => `@${f.handle}`).join(', ') || 'none'}\n\n`;
+        text += `Channels (${userChannels.length}): ${userChannels.map(c => `#${c.id}`).join(', ') || 'none'}\n\n`;
+        text += `Addressed entries to: ${[...addressedTo].join(', ') || 'none'}\n\n`;
+        text += `Recent entries: ${entries.length}`;
+
+        return { content: [{ type: 'text' as const, text }] };
+      } catch (err: any) {
+        return { content: [{ type: 'text' as const, text: `Graph failed: ${err.message}` }], isError: true };
+      }
+    }
+
     return {
       content: [{ type: 'text' as const, text: `Unknown tool: ${name}` }],
       isError: true,
@@ -5392,6 +5567,15 @@ const server = createServer(async (req, res) => {
       }
 
       await storage.addSubscriber(channelId, user.handle, 'member');
+
+      // Sync to Matrix: join user to the channel's Matrix room
+      const matrixPlatform = getPlatform('matrix') as MatrixPlatform | undefined;
+      if (matrixPlatform) {
+        matrixPlatform.joinUserToChannel(user.handle, channelId, channel.name).catch(err => {
+          console.error(`[Channel] Failed to join ${user.handle} to Matrix room for #${channelId}:`, err);
+        });
+      }
+
       res.writeHead(200);
       res.end(JSON.stringify({ ok: true, channel }));
       return;
@@ -5962,6 +6146,245 @@ const server = createServer(async (req, res) => {
         message: 'Account created successfully',
       }));
       return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/profile/:handle - Get user profile with interest profile
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/profile\/[^/]+$/)) {
+      const profileHandle = decodeURIComponent(url.pathname.split('/')[3]);
+      try {
+        const profileUser = await storage.getUser(profileHandle);
+        if (!profileUser) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: 'User not found' }));
+          return;
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify({
+          handle: profileUser.handle,
+          displayName: profileUser.displayName,
+          bio: profileUser.bio,
+          links: profileUser.links,
+          pronouns: profileUser.pronouns,
+          createdAt: profileUser.createdAt,
+          interestProfile: profileUser.interestProfile || null,
+        }));
+        return;
+      } catch (err: any) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/sparks - Get potential introductions for the authenticated user
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/sparks') {
+      const secretKey = url.searchParams.get('key');
+      if (!secretKey || !isValidSecretKey(secretKey)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'Valid key required' }));
+        return;
+      }
+
+      const sparksKeyHash = hashSecretKey(secretKey);
+      const sparksUser = await storage.getUserByKeyHash(sparksKeyHash);
+      if (!sparksUser?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Account required' }));
+        return;
+      }
+
+      try {
+        const { detectSparks } = await import('./intelligence/sparks.js');
+        const { getConnectionInfo } = await import('./intelligence/sparks.js');
+        const userEntries = await storage.getEntriesByHandle(sparksUser.handle, 5);
+        const sparks: any[] = [];
+
+        for (const entry of userEntries.slice(0, 3)) {
+          const candidates = await detectSparks(entry, storage);
+          for (const candidate of candidates.slice(0, 3)) {
+            const connInfo = await getConnectionInfo(sparksUser.handle, candidate.handle, getAllPlatforms(), storage);
+            sparks.push({
+              sourceHandle: sparksUser.handle,
+              targetHandle: candidate.handle,
+              overlapTopics: candidate.overlapTopics,
+              matchingEntries: candidate.matchingEntries.map(e => ({
+                id: e.id,
+                author: e.handle || e.pseudonym,
+                content: e.content.substring(0, 200),
+                timestamp: e.timestamp,
+              })),
+              sourceEntry: {
+                id: entry.id,
+                content: entry.content.substring(0, 200),
+                timestamp: entry.timestamp,
+              },
+              isConnected: connInfo.isConnected,
+              sharedRooms: connInfo.sharedRoomIds.length,
+            });
+          }
+        }
+
+        // Deduplicate by target handle
+        const seen = new Set<string>();
+        const uniqueSparks = sparks.filter(s => {
+          if (seen.has(s.targetHandle)) return false;
+          seen.add(s.targetHandle);
+          return true;
+        });
+
+        res.writeHead(200);
+        res.end(JSON.stringify({ sparks: uniqueSparks }));
+        return;
+      } catch (err: any) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: 'Spark detection failed', detail: err.message }));
+        return;
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/matrix/provision - Provision Matrix account from Hermes key
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/matrix/provision') {
+      const matrixServerUrl = process.env.MATRIX_SERVER_URL || 'http://localhost:8008';
+      const matrixServerName = process.env.MATRIX_SERVER_NAME || 'localhost';
+      const matrixRegistrationToken = process.env.MATRIX_REGISTRATION_TOKEN || 'router-dev-token';
+
+      const body = await readBody(req);
+      const { secret_key } = JSON.parse(body);
+
+      if (!isValidSecretKey(secret_key)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid identity key' }));
+        return;
+      }
+
+      const keyHash = hashSecretKey(secret_key);
+      const user = await storage.getUserByKeyHash(keyHash);
+
+      if (!user) {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'No Hermes account found for this key. Register first.' }));
+        return;
+      }
+
+      const matrixUsername = user.handle;
+      // Derive a deterministic password from the key so the same key always works
+      const crypto = await import('crypto');
+      const matrixPassword = crypto.createHmac('sha256', secret_key)
+        .update(`matrix:${matrixServerName}`)
+        .digest('base64url');
+
+      // Try logging in first (account may already exist)
+      try {
+        const loginResp = await fetch(`${matrixServerUrl}/_matrix/client/v3/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'm.login.password',
+            identifier: { type: 'm.id.user', user: matrixUsername },
+            password: matrixPassword,
+          }),
+        });
+
+        if (loginResp.ok) {
+          const loginData = await loginResp.json() as any;
+          res.writeHead(200);
+          res.end(JSON.stringify({
+            user_id: loginData.user_id,
+            access_token: loginData.access_token,
+            device_id: loginData.device_id,
+            homeserver_url: matrixServerUrl,
+            server_name: matrixServerName,
+          }));
+          return;
+        }
+      } catch (e) {
+        // Login failed, try registration below
+      }
+
+      // Account doesn't exist yet — register it
+      try {
+        // Step 1: initiate registration to get session
+        const initResp = await fetch(`${matrixServerUrl}/_matrix/client/v3/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: matrixUsername,
+            password: matrixPassword,
+          }),
+        });
+
+        const initData = await initResp.json() as any;
+        const session = initData.session;
+
+        if (!session) {
+          res.writeHead(502);
+          res.end(JSON.stringify({ error: 'Matrix server did not return a session' }));
+          return;
+        }
+
+        // Step 2: complete registration with token
+        const regResp = await fetch(`${matrixServerUrl}/_matrix/client/v3/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: matrixUsername,
+            password: matrixPassword,
+            auth: {
+              type: 'm.login.registration_token',
+              token: matrixRegistrationToken,
+              session,
+            },
+          }),
+        });
+
+        if (!regResp.ok) {
+          const errData = await regResp.json() as any;
+          res.writeHead(502);
+          res.end(JSON.stringify({
+            error: 'Matrix registration failed',
+            detail: errData.error || errData.errcode,
+          }));
+          return;
+        }
+
+        const regData = await regResp.json() as any;
+
+        // Always set display name to override Continuwuity's default
+        if (regData.access_token) {
+          try {
+            await fetch(`${matrixServerUrl}/_matrix/client/v3/profile/${regData.user_id}/displayname`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${regData.access_token}`,
+              },
+              body: JSON.stringify({ displayname: user.displayName || user.handle }),
+            });
+          } catch {
+            // Non-fatal
+          }
+        }
+
+        res.writeHead(201);
+        res.end(JSON.stringify({
+          user_id: regData.user_id,
+          access_token: regData.access_token,
+          device_id: regData.device_id,
+          homeserver_url: matrixServerUrl,
+          server_name: matrixServerName,
+        }));
+        return;
+      } catch (e: any) {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: 'Failed to connect to Matrix server', detail: e.message }));
+        return;
+      }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -7194,9 +7617,42 @@ async function seedDefaultChannels() {
   }
 }
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`Hermes server running on port ${PORT}`);
   seedDefaultChannels();
+
+  // ── Hook System ──────────────────────────────────────────
+  const dispatcher = getDispatcher();
+  dispatcher.setStorage(storage);
+  setDispatcher((event) => dispatcher.dispatch(event));
+  registerAgentHooks(dispatcher);
+  console.log('[Router] Hook system initialized');
+
+  // ── Matrix Platform ──────────────────────────────────────
+  const matrixServerUrl = process.env.MATRIX_SERVER_URL;
+  const matrixServerName = process.env.MATRIX_SERVER_NAME;
+  const matrixBotKey = process.env.MATRIX_BOT_SECRET_KEY;
+  const matrixBotHandle = process.env.MATRIX_BOT_HANDLE || 'router';
+
+  if (matrixServerUrl && matrixServerName && matrixBotKey) {
+    const matrixPlatform = new MatrixPlatform({
+      serverUrl: matrixServerUrl,
+      serverName: matrixServerName,
+      botSecretKey: matrixBotKey,
+      botHandle: matrixBotHandle,
+      registrationToken: process.env.MATRIX_REGISTRATION_TOKEN,
+    });
+    registerPlatform(matrixPlatform);
+    console.log('[Router] Matrix platform registered');
+  } else {
+    console.log('[Router] Matrix not configured (set MATRIX_SERVER_URL, MATRIX_SERVER_NAME, MATRIX_BOT_SECRET_KEY)');
+  }
+
+  // ── Start all platforms ──────────────────────────────────
+  await startAllPlatforms();
+
+  // ── Cron Jobs ────────────────────────────────────────────
+  startCronJobs(storage);
 
   // Telegram is handled by the Nous Hermes agent gateway.
   // No bot started here — the agent owns the bot token.
@@ -7231,9 +7687,12 @@ process.on('SIGTERM', () => {
     }
   }
 
-  server.close(() => {
-    console.log('[Shutdown] Server closed');
-    process.exit(0);
+  stopCronJobs();
+  stopAllPlatforms().finally(() => {
+    server.close(() => {
+      console.log('[Shutdown] Server closed');
+      process.exit(0);
+    });
   });
 
   // Force exit after 5 seconds if server doesn't close gracefully

@@ -17,13 +17,16 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@matrix-org/matrix-sdk-crypto-wasm": "^18.1.0",
     "@mendable/firecrawl-js": "^4.10.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@phala/dstack-sdk": "^0.5.7",
     "@sendgrid/mail": "^8.1.6",
     "dotenv": "^17.2.3",
+    "fake-indexeddb": "^6.2.5",
     "firebase-admin": "^13.6.0",
     "jsonwebtoken": "^9.0.3",
+    "matrix-js-sdk": "^41.4.0-rc.0",
     "resend": "^6.7.0",
     "telegraf": "^4.16.3"
   },

@@ -143,6 +143,19 @@ export interface User {
   lastDailyQuestionAt?: number;  // UTC timestamp of last daily question trigger, resets by calendar day
   /** The agent's living model of who this person is — updated incrementally as they write entries. */
   interestProfile?: InterestProfile;
+  /** Linked platform accounts — Matrix, Telegram, Discord, etc. */
+  linkedAccounts?: LinkedAccount[];
+}
+
+/**
+ * A linked platform account.
+ * Maps a Hermes identity to an identity on an external platform.
+ */
+export interface LinkedAccount {
+  platform: string;          // "matrix", "telegram", "discord", etc.
+  platformUserId: string;    // "@james:matrix.org", "123456789", etc.
+  linkedAt: number;          // When the link was created
+  verified?: boolean;        // Whether ownership has been verified
 }
 
 /**

@@ -6149,6 +6149,63 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // POST /api/identity/link-platform - Link a platform account to Hermes identity
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/identity/link-platform') {
+      const body = await readBody(req);
+      const { secret_key, platform, platform_user_id } = JSON.parse(body);
+
+      if (!isValidSecretKey(secret_key)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid identity key' }));
+        return;
+      }
+
+      if (!platform || !platform_user_id) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'platform and platform_user_id are required' }));
+        return;
+      }
+
+      const linkKeyHash = hashSecretKey(secret_key);
+      const linkUser = await storage.getUserByKeyHash(linkKeyHash);
+      if (!linkUser?.handle) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'Account required. Register a handle first.' }));
+        return;
+      }
+
+      // Add or update the linked account
+      const existingAccounts = linkUser.linkedAccounts || [];
+      const existingIndex = existingAccounts.findIndex(
+        a => a.platform === platform && a.platformUserId === platform_user_id
+      );
+
+      const newAccount = {
+        platform,
+        platformUserId: platform_user_id,
+        linkedAt: Date.now(),
+        verified: false,
+      };
+
+      if (existingIndex >= 0) {
+        existingAccounts[existingIndex] = newAccount;
+      } else {
+        existingAccounts.push(newAccount);
+      }
+
+      await storage.updateUser(linkUser.handle, { linkedAccounts: existingAccounts });
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        ok: true,
+        handle: linkUser.handle,
+        linkedAccounts: existingAccounts,
+      }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // GET /api/profile/:handle - Get user profile with interest profile
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname.match(/^\/api\/profile\/[^/]+$/)) {
@@ -6169,6 +6226,7 @@ const server = createServer(async (req, res) => {
           pronouns: profileUser.pronouns,
           createdAt: profileUser.createdAt,
           interestProfile: profileUser.interestProfile || null,
+          linkedAccounts: profileUser.linkedAccounts || [],
         }));
         return;
       } catch (err: any) {

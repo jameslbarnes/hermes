@@ -67,7 +67,8 @@ export interface Platform {
   // ── Identity ───────────────────────────────────────────────
   /** Given a platform-native user ID, return the Hermes handle (if known) */
   resolveHermesHandle(platformUserId: string): Promise<string | null>;
-  /** Given a Hermes handle, return the platform-native user ID (if known) */
+  /** Given a Hermes handle, return the platform-native user ID (if known).
+   *  Checks linkedAccounts in storage first, falls back to convention. */
   resolvePlatformId(hermesHandle: string): Promise<string | null>;
 
   // ── Formatting ─────────────────────────────────────────────

@@ -77,7 +77,7 @@ export class SASVerificationManager {
       return;
     }
 
-    if (request.phase === VerificationPhase.Requested && !request.accepting && request.methods.includes(SAS_METHOD)) {
+    if (request.phase === VerificationPhase.Requested && !request.accepting) {
       console.log(`[SAS/sdk] Accepting request ${request.transactionId || ''}`);
       await request.accept();
       return;

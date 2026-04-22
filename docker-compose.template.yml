@@ -19,6 +19,13 @@ services:
       - MODERATOR_API_KEY
       - SENDGRID_API_KEY
       - SENDGRID_FROM_EMAIL
+      # Matrix platform — agent connects to this homeserver to DM users,
+      # create rooms for introductions, and route notebook entries
+      - MATRIX_SERVER_URL
+      - MATRIX_SERVER_NAME
+      - MATRIX_BOT_SECRET_KEY
+      - MATRIX_BOT_HANDLE
+      - MATRIX_REGISTRATION_TOKEN
     volumes:
       - hermes-data:/data
     restart: unless-stopped

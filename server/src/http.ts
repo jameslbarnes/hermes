@@ -6301,6 +6301,15 @@ const server = createServer(async (req, res) => {
           res.end(JSON.stringify({ error: 'User not found' }));
           return;
         }
+
+        // Only return linkedAccounts if the requester IS this user (auth via ?key=)
+        const requesterKey = url.searchParams.get('key');
+        let isOwnProfile = false;
+        if (requesterKey && isValidSecretKey(requesterKey)) {
+          const requester = await storage.getUserByKeyHash(hashSecretKey(requesterKey));
+          isOwnProfile = requester?.handle === profileUser.handle;
+        }
+
         res.writeHead(200);
         res.end(JSON.stringify({
           handle: profileUser.handle,
@@ -6310,7 +6319,8 @@ const server = createServer(async (req, res) => {
           pronouns: profileUser.pronouns,
           createdAt: profileUser.createdAt,
           interestProfile: profileUser.interestProfile || null,
-          linkedAccounts: profileUser.linkedAccounts || [],
+          // linkedAccounts are private — only visible to the profile owner
+          ...(isOwnProfile ? { linkedAccounts: profileUser.linkedAccounts || [] } : {}),
         }));
         return;
       } catch (err: any) {

@@ -146,12 +146,28 @@ export class MatrixPlatform implements Platform {
 
     this.botUserId = userId;
 
-    // Create the MatrixClient with crypto support
+    // Crypto callbacks — getSecretStorageKey is called when SSSS needs to unlock
+    // a secret. We derive keys from the bot's Hermes secret key.
+    const stableSecret = this.config.botSecretKey;
+    const cryptoCallbacks: any = {
+      getSecretStorageKey: async ({ keys }: { keys: Record<string, any> }): Promise<[string, Uint8Array] | null> => {
+        const keyIds = Object.keys(keys);
+        if (keyIds.length === 0) return null;
+        // For bootstrap flow — the recovery key was created from stableSecret.
+        // Return the first key ID with a derived 32-byte key.
+        const raw = new TextEncoder().encode(`router-ssss-${stableSecret}`);
+        const hashed = new Uint8Array(32);
+        for (let i = 0; i < 32; i++) hashed[i] = raw[i % raw.length] ^ (i * 31);
+        return [keyIds[0], hashed];
+      },
+    };
+
     const clientOpts: ICreateClientOpts = {
       baseUrl: this.config.serverUrl,
       userId,
       deviceId,
       accessToken,
+      cryptoCallbacks,
     };
 
     this.client = createClient(clientOpts);
@@ -165,14 +181,6 @@ export class MatrixPlatform implements Platform {
         storagePassword: this.config.cryptoStorePassword || `${userId}:${deviceId}`,
       });
       console.log('[Matrix] Rust crypto initialized');
-
-      // Trust relaxation: accept messages from unverified devices
-      // This is critical — without it, Element sessions don't get Megolm keys
-      try {
-        (this.client as any).setGlobalErrorOnUnknownDevices(false);
-      } catch {
-        // Method may not exist in all SDK versions
-      }
     } catch (e: any) {
       console.warn('[Matrix] Crypto init failed, running without E2EE:', e.message);
     }
@@ -180,8 +188,15 @@ export class MatrixPlatform implements Platform {
     // Set up event listeners
     this.setupEventListeners();
 
-    // Start syncing
+    // Start syncing (must happen before cross-signing bootstrap so we can query our own keys)
     await this.client.startClient({ initialSyncLimit: 0 });
+
+    // Bootstrap cross-signing and secret storage — makes the bot a first-class
+    // Matrix citizen that Element clients trust like any other verified user.
+    // This is a one-time operation; subsequent startups find existing keys.
+    this.bootstrapCryptoIdentity(username, password).catch(err => {
+      console.warn('[Matrix] Cross-signing bootstrap failed (non-fatal):', err.message);
+    });
     console.log(`[Matrix] Authenticated as ${userId}, syncing...`);
 
     // Wait for first sync
@@ -479,7 +494,12 @@ export class MatrixPlatform implements Platform {
       const handleMatch = sender.match(/^@([^:]+):/);
       const handle = handleMatch ? handleMatch[1] : null;
 
-      const isMention = text.includes(`@${this.config.botHandle}`);
+      // Detect if this is a DM to the bot (2-member room, bot is a member)
+      const room = this.client!.getRoom(roomId);
+      const isDM = room ? room.getJoinedMemberCount() === 2 : false;
+
+      // Treat @mentions AND direct DMs as mentions (agent should respond)
+      const isMention = isDM || text.includes(`@${this.config.botHandle}`);
 
       // Check if this is a reply to a notebook entry
       const replyToEventId = content['m.relates_to']?.['m.in_reply_to']?.event_id;
@@ -499,6 +519,7 @@ export class MatrixPlatform implements Platform {
         sender_handle: handle,
         text,
         timestamp: event.getTs(),
+        is_dm: isDM,
       };
 
       if (replyToEntryId) {
@@ -535,6 +556,87 @@ export class MatrixPlatform implements Platform {
         console.error(`[Matrix] Failed to join room ${roomId}:`, err);
       }
     });
+  }
+
+  /**
+   * Bootstrap cross-signing and secret storage if not already set up.
+   * This makes the bot behave like any Element user — its device self-signs,
+   * other clients can verify it, and encrypted messages flow without special
+   * trust relaxation.
+   */
+  private async bootstrapCryptoIdentity(username: string, password: string): Promise<void> {
+    if (!this.client) return;
+    const crypto = this.client.getCrypto();
+    if (!crypto) {
+      console.warn('[Matrix] No crypto backend — skipping cross-signing bootstrap');
+      return;
+    }
+
+    // Check if cross-signing is already set up
+    try {
+      const isReady = await crypto.isCrossSigningReady();
+      if (isReady) {
+        console.log('[Matrix] Cross-signing already set up');
+        return;
+      }
+    } catch {
+      // Fall through to bootstrap
+    }
+
+    console.log('[Matrix] Bootstrapping cross-signing...');
+
+    // UIA callback — provides password for uploading device signing keys.
+    // matrix-js-sdk calls this with a function; we return auth data.
+    // First invocation: return null to get session; second: return password auth.
+    const authUploadDeviceSigningKeys = async (makeRequest: (authData: any) => Promise<any>): Promise<void> => {
+      try {
+        // First attempt — let the server tell us what auth is needed
+        await makeRequest(null);
+      } catch (err: any) {
+        // UIA: server returned 401 with session + flows
+        const data = err.data || err.httpStatus === 401 ? err.data : null;
+        if (data?.session) {
+          await makeRequest({
+            session: data.session,
+            type: 'm.login.password',
+            identifier: { type: 'm.id.user', user: username },
+            password,
+          });
+          return;
+        }
+        throw err;
+      }
+    };
+
+    try {
+      await crypto.bootstrapCrossSigning({
+        authUploadDeviceSigningKeys,
+      });
+      console.log('[Matrix] Cross-signing keys uploaded');
+    } catch (err: any) {
+      console.warn('[Matrix] Cross-signing bootstrap failed:', err.message);
+      return;
+    }
+
+    // Bootstrap secret storage (SSSS) with a recovery key derived from the bot's secret
+    try {
+      const isSecretStorageReady = await crypto.isSecretStorageReady();
+      if (!isSecretStorageReady) {
+        await crypto.bootstrapSecretStorage({
+          setupNewKeyBackup: true,
+          setupNewSecretStorage: true,
+          createSecretStorageKey: async () => {
+            // Derive a stable recovery key from the bot secret so it survives restarts
+            return await crypto.createRecoveryKeyFromPassphrase(
+              `router-ssss-${this.config.botSecretKey}`
+            );
+          },
+        });
+        console.log('[Matrix] Secret storage + key backup set up');
+      }
+    } catch (err: any) {
+      console.warn('[Matrix] Secret storage bootstrap failed:', err.message);
+    }
   }
 
   private markdownToHtml(text: string): string {

@@ -16,6 +16,7 @@ import { shouldRoute, evaluateEntry, type RecentPost } from '../intelligence/sco
 import { detectSparks, evaluateSpark, getConnectionInfo, executeSpark, type SparkAction } from '../intelligence/sparks.js';
 import { RoomBufferManager, type BufferedMessage } from '../intelligence/heat.js';
 import { updateInterestProfile, craftIntroduction } from '../intelligence/profiles.js';
+import { generateLinkToken } from '../intelligence/link-tokens.js';
 import { MatrixPlatform } from '../platform/matrix.js';
 
 // ── State ────────────────────────────────────────────────────
@@ -239,19 +240,54 @@ async function onPlatformMessage(ctx: HookContext): Promise<void> {
  */
 async function onPlatformMention(ctx: HookContext): Promise<void> {
   const { event, storage, platforms } = ctx;
-  const { platform: platformName, room_id, text, sender_handle, message_id } = event.data;
+  const { platform: platformName, room_id, text, sender_handle, sender_id, message_id, is_dm } = event.data;
 
   if (!text || !room_id) return;
 
   const platform = platforms.find(p => p.name === platformName);
   if (!platform) return;
 
-  console.log(`[Agent] Mentioned on ${platformName} by ${sender_handle || 'unknown'}: ${text.substring(0, 80)}...`);
+  console.log(`[Agent] ${is_dm ? 'DM' : 'Mention'} on ${platformName} by ${sender_id || 'unknown'}: ${text.substring(0, 80)}...`);
 
-  // Extract the query (remove @mentions)
-  const query = text.replace(/@\w+/g, '').trim();
+  // Extract the query (remove @mentions, slashes, etc.)
+  const query = text.replace(/@\w+/g, '').trim().toLowerCase();
+  const firstWord = query.split(/\s+/)[0];
+
+  // ── Link command ──────────────────────────────────────────
+  // User DMs "link" to get a code that ties their platform account
+  // to their Hermes identity (completed via MCP tool).
+  if ((firstWord === 'link' || firstWord === '/link') && sender_id) {
+    const code = generateLinkToken(platformName, sender_id);
+    const reply = [
+      `Your one-time link code: **${code}**`,
+      '',
+      `To finish linking, tell your Claude:`,
+      `"Link my ${platformName} account, code is ${code}"`,
+      '',
+      `(expires in 10 minutes)`,
+    ].join('\n');
+    await platform.sendMessage(room_id, reply, { replyTo: message_id });
+    console.log(`[Agent] Generated link code ${code} for ${sender_id}`);
+    return;
+  }
+
+  // ── Help command ──────────────────────────────────────────
+  if (firstWord === 'help' || firstWord === '/help') {
+    const helpText = [
+      `I'm the Router — I connect people and ideas from the notebook.`,
+      ``,
+      `Commands:`,
+      `• **link** — get a code to connect this ${platformName} account to your Hermes identity`,
+      `• **help** — show this message`,
+      ``,
+      `Or just ask me a question about the notebook and I'll search it.`,
+    ].join('\n');
+    await platform.sendMessage(room_id, helpText, { replyTo: message_id });
+    return;
+  }
+
   if (query.length < 3) {
-    await platform.sendMessage(room_id, "What would you like to know? I can search the notebook for entries, find connections between people, or help you explore topics.", {
+    await platform.sendMessage(room_id, "Say `help` for what I can do, or ask me anything about the notebook.", {
       replyTo: message_id,
     });
     return;

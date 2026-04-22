@@ -1,21 +1,26 @@
 /**
- * Raw SAS (m.sas.v1) verification over to-device events.
+ * Raw SAS (m.sas.v1) verification — hand-rolled over both to-device AND
+ * in-room flows.
  *
- * This is a port of Andrew Miller's sas_verification.py from
- * https://github.com/Account-Link/shape-rotator-matrix — his bot connects to
- * the same Continuwuity homeserver we're using, and he bypasses the SDK's
- * verification machinery entirely because it produces MACs that fail to
- * validate against this server. We hit the exact same m.mismatched_sas
- * failure through matrix-js-sdk's high-level SAS API, so we do the same:
- * drive the state machine by hand against raw to-device events, using
- * @matrix-org/olm for the SAS primitives.
+ * matrix-js-sdk's high-level VerificationRequest/Verifier API produces MACs
+ * that Continuwuity rejects (m.mismatched_sas). Andrew Miller hit the same
+ * wall and ported his own SAS driver in Python (shape-rotator-matrix,
+ * sas_verification.py). This TS port does the same, but handles both
+ * transports: Element picks in-room when there's an existing DM, to-device
+ * otherwise.
  *
- * The bot auto-accepts every incoming request and sends its MAC immediately
- * after receiving the other side's ephemeral key — no emoji confirmation,
- * no human in the loop. For a bot, trust-on-first-verify is correct.
+ * The bot auto-accepts every request and fires MAC immediately on receiving
+ * the peer's ephemeral key — trust-on-first-verify, correct for a bot.
  */
 import Olm from '@matrix-org/olm';
-import { ClientEvent, type MatrixClient, type MatrixEvent } from 'matrix-js-sdk';
+import {
+  ClientEvent,
+  RoomEvent,
+  EventType,
+  type MatrixClient,
+  type MatrixEvent,
+  type Room,
+} from 'matrix-js-sdk';
 import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import { createRequire } from 'module';
@@ -29,14 +34,10 @@ const SAS_TYPES = ['emoji', 'decimal'];
 let olmInitPromise: Promise<void> | null = null;
 async function ensureOlmInitialized(): Promise<void> {
   if (!olmInitPromise) {
-    // In Node we need to help Olm locate its wasm file. Resolve via the
-    // CommonJS require so we get the module path regardless of CWD.
     const require = createRequire(import.meta.url);
     const wasmPath = require.resolve('@matrix-org/olm/olm.wasm');
     olmInitPromise = Olm.init({
       locateFile: () => wasmPath,
-      // Some versions of @matrix-org/olm try to fetch() the wasm; provide
-      // the bytes directly to skip the fetch path entirely.
       wasmBinary: readFileSync(wasmPath),
     } as any);
   }
@@ -48,22 +49,25 @@ function canonicalJson(obj: any): string {
   const sortKeys = (v: any): any => {
     if (Array.isArray(v)) return v.map(sortKeys);
     if (v && typeof v === 'object') {
-      const sorted: Record<string, any> = {};
-      for (const k of Object.keys(v).sort()) {
-        sorted[k] = sortKeys(v[k]);
-      }
-      return sorted;
+      const out: Record<string, any> = {};
+      for (const k of Object.keys(v).sort()) out[k] = sortKeys(v[k]);
+      return out;
     }
     return v;
   };
   return JSON.stringify(sortKeys(obj));
 }
 
+type Flow =
+  | { kind: 'to-device' }
+  | { kind: 'in-room'; roomId: string; requestEventId: string };
+
 class SASSession {
   private sas: Olm.SAS;
   private cancelled = false;
 
   constructor(
+    private readonly flow: Flow,
     private readonly txnId: string,
     private readonly theirUser: string,
     private readonly theirDevice: string,
@@ -75,20 +79,33 @@ class SASSession {
     this.sas = new Olm.SAS();
   }
 
-  private async send(eventType: string, content: Record<string, any>): Promise<void> {
-    const deviceMap = new Map<string, Record<string, any>>();
-    deviceMap.set(this.theirDevice, content);
-    const contentMap = new Map<string, Map<string, Record<string, any>>>();
-    contentMap.set(this.theirUser, deviceMap);
-    await this.client.sendToDevice(eventType, contentMap);
+  /** Route an outgoing verification event over the right transport. */
+  private async send(eventType: string, rawContent: Record<string, any>): Promise<void> {
+    if (this.flow.kind === 'to-device') {
+      const content = { ...rawContent, transaction_id: this.txnId };
+      const deviceMap = new Map<string, Record<string, any>>();
+      deviceMap.set(this.theirDevice, content);
+      const contentMap = new Map<string, Map<string, Record<string, any>>>();
+      contentMap.set(this.theirUser, deviceMap);
+      await this.client.sendToDevice(eventType, contentMap);
+    } else {
+      // In-room: relate to the original request event, no transaction_id field.
+      const content = {
+        ...rawContent,
+        'm.relates_to': {
+          rel_type: 'm.reference',
+          event_id: this.flow.requestEventId,
+        },
+      };
+      await this.client.sendEvent(this.flow.roomId, eventType as any, content);
+    }
   }
 
   async handleRequest(): Promise<void> {
-    console.log(`[SAS] Request from ${this.theirUser}/${this.theirDevice} txn=${this.txnId}`);
+    console.log(`[SAS/${this.flow.kind}] Request from ${this.theirUser}/${this.theirDevice} txn=${this.txnId.slice(0, 16)}…`);
     await this.send('m.key.verification.ready', {
       from_device: this.ourDevice,
       methods: [SAS_METHOD],
-      transaction_id: this.txnId,
     });
   }
 
@@ -98,8 +115,12 @@ class SASSession {
       return;
     }
     const ourPubkey = this.sas.get_pubkey();
-    const { transaction_id: _, ...startCopy } = content;
-    // commitment = base64( sha256( pubkey_str + canonical_json(start_minus_txn) ) )
+
+    // Commitment hashes over the start event content. Strip transaction-
+    // identifying fields per spec (transaction_id for to-device, and we
+    // leave m.relates_to in for in-room since it's part of the content
+    // the other side hashes too).
+    const { transaction_id: _t, ...startCopy } = content;
     const commitmentInput = Buffer.concat([
       Buffer.from(ourPubkey, 'utf8'),
       Buffer.from(canonicalJson(startCopy), 'utf8'),
@@ -107,7 +128,6 @@ class SASSession {
     const commitment = createHash('sha256').update(commitmentInput).digest('base64');
 
     await this.send('m.key.verification.accept', {
-      transaction_id: this.txnId,
       method: SAS_METHOD,
       key_agreement_protocol: KEY_AGREEMENT,
       hash: HASH_METHOD,
@@ -120,21 +140,12 @@ class SASSession {
   async handleKey(content: any): Promise<void> {
     this.sas.set_their_key(content.key);
     await this.send('m.key.verification.key', {
-      transaction_id: this.txnId,
       key: this.sas.get_pubkey(),
     });
-    // Bot auto-confirms: immediately send MAC, no emoji step.
+    // Auto-confirm: send MAC immediately.
     await this.sendMac();
   }
 
-  /**
-   * Info strings for MAC, per Matrix SAS spec:
-   * sending:   "MATRIX_KEY_VERIFICATION_MAC" + our_user + our_device + their_user + their_device + txn + key_id
-   * receiving: "MATRIX_KEY_VERIFICATION_MAC" + their_user + their_device + our_user + our_device + txn + key_id
-   *
-   * The concat is bare, no separators. Getting the order wrong is the classic
-   * m.mismatched_sas cause.
-   */
   private macInfoSending(keyId: string): string {
     return 'MATRIX_KEY_VERIFICATION_MAC'
       + this.ourUser + this.ourDevice
@@ -150,21 +161,18 @@ class SASSession {
 
   private async sendMac(): Promise<void> {
     const keyId = `ed25519:${this.ourDevice}`;
-    // v2 MAC is calculate_mac_fixed_base64 in libolm (unpadded base64).
     const keyMac = this.sas.calculate_mac_fixed_base64(this.ourSigningKey, this.macInfoSending(keyId));
     const keysMac = this.sas.calculate_mac_fixed_base64(keyId, this.macInfoSending('KEY_IDS'));
     await this.send('m.key.verification.mac', {
-      transaction_id: this.txnId,
       mac: { [keyId]: keyMac },
       keys: keysMac,
     });
-    console.log(`[SAS] Sent MAC for ${this.ourUser}/${this.ourDevice}`);
+    console.log(`[SAS/${this.flow.kind}] Sent MAC for ${this.ourUser}/${this.ourDevice}`);
   }
 
   async handleMac(content: any): Promise<void> {
     const theirSigningKey = await this.fetchTheirSigningKey();
     if (!theirSigningKey) {
-      console.warn(`[SAS] Could not fetch signing key for ${this.theirUser}/${this.theirDevice}`);
       await this.cancel('m.key_mismatch');
       return;
     }
@@ -176,17 +184,16 @@ class SASSession {
     const keysMac = content.keys || '';
 
     if (mac[keyId] !== expectedKeyMac || keysMac !== expectedKeysMac) {
-      console.warn(`[SAS] MAC mismatch for ${this.theirUser}/${this.theirDevice}`);
-      console.warn(`[SAS]   got mac[${keyId}]=${mac[keyId]}`);
-      console.warn(`[SAS]   expected        =${expectedKeyMac}`);
-      console.warn(`[SAS]   got keys=${keysMac}`);
-      console.warn(`[SAS]   expected=${expectedKeysMac}`);
+      console.warn(`[SAS/${this.flow.kind}] MAC mismatch for ${this.theirUser}/${this.theirDevice}`);
+      console.warn(`[SAS]   got     mac[${keyId}]=${mac[keyId]}`);
+      console.warn(`[SAS]   expected             =${expectedKeyMac}`);
+      console.warn(`[SAS]   got     keys=${keysMac}`);
+      console.warn(`[SAS]   expected    =${expectedKeysMac}`);
       await this.cancel('m.key_mismatch');
       return;
     }
-
-    console.log(`[SAS] ✅ Verified device ${this.theirUser}/${this.theirDevice}`);
-    await this.send('m.key.verification.done', { transaction_id: this.txnId });
+    console.log(`[SAS/${this.flow.kind}] ✅ Verified device ${this.theirUser}/${this.theirDevice}`);
+    await this.send('m.key.verification.done', {});
   }
 
   private async fetchTheirSigningKey(): Promise<string | null> {
@@ -195,8 +202,7 @@ class SASSession {
     try {
       const devices = await crypto.getUserDeviceInfo([this.theirUser], true);
       const device = devices.get(this.theirUser)?.get(this.theirDevice);
-      if (!device) return null;
-      return device.getFingerprint() || null;
+      return device?.getFingerprint() || null;
     } catch (err: any) {
       console.warn(`[SAS] getUserDeviceInfo failed:`, err.message);
       return null;
@@ -207,11 +213,7 @@ class SASSession {
     if (this.cancelled) return;
     this.cancelled = true;
     try {
-      await this.send('m.key.verification.cancel', {
-        transaction_id: this.txnId,
-        code,
-        reason: reason || code,
-      });
+      await this.send('m.key.verification.cancel', { code, reason: reason || code });
     } catch (err: any) {
       console.warn(`[SAS] Cancel send failed:`, err.message);
     }
@@ -223,6 +225,7 @@ class SASSession {
 }
 
 export class SASVerificationManager {
+  // Keyed by transaction_id (to-device) OR request event_id (in-room).
   private sessions = new Map<string, SASSession>();
 
   private constructor(
@@ -232,29 +235,32 @@ export class SASVerificationManager {
     private readonly ourSigningKey: string,
   ) {}
 
-  /**
-   * Factory: initializes Olm, looks up the bot's ed25519 fingerprint, wires
-   * up the to-device event listener.
-   */
   static async create(client: MatrixClient): Promise<SASVerificationManager> {
     await ensureOlmInitialized();
 
     const ourUser = client.getUserId();
     const ourDevice = client.getDeviceId();
-    if (!ourUser || !ourDevice) {
-      throw new Error('MatrixClient not logged in — cannot init SAS manager');
-    }
+    if (!ourUser || !ourDevice) throw new Error('MatrixClient not logged in');
     const crypto = client.getCrypto();
-    if (!crypto) throw new Error('No crypto backend — cannot init SAS manager');
+    if (!crypto) throw new Error('No crypto backend');
     const ownKeys = await crypto.getOwnDeviceKeys();
     if (!ownKeys?.ed25519) throw new Error('Could not fetch own ed25519 key');
 
     const mgr = new SASVerificationManager(client, ourUser, ourDevice, ownKeys.ed25519);
+
+    // To-device flow (when there's no pre-existing DM).
     (client as any).on(ClientEvent.ToDeviceEvent, (event: MatrixEvent) => {
-      mgr.handleToDevice(event).catch(err => {
-        console.error('[SAS] Handler error:', err.message);
-      });
+      mgr.handleToDevice(event).catch(err =>
+        console.error('[SAS/to-device] Handler error:', err.message));
     });
+
+    // In-room flow (when Element has a DM open — this is the common case).
+    (client as any).on(RoomEvent.Timeline, (event: MatrixEvent, room: Room | undefined) => {
+      if (!room) return;
+      mgr.handleInRoom(event, room).catch(err =>
+        console.error('[SAS/in-room] Handler error:', err.message));
+    });
+
     console.log(`[SAS] Manager ready: user=${ourUser} device=${ourDevice} ed25519=${ownKeys.ed25519.slice(0, 12)}…`);
     return mgr;
   }
@@ -262,19 +268,17 @@ export class SASVerificationManager {
   private async handleToDevice(event: MatrixEvent): Promise<void> {
     const type = event.getType();
     if (!type.startsWith('m.key.verification.')) return;
-
     const content: any = event.getContent();
     const sender = event.getSender();
     const txnId: string | undefined = content.transaction_id;
     if (!txnId || !sender) return;
 
-    // Request creates the session; everything else expects one to exist.
     if (type === 'm.key.verification.request') {
       const theirDevice: string = content.from_device || '';
       if (!theirDevice) return;
-      // If a session already exists for this txn, reuse it (idempotent).
       if (!this.sessions.has(txnId)) {
         this.sessions.set(txnId, new SASSession(
+          { kind: 'to-device' },
           txnId, sender, theirDevice,
           this.ourUser, this.ourDevice, this.ourSigningKey,
           this.client,
@@ -285,11 +289,54 @@ export class SASVerificationManager {
     }
 
     const session = this.sessions.get(txnId);
-    if (!session) {
-      console.log(`[SAS] Unknown txn ${txnId}, ignoring ${type}`);
+    if (!session) return;
+    await this.routeSubsequent(type, content, session, txnId);
+  }
+
+  private async handleInRoom(event: MatrixEvent, room: Room): Promise<void> {
+    const sender = event.getSender();
+    if (!sender || sender === this.ourUser) return;
+
+    // In-room verification request is wrapped as m.room.message with a
+    // dedicated msgtype. Subsequent events carry their real verification
+    // type and reference the request event via m.relates_to.
+    const type = event.getType();
+    const content: any = event.getContent();
+
+    if (type === EventType.RoomMessage && content.msgtype === 'm.key.verification.request') {
+      const requestEventId = event.getId();
+      if (!requestEventId) return;
+      const theirDevice: string = content.from_device || '';
+      if (!theirDevice) return;
+      if (this.sessions.has(requestEventId)) return;
+      this.sessions.set(requestEventId, new SASSession(
+        { kind: 'in-room', roomId: room.roomId, requestEventId },
+        requestEventId, sender, theirDevice,
+        this.ourUser, this.ourDevice, this.ourSigningKey,
+        this.client,
+      ));
+      await this.sessions.get(requestEventId)!.handleRequest();
       return;
     }
 
+    if (!type.startsWith('m.key.verification.')) return;
+    const relatesTo = content['m.relates_to'];
+    const requestEventId: string | undefined = relatesTo?.event_id;
+    if (!requestEventId) return;
+    const session = this.sessions.get(requestEventId);
+    if (!session) {
+      console.log(`[SAS/in-room] Unknown request ${requestEventId.slice(0, 16)}…, ignoring ${type}`);
+      return;
+    }
+    await this.routeSubsequent(type, content, session, requestEventId);
+  }
+
+  private async routeSubsequent(
+    type: string,
+    content: any,
+    session: SASSession,
+    txnId: string,
+  ): Promise<void> {
     switch (type) {
       case 'm.key.verification.start':
         await session.handleStart(content);
@@ -303,15 +350,16 @@ export class SASVerificationManager {
         this.sessions.delete(txnId);
         break;
       case 'm.key.verification.cancel':
-        console.log(`[SAS] Cancelled by ${sender}: ${content.code || 'unknown'}`);
+        console.log(`[SAS] Cancelled: ${content.code || 'unknown'}`);
         session.free();
         this.sessions.delete(txnId);
         break;
       case 'm.key.verification.done':
-        // Both sides happy; clean up.
         session.free();
         this.sessions.delete(txnId);
         break;
+      // m.key.verification.ready / .accept come from the other side; we're the
+      // responder so we don't normally receive these, but ignore them safely.
     }
   }
 }

@@ -204,9 +204,15 @@ export class MatrixPlatform implements Platform {
     // landed, every restart created a new device. Element caches all of them
     // and gets confused during verification (MAC verification mismatch), which
     // shows up as m.mismatched_sas cancels.
-    this.cleanupOrphanDevices(userId, deviceId, accessToken, username, password).catch(err => {
+    //
+    // MUST complete before start() returns, otherwise clients verifying the
+    // bot right after boot will still see the ghost devices in their cached
+    // device list and SAS MAC validation will fail against phantoms.
+    try {
+      await this.cleanupOrphanDevices(userId, deviceId, accessToken, username, password);
+    } catch (err: any) {
       console.warn('[Matrix] Orphan device cleanup failed (non-fatal):', err.message);
-    });
+    }
 
     console.log(`[Matrix] Authenticated as ${userId}, syncing...`);
 
@@ -868,7 +874,7 @@ export class MatrixPlatform implements Platform {
         try {
           console.log(`[Matrix/Verify] Starting SAS for ${request.otherUserId}`);
           const verifier = await request.startVerification('m.sas.v1');
-          this.wireVerifier(verifier, request.otherUserId);
+          this.wireVerifier(verifier, request.otherUserId, /* weStarted */ true);
         } catch (err: any) {
           console.error(`[Matrix/Verify] startVerification failed:`, err.message);
           sasStarted = false;
@@ -879,7 +885,7 @@ export class MatrixPlatform implements Platform {
       // Phase Started → other side started, grab their verifier
       if (request.phase === VerificationPhase.Started && request.verifier) {
         sasStarted = true;
-        this.wireVerifier(request.verifier, request.otherUserId);
+        this.wireVerifier(request.verifier, request.otherUserId, /* weStarted */ false);
       }
     };
 
@@ -906,8 +912,13 @@ export class MatrixPlatform implements Platform {
 
   /**
    * Attach callbacks to a Verifier to auto-confirm SAS emojis.
+   *
+   * @param weStarted - true if we called request.startVerification() ourselves
+   *   (start event already sent). false if the other side started and we need
+   *   to send accept. Skips redundant verify() call in the "we started" case,
+   *   which was a no-op per rust-crypto but muddied the state machine.
    */
-  private wireVerifier(verifier: Verifier, otherUserId: string): void {
+  private wireVerifier(verifier: Verifier, otherUserId: string, weStarted: boolean): void {
     // If the verifier has already exposed SAS callbacks, confirm immediately
     const existing = verifier.getShowSasCallbacks();
     if (existing) {
@@ -922,10 +933,14 @@ export class MatrixPlatform implements Platform {
       console.log(`[Matrix/Verify] Verifier cancelled:`, e?.message || e);
     });
 
-    // Kick off verification from our side
-    verifier.verify().catch(err => {
-      console.error(`[Matrix/Verify] verify() failed:`, err.message);
-    });
+    // Only send m.key.verification.accept if the OTHER side started the flow.
+    // If we started (via request.startVerification), the start event is
+    // already sent and we're waiting for their accept + key exchange.
+    if (!weStarted) {
+      verifier.verify().catch(err => {
+        console.error(`[Matrix/Verify] verify() failed:`, err.message);
+      });
+    }
   }
 
   /**

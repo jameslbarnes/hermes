@@ -13,6 +13,8 @@
  */
 
 import { createHmac } from 'crypto';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
 import {
   createClient,
   type MatrixClient,
@@ -22,6 +24,7 @@ import {
   EventType,
   MsgType,
   RoomMemberEvent,
+  RoomEvent,
   ClientEvent,
   KnownMembership,
 } from 'matrix-js-sdk';
@@ -104,88 +107,34 @@ export class MatrixPlatform implements Platform {
 
     const username = this.config.botHandle;
 
-    // First, login or register to get credentials
+    // Credential persistence: without this, every restart calls /login and
+    // gets a fresh device_id, causing:
+    //  - a device graveyard on the server (one orphan per restart)
+    //  - Element verification requests getting targeted at dead devices
+    //  - the crypto snapshot becoming useless (wrong device context)
+    const credsPath = process.env.MATRIX_CREDS_PATH || '/data/matrix-credentials.json';
+
     let accessToken: string;
     let userId: string;
     let deviceId: string;
 
-    try {
-      // Try login
-      const loginResp = await fetch(`${this.config.serverUrl}/_matrix/client/v3/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'm.login.password',
-          identifier: { type: 'm.id.user', user: username },
-          password,
-        }),
-      });
-
-      if (loginResp.ok) {
-        const data = await loginResp.json() as any;
-        accessToken = data.access_token;
-        userId = data.user_id;
-        deviceId = data.device_id;
-      } else if (this.config.signupUrl && this.config.registrationToken) {
-        // Signup via wrapper API (e.g. Shape Rotator's /signup/api)
-        // The wrapper owns code lifecycle + auto-invites to spaces/rooms
-        const signupResp = await fetch(this.config.signupUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            code: this.config.registrationToken,
-            username,
-            password,
-          }),
-        });
-        const signupData = await signupResp.json() as any;
-        if (!signupResp.ok) {
-          throw new Error(`Signup wrapper failed: ${signupData.error || JSON.stringify(signupData)}`);
-        }
-        accessToken = signupData.access_token;
-        userId = signupData.user_id;
-        deviceId = signupData.device_id;
-      } else {
-        // Native Matrix registration
-        if (!this.config.registrationToken) {
-          throw new Error('Bot account does not exist and no registration token provided');
-        }
-
-        const initResp = await fetch(`${this.config.serverUrl}/_matrix/client/v3/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password }),
-        });
-        const initData = await initResp.json() as any;
-
-        const regResp = await fetch(`${this.config.serverUrl}/_matrix/client/v3/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            username, password,
-            auth: {
-              type: 'm.login.registration_token',
-              token: this.config.registrationToken,
-              session: initData.session,
-            },
-          }),
-        });
-        const regData = await regResp.json() as any;
-        if (!regResp.ok) throw new Error(`Registration failed: ${regData.error}`);
-
-        accessToken = regData.access_token;
-        userId = regData.user_id;
-        deviceId = regData.device_id;
-
-        // Set display name
-        await fetch(`${this.config.serverUrl}/_matrix/client/v3/profile/${userId}/displayname`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
-          body: JSON.stringify({ displayname: this.config.botHandle }),
-        }).catch(() => {});
+    const existingCreds = this.loadCredentials(credsPath);
+    if (existingCreds && await this.validateCredentials(existingCreds)) {
+      console.log(`[Matrix] Reusing persisted credentials, device=${existingCreds.device_id}`);
+      accessToken = existingCreds.access_token;
+      userId = existingCreds.user_id;
+      deviceId = existingCreds.device_id;
+    } else {
+      try {
+        const fresh = await this.obtainFreshCredentials(username, password);
+        accessToken = fresh.access_token;
+        userId = fresh.user_id;
+        deviceId = fresh.device_id;
+        this.saveCredentials(credsPath, fresh);
+        console.log(`[Matrix] Obtained fresh credentials, device=${deviceId}`);
+      } catch (e: any) {
+        throw new Error(`Matrix auth failed: ${e.message}`);
       }
-    } catch (e: any) {
-      throw new Error(`Matrix auth failed: ${e.message}`);
     }
 
     this.botUserId = userId;
@@ -274,6 +223,105 @@ export class MatrixPlatform implements Platform {
       this.client.stopClient();
       this.client = null;
     }
+  }
+
+  // ── Credential persistence ────────────────────────────────
+
+  private loadCredentials(path: string): { access_token: string; user_id: string; device_id: string } | null {
+    if (!existsSync(path)) return null;
+    try {
+      return JSON.parse(readFileSync(path, 'utf8'));
+    } catch {
+      return null;
+    }
+  }
+
+  private saveCredentials(path: string, creds: { access_token: string; user_id: string; device_id: string }): void {
+    const dir = dirname(path);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(path, JSON.stringify(creds), 'utf8');
+  }
+
+  /** Verify an access token is still valid by hitting /account/whoami. */
+  private async validateCredentials(creds: { access_token: string; user_id: string; device_id: string }): Promise<boolean> {
+    try {
+      const resp = await fetch(`${this.config.serverUrl}/_matrix/client/v3/account/whoami`, {
+        headers: { 'Authorization': `Bearer ${creds.access_token}` },
+      });
+      if (!resp.ok) return false;
+      const data = await resp.json() as any;
+      return data.user_id === creds.user_id && data.device_id === creds.device_id;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Run the login / signup / register flow to get fresh credentials. */
+  private async obtainFreshCredentials(username: string, password: string): Promise<{ access_token: string; user_id: string; device_id: string }> {
+    const loginResp = await fetch(`${this.config.serverUrl}/_matrix/client/v3/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'm.login.password',
+        identifier: { type: 'm.id.user', user: username },
+        password,
+      }),
+    });
+    if (loginResp.ok) {
+      const data = await loginResp.json() as any;
+      return { access_token: data.access_token, user_id: data.user_id, device_id: data.device_id };
+    }
+
+    if (this.config.signupUrl && this.config.registrationToken) {
+      const signupResp = await fetch(this.config.signupUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: this.config.registrationToken,
+          username,
+          password,
+        }),
+      });
+      const signupData = await signupResp.json() as any;
+      if (!signupResp.ok) {
+        throw new Error(`Signup wrapper failed: ${signupData.error || JSON.stringify(signupData)}`);
+      }
+      return { access_token: signupData.access_token, user_id: signupData.user_id, device_id: signupData.device_id };
+    }
+
+    if (!this.config.registrationToken) {
+      throw new Error('Bot account does not exist and no registration token provided');
+    }
+
+    const initResp = await fetch(`${this.config.serverUrl}/_matrix/client/v3/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const initData = await initResp.json() as any;
+
+    const regResp = await fetch(`${this.config.serverUrl}/_matrix/client/v3/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username, password,
+        auth: {
+          type: 'm.login.registration_token',
+          token: this.config.registrationToken,
+          session: initData.session,
+        },
+      }),
+    });
+    const regData = await regResp.json() as any;
+    if (!regResp.ok) throw new Error(`Registration failed: ${regData.error}`);
+
+    await fetch(`${this.config.serverUrl}/_matrix/client/v3/profile/${regData.user_id}/displayname`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${regData.access_token}` },
+      body: JSON.stringify({ displayname: this.config.botHandle }),
+    }).catch(() => {});
+
+    return { access_token: regData.access_token, user_id: regData.user_id, device_id: regData.device_id };
   }
 
   // ── Messaging ──────────────────────────────────────────────
@@ -637,55 +685,110 @@ export class MatrixPlatform implements Platform {
     if (!this.client) return;
     if (!this.client.getCrypto()) return;
 
-    // MatrixClient re-emits CryptoEvent.VerificationRequestReceived from the crypto impl
+    // Path 1: to-device m.key.verification.request — emitted by rust crypto
+    // when Element's user clicks "Verify" in the standard flow.
     (this.client as any).on(CryptoEvent.VerificationRequestReceived, async (request: VerificationRequest) => {
-      console.log(`[Matrix/Verify] Request from ${request.otherUserId}, phase=${VerificationPhase[request.phase]}`);
+      console.log(`[Matrix/Verify] to-device request from ${request.otherUserId}, phase=${VerificationPhase[request.phase]}`);
+      this.driveVerification(request);
+    });
 
-      // Listen for phase transitions BEFORE accepting — some transitions happen
-      // synchronously inside accept() and we'd miss them otherwise.
-      let sasStarted = false;
-      request.on(VerificationRequestEvent.Change, async () => {
-        console.log(`[Matrix/Verify] Phase change: ${VerificationPhase[request.phase]} (methods=${request.methods?.join(',') || 'none'})`);
+    // Path 2: in-room verification — Element can send m.key.verification.start
+    // directly into a DM room (especially when "Verify by emoji" is clicked).
+    // That doesn't fire VerificationRequestReceived, so we watch room timelines
+    // for any m.key.verification.* event and pull the live request via
+    // findVerificationRequestDMInProgress().
+    (this.client as any).on(RoomEvent.Timeline, async (event: MatrixEvent, room: Room | undefined) => {
+      if (!room) return;
+      const type = event.getType();
+      if (!type.startsWith('m.key.verification.')) {
+        // Also catch m.room.message with verification request msgtype
+        if (type !== EventType.RoomMessage) return;
+        const msgtype = event.getContent().msgtype;
+        if (msgtype !== 'm.key.verification.request') return;
+      }
+      const sender = event.getSender();
+      if (!sender || sender === this.botUserId) return;
 
-        // Once both sides have exchanged ready, proactively start SAS.
-        // The other side (Element) may wait for us to initiate — we're the
-        // one that was asked to verify, so push the flow forward.
-        if (request.phase === VerificationPhase.Ready && !sasStarted) {
-          sasStarted = true;
-          try {
-            console.log(`[Matrix/Verify] Starting SAS verification with ${request.otherUserId}`);
-            const verifier = await request.startVerification('m.sas.v1');
-            this.wireVerifier(verifier, request.otherUserId);
-          } catch (err: any) {
-            console.error(`[Matrix/Verify] startVerification failed:`, err.message);
+      const crypto = this.client!.getCrypto();
+      if (!crypto) return;
+
+      // Rust SDK needs a tick to process the event before the request is queryable.
+      setTimeout(async () => {
+        try {
+          const request = crypto.findVerificationRequestDMInProgress(room.roomId, sender);
+          if (!request) {
+            console.log(`[Matrix/Verify] No in-progress request for ${sender} in ${room.roomId} after ${type}`);
+            return;
           }
+          console.log(`[Matrix/Verify] in-room request from ${sender}, phase=${VerificationPhase[request.phase]}, trigger=${type}`);
+          this.driveVerification(request);
+        } catch (err: any) {
+          console.error(`[Matrix/Verify] findVerificationRequestDMInProgress failed:`, err.message);
         }
+      }, 100);
+    });
+  }
 
-        // If the other side started SAS first, wire the verifier from the request
-        if (request.phase === VerificationPhase.Started && request.verifier && !sasStarted) {
-          sasStarted = true;
-          this.wireVerifier(request.verifier, request.otherUserId);
-        }
+  /**
+   * Drive a VerificationRequest through to completion.
+   * Idempotent: safe to call multiple times for the same request.
+   */
+  private driveVerification(request: VerificationRequest): void {
+    const driven = (request as any).__routerDriven;
+    if (driven) return;
+    (request as any).__routerDriven = true;
 
-        if (request.phase === VerificationPhase.Done) {
-          console.log(`[Matrix/Verify] ✅ Verification with ${request.otherUserId} complete`);
-        }
-        if (request.phase === VerificationPhase.Cancelled) {
-          console.log(`[Matrix/Verify] ❌ Verification with ${request.otherUserId} cancelled: ${request.cancellationCode}`);
-        }
-      });
+    let sasStarted = false;
+    const maybeWire = async () => {
+      if (sasStarted) return;
 
-      // Accept the request (sends m.key.verification.ready → phase becomes Ready)
-      try {
-        if (request.phase === VerificationPhase.Requested) {
+      // Phase Requested → accept (sends ready)
+      if (request.phase === VerificationPhase.Requested) {
+        try {
           await request.accept();
-          console.log(`[Matrix/Verify] Accepted request from ${request.otherUserId}`);
+          console.log(`[Matrix/Verify] Accepted from ${request.otherUserId}`);
+        } catch (err: any) {
+          console.error(`[Matrix/Verify] Accept failed:`, err.message);
         }
-      } catch (err: any) {
-        console.error(`[Matrix/Verify] Accept failed:`, err.message);
         return;
       }
+
+      // Phase Ready → start SAS proactively
+      if (request.phase === VerificationPhase.Ready) {
+        sasStarted = true;
+        try {
+          console.log(`[Matrix/Verify] Starting SAS for ${request.otherUserId}`);
+          const verifier = await request.startVerification('m.sas.v1');
+          this.wireVerifier(verifier, request.otherUserId);
+        } catch (err: any) {
+          console.error(`[Matrix/Verify] startVerification failed:`, err.message);
+          sasStarted = false;
+        }
+        return;
+      }
+
+      // Phase Started → other side started, grab their verifier
+      if (request.phase === VerificationPhase.Started && request.verifier) {
+        sasStarted = true;
+        this.wireVerifier(request.verifier, request.otherUserId);
+      }
+    };
+
+    request.on(VerificationRequestEvent.Change, async () => {
+      console.log(`[Matrix/Verify] Phase change: ${VerificationPhase[request.phase]} (methods=${request.methods?.join(',') || 'none'})`);
+      if (request.phase === VerificationPhase.Done) {
+        console.log(`[Matrix/Verify] ✅ Verification with ${request.otherUserId} complete`);
+        return;
+      }
+      if (request.phase === VerificationPhase.Cancelled) {
+        console.log(`[Matrix/Verify] ❌ Verification with ${request.otherUserId} cancelled: ${request.cancellationCode}`);
+        return;
+      }
+      await maybeWire();
     });
+
+    // Immediate wire-up for requests that are already past Requested
+    maybeWire().catch(err => console.error(`[Matrix/Verify] initial wire failed:`, err.message));
   }
 
   /**

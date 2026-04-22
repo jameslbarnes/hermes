@@ -32,6 +32,12 @@ function getAnthropic(): Anthropic | null {
   return new Anthropic({ apiKey: key });
 }
 
+function matrixMentionsHandledByHermesAgent(): boolean {
+  const raw = process.env.HERMES_AGENT_HANDLES_MATRIX;
+  if (!raw) return false;
+  return ['1', 'true', 'yes', 'remote'].includes(raw.trim().toLowerCase());
+}
+
 // ── Registration ─────────────────────────────────────────────
 
 /**
@@ -286,6 +292,16 @@ async function onPlatformMention(ctx: HookContext): Promise<void> {
       `Or just ask me a question about the notebook and I'll search it.`,
     ].join('\n');
     await platform.sendMessage(room_id, helpText, { replyTo: message_id });
+    return;
+  }
+
+  // Matrix DMs/@mentions should be handled by the external Hermes agent
+  // when that path is enabled. Keep link/help local, but otherwise let the
+  // event queue be the handoff boundary.
+  if (platformName === 'matrix' && matrixMentionsHandledByHermesAgent()) {
+    console.log(
+      `[Agent] Deferring Matrix ${is_dm ? 'DM' : 'mention'} in ${room_id} to hermes-agent`,
+    );
     return;
   }
 

@@ -19,6 +19,9 @@ services:
       - MODERATOR_API_KEY
       - SENDGRID_API_KEY
       - SENDGRID_FROM_EMAIL
+      # Route Matrix DMs/@mentions through the external hermes-agent instead
+      # of the legacy inline server-side mention handler.
+      - HERMES_AGENT_HANDLES_MATRIX=1
       # Matrix platform — agent connects to this homeserver to DM users,
       # create rooms for introductions, and route notebook entries
       - MATRIX_SERVER_URL

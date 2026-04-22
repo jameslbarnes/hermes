@@ -17,6 +17,7 @@ services:
       - ANTHROPIC_API_KEY
       - SENDGRID_API_KEY
       - SENDGRID_FROM_EMAIL
+      - HERMES_AGENT_HANDLES_MATRIX=1
     volumes:
       - hermes-data:/data
     restart: unless-stopped

@@ -45,6 +45,9 @@ export interface MatrixPlatformConfig {
   botSecretKey: string;
   botHandle: string;
   registrationToken?: string;
+  /** Signup wrapper URL (e.g. Shape Rotator's /signup/api). If set, registration
+   *  uses this wrapper instead of the native Matrix registration endpoint. */
+  signupUrl?: string;
   cryptoStoreName?: string;
   cryptoStorePassword?: string;
   baseUrl?: string;
@@ -101,8 +104,27 @@ export class MatrixPlatform implements Platform {
         accessToken = data.access_token;
         userId = data.user_id;
         deviceId = data.device_id;
+      } else if (this.config.signupUrl && this.config.registrationToken) {
+        // Signup via wrapper API (e.g. Shape Rotator's /signup/api)
+        // The wrapper owns code lifecycle + auto-invites to spaces/rooms
+        const signupResp = await fetch(this.config.signupUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: this.config.registrationToken,
+            username,
+            password,
+          }),
+        });
+        const signupData = await signupResp.json() as any;
+        if (!signupResp.ok) {
+          throw new Error(`Signup wrapper failed: ${signupData.error || JSON.stringify(signupData)}`);
+        }
+        accessToken = signupData.access_token;
+        userId = signupData.user_id;
+        deviceId = signupData.device_id;
       } else {
-        // Register
+        // Native Matrix registration
         if (!this.config.registrationToken) {
           throw new Error('Bot account does not exist and no registration token provided');
         }

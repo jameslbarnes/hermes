@@ -7793,6 +7793,8 @@ server.listen(PORT, async () => {
       botSecretKey: matrixBotKey,
       botHandle: matrixBotHandle,
       registrationToken: process.env.MATRIX_REGISTRATION_TOKEN,
+      signupUrl: process.env.MATRIX_SIGNUP_URL,
+      baseUrl: process.env.BASE_URL,
     });
     registerPlatform(matrixPlatform);
     console.log('[Router] Matrix platform registered');

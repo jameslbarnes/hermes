@@ -26,6 +26,7 @@ services:
       - MATRIX_BOT_SECRET_KEY
       - MATRIX_BOT_HANDLE
       - MATRIX_REGISTRATION_TOKEN
+      - MATRIX_SIGNUP_URL
     volumes:
       - hermes-data:/data
     restart: unless-stopped

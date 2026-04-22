@@ -21,6 +21,7 @@ import {
   type ICreateClientOpts,
   type Room,
   type MatrixEvent,
+  MatrixEventEvent,
   EventType,
   MsgType,
   RoomMemberEvent,
@@ -78,6 +79,7 @@ export class MatrixPlatform implements Platform {
   private config: MatrixPlatformConfig;
   private channelRooms = new Map<string, string>();
   private entryEventMap = new Map<string, string>();
+  private processedMessageEvents = new Set<string>();
 
   constructor(config: MatrixPlatformConfig) {
     this.config = config;
@@ -729,57 +731,17 @@ export class MatrixPlatform implements Platform {
   private setupEventListeners(): void {
     if (!this.client) return;
 
-    // Handle incoming messages
+    // Handle incoming messages immediately when they are already decrypted.
     this.client.on(ClientEvent.Event, (event: MatrixEvent) => {
-      if (event.getType() !== EventType.RoomMessage) return;
-      if (event.getSender() === this.botUserId) return;
-      if (!event.getRoomId()) return;
+      this.handleIncomingMessageEvent(event);
+    });
 
-      const content = event.getContent();
-      const text = content.body || '';
-      const sender = event.getSender()!;
-      const roomId = event.getRoomId()!;
-
-      // Resolve handle from Matrix user ID
-      const handleMatch = sender.match(/^@([^:]+):/);
-      const handle = handleMatch ? handleMatch[1] : null;
-
-      // Detect if this is a DM to the bot (2-member room, bot is a member)
-      const room = this.client!.getRoom(roomId);
-      const isDM = room ? room.getJoinedMemberCount() === 2 : false;
-
-      // Treat @mentions AND direct DMs as mentions (agent should respond)
-      const isMention = isDM || text.includes(`@${this.config.botHandle}`);
-
-      // Check if this is a reply to a notebook entry
-      const replyToEventId = content['m.relates_to']?.['m.in_reply_to']?.event_id;
-      const replyToEntryId = replyToEventId ? this.entryEventMap.get(replyToEventId) : undefined;
-
-      // Check if the message itself contains entry data (reply to entry card)
-      const isEntryMessage = content.entry_id != null;
-      if (isEntryMessage) {
-        this.entryEventMap.set(event.getId()!, content.entry_id);
-      }
-
-      const eventData: Record<string, any> = {
-        platform: 'matrix',
-        room_id: roomId,
-        message_id: event.getId(),
-        sender_id: sender,
-        sender_handle: handle,
-        text,
-        timestamp: event.getTs(),
-        is_dm: isDM,
-      };
-
-      if (replyToEntryId) {
-        eventData.reply_to_entry_id = replyToEntryId;
-      }
-
-      pushEvent(
-        isMention ? 'platform_mention' : 'platform_message',
-        eventData,
-      );
+    // Also handle events that arrive encrypted and decrypt later once the room
+    // key shows up. Without this, the first command after a fresh device reset
+    // can be missed.
+    this.client.on(MatrixEventEvent.Decrypted, (event: MatrixEvent, err?: Error) => {
+      if (err) return;
+      this.handleIncomingMessageEvent(event);
     });
 
     // Auto-join on invite
@@ -810,6 +772,69 @@ export class MatrixPlatform implements Platform {
         console.error(`[Matrix] Failed to join room ${roomId}:`, err);
       }
     });
+  }
+
+  private handleIncomingMessageEvent(event: MatrixEvent): void {
+    if (!this.client) return;
+    if (event.getType() !== EventType.RoomMessage) return;
+    if (event.getSender() === this.botUserId) return;
+    if (!event.getRoomId()) return;
+
+    const eventId = event.getId();
+    if (eventId && this.processedMessageEvents.has(eventId)) return;
+
+    const content = event.getContent();
+    const text = content.body || '';
+    const sender = event.getSender()!;
+    const roomId = event.getRoomId()!;
+
+    // Resolve handle from Matrix user ID
+    const handleMatch = sender.match(/^@([^:]+):/);
+    const handle = handleMatch ? handleMatch[1] : null;
+
+    // Detect if this is a DM to the bot (2-member room, bot is a member)
+    const room = this.client.getRoom(roomId);
+    const isDM = room ? room.getJoinedMemberCount() === 2 : false;
+
+    // Treat @mentions AND direct DMs as mentions (agent should respond)
+    const isMention = isDM || text.includes(`@${this.config.botHandle}`);
+
+    // Check if this is a reply to a notebook entry
+    const replyToEventId = content['m.relates_to']?.['m.in_reply_to']?.event_id;
+    const replyToEntryId = replyToEventId ? this.entryEventMap.get(replyToEventId) : undefined;
+
+    // Check if the message itself contains entry data (reply to entry card)
+    const isEntryMessage = content.entry_id != null;
+    if (isEntryMessage && eventId) {
+      this.entryEventMap.set(eventId, content.entry_id);
+    }
+
+    if (eventId) {
+      this.processedMessageEvents.add(eventId);
+      if (this.processedMessageEvents.size > 10000) {
+        this.processedMessageEvents.clear();
+      }
+    }
+
+    const eventData: Record<string, any> = {
+      platform: 'matrix',
+      room_id: roomId,
+      message_id: eventId,
+      sender_id: sender,
+      sender_handle: handle,
+      text,
+      timestamp: event.getTs(),
+      is_dm: isDM,
+    };
+
+    if (replyToEntryId) {
+      eventData.reply_to_entry_id = replyToEntryId;
+    }
+
+    pushEvent(
+      isMention ? 'platform_mention' : 'platform_message',
+      eventData,
+    );
   }
 
   /**

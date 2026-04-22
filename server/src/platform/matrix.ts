@@ -198,6 +198,15 @@ export class MatrixPlatform implements Platform {
     this.bootstrapCryptoIdentity(username, password).catch(err => {
       console.warn('[Matrix] Cross-signing bootstrap failed (non-fatal):', err.message);
     });
+
+    // Delete orphan devices from prior restarts — before credential persistence
+    // landed, every restart created a new device. Element caches all of them
+    // and gets confused during verification (MAC verification mismatch), which
+    // shows up as m.mismatched_sas cancels.
+    this.cleanupOrphanDevices(userId, deviceId, accessToken, username, password).catch(err => {
+      console.warn('[Matrix] Orphan device cleanup failed (non-fatal):', err.message);
+    });
+
     console.log(`[Matrix] Authenticated as ${userId}, syncing...`);
 
     // Wait for first sync
@@ -322,6 +331,75 @@ export class MatrixPlatform implements Platform {
     }).catch(() => {});
 
     return { access_token: regData.access_token, user_id: regData.user_id, device_id: regData.device_id };
+  }
+
+  /**
+   * Delete all the bot's devices except the currently-active one.
+   *
+   * Uses POST /delete_devices with UIA password auth in a single call so the
+   * server only charges one round-trip for the UIA dance.
+   */
+  private async cleanupOrphanDevices(
+    userId: string,
+    currentDeviceId: string,
+    accessToken: string,
+    username: string,
+    password: string,
+  ): Promise<void> {
+    const listResp = await fetch(`${this.config.serverUrl}/_matrix/client/v3/devices`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (!listResp.ok) {
+      console.warn(`[Matrix] /devices list failed: ${listResp.status}`);
+      return;
+    }
+    const listData = await listResp.json() as any;
+    const orphanIds: string[] = (listData.devices || [])
+      .map((d: any) => d.device_id)
+      .filter((id: string) => id && id !== currentDeviceId);
+
+    if (orphanIds.length === 0) {
+      console.log('[Matrix] No orphan devices to clean up');
+      return;
+    }
+    console.log(`[Matrix] Cleaning up ${orphanIds.length} orphan devices: ${orphanIds.join(',')}`);
+
+    // Step 1: probe for UIA session
+    const probe = await fetch(`${this.config.serverUrl}/_matrix/client/v3/delete_devices`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+      body: JSON.stringify({ devices: orphanIds }),
+    });
+    if (probe.ok) {
+      console.log('[Matrix] Orphan devices deleted (no UIA required)');
+      return;
+    }
+    const probeData = await probe.json() as any;
+    if (probe.status !== 401 || !probeData.session) {
+      console.warn(`[Matrix] /delete_devices unexpected response: ${probe.status} ${JSON.stringify(probeData)}`);
+      return;
+    }
+
+    // Step 2: complete UIA with password
+    const doDelete = await fetch(`${this.config.serverUrl}/_matrix/client/v3/delete_devices`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        devices: orphanIds,
+        auth: {
+          type: 'm.login.password',
+          identifier: { type: 'm.id.user', user: username },
+          password,
+          session: probeData.session,
+        },
+      }),
+    });
+    if (doDelete.ok) {
+      console.log(`[Matrix] Deleted ${orphanIds.length} orphan devices`);
+    } else {
+      const errData = await doDelete.text();
+      console.warn(`[Matrix] /delete_devices UIA step failed: ${doDelete.status} ${errData}`);
+    }
   }
 
   // ── Messaging ──────────────────────────────────────────────
@@ -751,11 +829,16 @@ export class MatrixPlatform implements Platform {
     (request as any).__routerDriven = true;
 
     let sasStarted = false;
+    let accepting = false;
     const maybeWire = async () => {
       if (sasStarted) return;
 
-      // Phase Requested → accept (sends ready)
+      // Phase Requested → accept (sends ready). Guard against concurrent
+      // accept calls: the Change listener can fire while the initial
+      // maybeWire() is still awaiting request.accept().
       if (request.phase === VerificationPhase.Requested) {
+        if (accepting) return;
+        accepting = true;
         try {
           await request.accept();
           console.log(`[Matrix/Verify] Accepted from ${request.otherUserId}`);

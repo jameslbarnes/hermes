@@ -161,8 +161,23 @@ class SASSession {
 
   private async sendMac(): Promise<void> {
     const keyId = `ed25519:${this.ourDevice}`;
-    const keyMac = this.sas.calculate_mac_fixed_base64(this.ourSigningKey, this.macInfoSending(keyId));
-    const keysMac = this.sas.calculate_mac_fixed_base64(keyId, this.macInfoSending('KEY_IDS'));
+    const keyInfo = this.macInfoSending(keyId);
+    const keysInfo = this.macInfoSending('KEY_IDS');
+    const keyMac = this.sas.calculate_mac_fixed_base64(this.ourSigningKey, keyInfo);
+    const keysMac = this.sas.calculate_mac_fixed_base64(keyId, keysInfo);
+
+    // Diagnostic: dump everything needed to reproduce the MAC calculation.
+    // If Element still rejects with m.mismatched_sas we can compare these
+    // exact bytes against what rust-crypto computes on the other side.
+    console.log(`[SAS/debug] txnId=${this.txnId}`);
+    console.log(`[SAS/debug] ourUser=${this.ourUser} ourDevice=${this.ourDevice}`);
+    console.log(`[SAS/debug] theirUser=${this.theirUser} theirDevice=${this.theirDevice}`);
+    console.log(`[SAS/debug] ourSigningKey=${this.ourSigningKey}`);
+    console.log(`[SAS/debug] keyInfo=${keyInfo}`);
+    console.log(`[SAS/debug] keyMac=${keyMac}`);
+    console.log(`[SAS/debug] keysInfo=${keysInfo}`);
+    console.log(`[SAS/debug] keysMac=${keysMac}`);
+
     await this.send('m.key.verification.mac', {
       mac: { [keyId]: keyMac },
       keys: keysMac,

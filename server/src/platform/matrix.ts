@@ -712,20 +712,32 @@ export class MatrixPlatform implements Platform {
       const crypto = this.client!.getCrypto();
       if (!crypto) return;
 
-      // Rust SDK needs a tick to process the event before the request is queryable.
-      setTimeout(async () => {
+      // Rust SDK needs a tick to process the event before the request is
+      // queryable. Retry a few times because the gap between sync delivery
+      // and olm machine ingestion is variable.
+      const tryFind = (remainingTries: number): void => {
         try {
           const request = crypto.findVerificationRequestDMInProgress(room.roomId, sender);
-          if (!request) {
-            console.log(`[Matrix/Verify] No in-progress request for ${sender} in ${room.roomId} after ${type}`);
+          if (request) {
+            console.log(`[Matrix/Verify] in-room request from ${sender}, phase=${VerificationPhase[request.phase]}, trigger=${type}`);
+            this.driveVerification(request);
             return;
           }
-          console.log(`[Matrix/Verify] in-room request from ${sender}, phase=${VerificationPhase[request.phase]}, trigger=${type}`);
-          this.driveVerification(request);
         } catch (err: any) {
           console.error(`[Matrix/Verify] findVerificationRequestDMInProgress failed:`, err.message);
+          return;
         }
-      }, 100);
+        if (remainingTries <= 0) {
+          const toDevice = crypto.getVerificationRequestsToDeviceInProgress(sender);
+          console.log(`[Matrix/Verify] No request found for ${sender} in ${room.roomId} after ${type}; ` +
+            `to-device in progress: ${toDevice.length}` +
+            (toDevice.length > 0 ? ` [${toDevice.map(r => VerificationPhase[r.phase]).join(',')}]` : '') +
+            ` — user should cancel in Element and start a fresh Verify`);
+          return;
+        }
+        setTimeout(() => tryFind(remainingTries - 1), 300);
+      };
+      tryFind(5);
     });
   }
 

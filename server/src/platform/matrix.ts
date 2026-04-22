@@ -92,22 +92,38 @@ export class MatrixPlatform implements Platform {
     const snapshotPath = process.env.MATRIX_CRYPTO_SNAPSHOT_PATH || '/data/matrix-crypto-snapshot.json';
 
     // Escape hatch: MATRIX_FRESH_CRYPTO=1 wipes the snapshot + credentials at
-    // boot. We lose Megolm history but get deterministic crypto state matching
-    // the current device_id. Use when the persisted store has drifted from the
+    // every boot. MATRIX_FRESH_CRYPTO=once does it exactly once and records a
+    // marker in /data. Use when the local crypto store has drifted from the
     // server's view (symptom: persistent m.mismatched_sas / MAC validation
     // failures even with a clean device list).
-    if (process.env.MATRIX_FRESH_CRYPTO === '1') {
+    const freshCryptoMode = process.env.MATRIX_FRESH_CRYPTO;
+    if (freshCryptoMode === '1' || freshCryptoMode === 'once') {
       const credsPath = process.env.MATRIX_CREDS_PATH || '/data/matrix-credentials.json';
-      for (const p of [snapshotPath, credsPath]) {
-        if (existsSync(p)) {
-          try {
-            const { unlinkSync } = await import('fs');
-            unlinkSync(p);
-            console.log(`[Matrix] MATRIX_FRESH_CRYPTO=1 — deleted ${p}`);
-          } catch (err: any) {
-            console.warn(`[Matrix] Failed to delete ${p}:`, err.message);
+      const onceMarkerPath = process.env.MATRIX_FRESH_CRYPTO_ONCE_MARKER
+        || `${dirname(snapshotPath)}/matrix-fresh-crypto.once`;
+      const shouldReset = freshCryptoMode === '1' || !existsSync(onceMarkerPath);
+
+      if (shouldReset) {
+        for (const p of [snapshotPath, credsPath]) {
+          if (existsSync(p)) {
+            try {
+              const { unlinkSync } = await import('fs');
+              unlinkSync(p);
+              console.log(`[Matrix] MATRIX_FRESH_CRYPTO=${freshCryptoMode} deleted ${p}`);
+            } catch (err: any) {
+              console.warn(`[Matrix] Failed to delete ${p}:`, err.message);
+            }
           }
         }
+
+        if (freshCryptoMode === 'once') {
+          const dir = dirname(onceMarkerPath);
+          if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+          writeFileSync(onceMarkerPath, JSON.stringify({ reset_at: new Date().toISOString() }), 'utf8');
+          console.log(`[Matrix] MATRIX_FRESH_CRYPTO=once marker written: ${onceMarkerPath}`);
+        }
+      } else {
+        console.log(`[Matrix] MATRIX_FRESH_CRYPTO=once already consumed: ${onceMarkerPath}`);
       }
     }
 

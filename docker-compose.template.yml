@@ -27,9 +27,9 @@ services:
       - MATRIX_BOT_HANDLE
       - MATRIX_REGISTRATION_TOKEN
       - MATRIX_SIGNUP_URL
-      # Set to 1 once to wipe persisted credentials + crypto snapshot and
-      # start fresh. Remove after verifying / one successful boot.
-      - MATRIX_FRESH_CRYPTO
+      # One-shot recovery: rotate the Matrix device once if stale device keys
+      # are causing SAS MAC mismatches. The app records a marker in /data.
+      - MATRIX_FRESH_CRYPTO=once
     volumes:
       - hermes-data:/data
     restart: unless-stopped

@@ -46,6 +46,13 @@ import { pushEvent } from '../events.js';
 
 // Polyfill IndexedDB for Node.js (required by matrix-sdk-crypto-wasm)
 import 'fake-indexeddb/auto';
+import {
+  restoreCryptoStore,
+  applyCryptoSnapshot,
+  startPersisting,
+  flushCryptoStore,
+  stopPersisting,
+} from './crypto-store-persist.js';
 
 export interface MatrixPlatformConfig {
   serverUrl: string;
@@ -84,6 +91,12 @@ export class MatrixPlatform implements Platform {
   // ── Lifecycle ──────────────────────────────────────────────
 
   async start(): Promise<void> {
+    // Load any persisted crypto snapshot BEFORE initializing Rust crypto.
+    // This restores device keys, cross-signing, Olm/Megolm sessions across
+    // restarts — without this, every deploy wipes the bot's identity.
+    const snapshotPath = process.env.MATRIX_CRYPTO_SNAPSHOT_PATH || '/data/matrix-crypto-snapshot.json';
+    await restoreCryptoStore({ filePath: snapshotPath });
+
     const password = createHmac('sha256', this.config.botSecretKey)
       .update(`matrix:${this.config.serverName}`)
       .digest('base64url');
@@ -211,6 +224,13 @@ export class MatrixPlatform implements Platform {
         storagePassword: this.config.cryptoStorePassword || `${userId}:${deviceId}`,
       });
       console.log('[Matrix] Rust crypto initialized');
+
+      // Apply the persisted snapshot into the just-created IndexedDB stores.
+      // This restores device keys, Olm sessions, Megolm keys, cross-signing, etc.
+      await applyCryptoSnapshot();
+
+      // Start periodic persistence so state survives the next restart
+      startPersisting({ filePath: snapshotPath, flushIntervalMs: 30_000 });
     } catch (e: any) {
       console.warn('[Matrix] Crypto init failed, running without E2EE:', e.message);
     }
@@ -242,6 +262,13 @@ export class MatrixPlatform implements Platform {
   }
 
   async stop(): Promise<void> {
+    // Flush crypto state to disk before shutting down
+    try {
+      stopPersisting();
+      await flushCryptoStore();
+    } catch (err: any) {
+      console.warn('[Matrix] Final crypto flush failed:', err.message);
+    }
     if (this.client) {
       this.client.stopClient();
       this.client = null;
@@ -703,6 +730,20 @@ export class MatrixPlatform implements Platform {
       // Fall through to bootstrap
     }
 
+    // Wait for /keys/query to settle so the bot's public cross-signing identity
+    // is in the local crypto store. Without this, importing private keys from
+    // SSSS fails with "No public identity found while importing cross-signing keys".
+    console.log('[Matrix] Waiting for /keys/query to populate local identity cache...');
+    try {
+      const userId = this.client.getUserId()!;
+      // downloadUncached: true forces a /keys/query and waits for the response.
+      await crypto.getUserDeviceInfo([userId], true);
+      // Give the store a beat to finish processing
+      await new Promise(r => setTimeout(r, 500));
+    } catch (err: any) {
+      console.warn('[Matrix] getUserDeviceInfo failed (continuing anyway):', err.message);
+    }
+
     console.log('[Matrix] Bootstrapping cross-signing...');
 
     // UIA callback — provides password for uploading device signing keys.
@@ -728,15 +769,28 @@ export class MatrixPlatform implements Platform {
       }
     };
 
-    try {
-      await crypto.bootstrapCrossSigning({
-        authUploadDeviceSigningKeys,
-      });
-      console.log('[Matrix] Cross-signing keys uploaded');
-    } catch (err: any) {
-      console.warn('[Matrix] Cross-signing bootstrap failed:', err.message);
-      return;
+    // Try up to 3 times — the first attempt often races with /keys/query
+    // when restoring from SSSS.
+    let lastErr: any = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await crypto.bootstrapCrossSigning({ authUploadDeviceSigningKeys });
+        console.log('[Matrix] Cross-signing keys uploaded');
+        lastErr = null;
+        break;
+      } catch (err: any) {
+        lastErr = err;
+        console.warn(`[Matrix] Cross-signing bootstrap attempt ${attempt}/3 failed:`, err.message);
+        if (attempt < 3) {
+          // Force another keys/query and wait before retrying
+          try {
+            await crypto.getUserDeviceInfo([this.client.getUserId()!], true);
+          } catch { /* ignore */ }
+          await new Promise(r => setTimeout(r, 2000 * attempt));
+        }
+      }
     }
+    if (lastErr) return;
 
     // Bootstrap secret storage (SSSS) with a recovery key derived from the bot's secret
     try {

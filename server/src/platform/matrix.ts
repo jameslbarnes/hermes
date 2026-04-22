@@ -43,7 +43,6 @@ import { SASVerificationManager } from './sas-verification.js';
 import 'fake-indexeddb/auto';
 import {
   restoreCryptoStore,
-  applyCryptoSnapshot,
   startPersisting,
   flushCryptoStore,
   stopPersisting,
@@ -186,10 +185,8 @@ export class MatrixPlatform implements Platform {
         storagePassword: this.config.cryptoStorePassword || `${userId}:${deviceId}`,
       });
       console.log('[Matrix] Rust crypto initialized');
-
-      // Apply the persisted snapshot into the just-created IndexedDB stores.
-      // This restores device keys, Olm sessions, Megolm keys, cross-signing, etc.
-      await applyCryptoSnapshot();
+      const ownKeys = await this.client.getCrypto()?.getOwnDeviceKeys();
+      console.log(`[Matrix] Own device keys: device=${deviceId} ed25519=${ownKeys?.ed25519 || 'unavailable'}`);
 
       // Start periodic persistence so state survives the next restart
       startPersisting({ filePath: snapshotPath, flushIntervalMs: 30_000 });

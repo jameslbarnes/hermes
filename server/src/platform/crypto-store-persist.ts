@@ -8,8 +8,10 @@
  * decrypting past messages.
  *
  * This module persists the entire IndexedDB state to a JSON file and
- * restores it on startup. It hooks into `fake-indexeddb`'s internal
- * structured-clone storage and snapshots it through the public API.
+ * restores it on startup through the public IndexedDB API. The important
+ * detail is that restore must happen before Rust crypto opens the store:
+ * by the time initRustCrypto() returns, the Olm account has already been
+ * loaded or freshly generated.
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
@@ -22,14 +24,97 @@ export interface PersistOptions {
   flushIntervalMs?: number;
 }
 
+interface IndexDump {
+  name: string;
+  keyPath: string | string[] | null;
+  unique: boolean;
+  multiEntry: boolean;
+}
+
+interface StoreDump {
+  keyPath: string | string[] | null;
+  autoIncrement: boolean;
+  indexes: IndexDump[];
+  entries: Array<{ key: IDBValidKey; value: any }>;
+}
+
+interface DatabaseDump {
+  version: number;
+  stores: Record<string, StoreDump | Array<{ key: IDBValidKey; value: any }>>;
+}
+
+const RUST_CRYPTO_MAIN_STORES: Record<string, IndexDump[]> = {
+  backup_keys: [],
+  core: [],
+  devices: [],
+  gossip_requests: [
+    { name: 'by_info', keyPath: 'info', unique: true, multiEntry: false },
+    { name: 'unsent', keyPath: 'unsent', unique: false, multiEntry: false },
+  ],
+  identities: [],
+  inbound_group_sessions3: [
+    { name: 'backed_up_to', keyPath: 'backed_up_to', unique: false, multiEntry: false },
+    { name: 'backup', keyPath: 'needs_backup', unique: false, multiEntry: false },
+    {
+      name: 'inbound_group_session_sender_key_sender_data_type_idx',
+      keyPath: ['sender_key', 'sender_data_type', 'session_id'],
+      unique: false,
+      multiEntry: false,
+    },
+  ],
+  lease_locks: [],
+  olm_hashes: [],
+  outbound_group_sessions: [],
+  received_room_key_bundles: [],
+  room_key_backups_fully_downloaded: [],
+  room_settings: [],
+  rooms_pending_key_bundle: [],
+  secrets_inbox2: [],
+  session: [],
+  tracked_users: [],
+  withheld_sessions: [],
+};
+
+function fallbackStoreDump(dbName: string, storeName: string, dump: any): StoreDump {
+  const entries = Array.isArray(dump) ? dump : dump?.entries || [];
+  const indexes =
+    dbName.endsWith('::matrix-sdk-crypto')
+      ? RUST_CRYPTO_MAIN_STORES[storeName] || []
+      : [];
+
+  return {
+    keyPath: dump?.keyPath ?? null,
+    autoIncrement: dump?.autoIncrement ?? false,
+    indexes: dump?.indexes || indexes,
+    entries,
+  };
+}
+
+function createStore(db: IDBDatabase, storeName: string, storeDump: StoreDump): void {
+  if (db.objectStoreNames.contains(storeName)) return;
+
+  const opts: IDBObjectStoreParameters = {};
+  if (storeDump.keyPath !== null) opts.keyPath = storeDump.keyPath;
+  if (storeDump.autoIncrement) opts.autoIncrement = true;
+
+  const store = db.createObjectStore(storeName, opts);
+  for (const index of storeDump.indexes || []) {
+    if (store.indexNames.contains(index.name)) continue;
+    store.createIndex(index.name, index.keyPath as any, {
+      unique: index.unique,
+      multiEntry: index.multiEntry,
+    });
+  }
+}
+
 /** Dump one IndexedDB database to a plain object. */
-async function dumpDatabase(dbName: string): Promise<any | null> {
+async function dumpDatabase(dbName: string): Promise<DatabaseDump | null> {
   return new Promise((resolve) => {
     const openReq = indexedDB.open(dbName);
     openReq.onerror = () => resolve(null);
     openReq.onsuccess = async () => {
       const db = openReq.result;
-      const out: { version: number; stores: Record<string, any[]> } = {
+      const out: DatabaseDump = {
         version: db.version,
         stores: {},
       };
@@ -44,17 +129,30 @@ async function dumpDatabase(dbName: string): Promise<any | null> {
         let pending = storeNames.length;
         for (const storeName of storeNames) {
           const store = tx.objectStore(storeName);
+          const storeDump: StoreDump = {
+            keyPath: store.keyPath as string | string[] | null,
+            autoIncrement: store.autoIncrement,
+            indexes: Array.from(store.indexNames).map((name) => {
+              const index = store.index(name);
+              return {
+                name,
+                keyPath: index.keyPath as string | string[] | null,
+                unique: index.unique,
+                multiEntry: index.multiEntry,
+              };
+            }),
+            entries: [],
+          };
           const req = store.getAll();
           const keyReq = store.getAllKeys();
-          const entries: any[] = [];
           req.onsuccess = () => {
             keyReq.onsuccess = () => {
               const values = req.result;
               const keys = keyReq.result;
               for (let i = 0; i < values.length; i++) {
-                entries.push({ key: keys[i], value: values[i] });
+                storeDump.entries.push({ key: keys[i], value: values[i] });
               }
-              out.stores[storeName] = entries;
+              out.stores[storeName] = storeDump;
               if (--pending === 0) {
                 db.close();
                 resolve(out);
@@ -93,17 +191,11 @@ async function listDatabasesWithPrefix(prefix: string): Promise<string[]> {
 async function restoreDatabase(dbName: string, dump: any): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!dump || !dump.stores) return resolve();
-    const openReq = indexedDB.open(dbName, dump.version);
+    const openReq = indexedDB.open(dbName, dump.version || 1);
     openReq.onupgradeneeded = () => {
       const db = openReq.result;
-      // We don't recreate schema here — the Rust WASM layer creates stores
-      // via its own upgrade path. We only restore data after it has done so.
       for (const storeName of Object.keys(dump.stores)) {
-        if (!db.objectStoreNames.contains(storeName)) {
-          // Store doesn't exist — can't restore into it without schema info.
-          // Rust crypto will re-migrate and create stores fresh.
-          console.warn(`[CryptoPersist] Store "${storeName}" missing during restore, skipping`);
-        }
+        createStore(db, storeName, fallbackStoreDump(dbName, storeName, dump.stores[storeName]));
       }
     };
     openReq.onerror = () => reject(openReq.error);
@@ -113,7 +205,8 @@ async function restoreDatabase(dbName: string, dump: any): Promise<void> {
       try {
         const tx = db.transaction(storeNames, 'readwrite');
         for (const storeName of storeNames) {
-          const entries = dump.stores[storeName];
+          const storeDump = fallbackStoreDump(dbName, storeName, dump.stores[storeName]);
+          const entries = storeDump.entries;
           if (!Array.isArray(entries)) continue;
           const store = tx.objectStore(storeName);
           for (const { key, value } of entries) {
@@ -139,6 +232,18 @@ async function restoreDatabase(dbName: string, dump: any): Promise<void> {
   });
 }
 
+async function deleteDatabaseIfExists(dbName: string): Promise<void> {
+  const existing = await listDatabasesWithPrefix('');
+  if (!existing.includes(dbName)) return;
+
+  await new Promise<void>((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(dbName);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error(`delete blocked for ${dbName}`));
+  });
+}
+
 /**
  * Restore the crypto store from a persisted snapshot (if one exists).
  * Call this BEFORE creating the MatrixClient / calling initRustCrypto.
@@ -158,39 +263,20 @@ export async function restoreCryptoStore(opts: PersistOptions): Promise<boolean>
     return false;
   }
 
-  // Restoring data before the schema is created by Rust crypto won't work
-  // (onupgradeneeded is where matrix-rust-sdk creates its stores). We need
-  // to let it create the schema, then inject our data afterwards.
-  //
-  // Strategy: don't restore here. Instead, return the snapshot so the
-  // caller can apply it AFTER initRustCrypto has created the stores.
-  (globalThis as any).__ROUTER_CRYPTO_SNAPSHOT__ = snapshot;
-  console.log(`[CryptoPersist] Loaded snapshot (${Object.keys(snapshot).length} databases)`);
-  return true;
-}
-
-/**
- * Apply a previously-loaded snapshot to the already-initialized IndexedDB stores.
- * Call this AFTER initRustCrypto has completed its schema migrations.
- */
-export async function applyCryptoSnapshot(): Promise<void> {
-  const snapshot = (globalThis as any).__ROUTER_CRYPTO_SNAPSHOT__;
-  if (!snapshot) return;
-
-  const existingDbs = await listDatabasesWithPrefix('');
+  let restored = 0;
   for (const dbName of Object.keys(snapshot)) {
-    if (!existingDbs.includes(dbName)) {
-      // Rust crypto hasn't created this DB — skip
-      continue;
-    }
     try {
+      await deleteDatabaseIfExists(dbName);
       await restoreDatabase(dbName, snapshot[dbName]);
       console.log(`[CryptoPersist] Restored ${dbName}`);
+      restored++;
     } catch (err: any) {
       console.warn(`[CryptoPersist] Restore failed for ${dbName}:`, err.message);
     }
   }
-  delete (globalThis as any).__ROUTER_CRYPTO_SNAPSHOT__;
+
+  console.log(`[CryptoPersist] Loaded snapshot (${restored}/${Object.keys(snapshot).length} databases)`);
+  return restored > 0;
 }
 
 let flushInterval: ReturnType<typeof setInterval> | null = null;

@@ -160,11 +160,23 @@ class SASSession {
   }
 
   private async sendMac(): Promise<void> {
-    const keyId = `ed25519:${this.ourDevice}`;
-    const keyInfo = this.macInfoSending(keyId);
+    const keysToMac: Record<string, string> = {
+      [`ed25519:${this.ourDevice}`]: this.ourSigningKey,
+    };
+
+    const ourMasterKey = await this.fetchOwnMasterKey();
+    if (ourMasterKey) {
+      keysToMac[`ed25519:${ourMasterKey}`] = ourMasterKey;
+    }
+
+    const mac: Record<string, string> = {};
+    for (const [keyId, keyValue] of Object.entries(keysToMac)) {
+      mac[keyId] = this.sas.calculate_mac_fixed_base64(keyValue, this.macInfoSending(keyId));
+    }
+
+    const keyIds = Object.keys(mac).sort().join(',');
     const keysInfo = this.macInfoSending('KEY_IDS');
-    const keyMac = this.sas.calculate_mac_fixed_base64(this.ourSigningKey, keyInfo);
-    const keysMac = this.sas.calculate_mac_fixed_base64(keyId, keysInfo);
+    const keysMac = this.sas.calculate_mac_fixed_base64(keyIds, keysInfo);
 
     // Diagnostic: dump everything needed to reproduce the MAC calculation.
     // If Element still rejects with m.mismatched_sas we can compare these
@@ -173,35 +185,53 @@ class SASSession {
     console.log(`[SAS/debug] ourUser=${this.ourUser} ourDevice=${this.ourDevice}`);
     console.log(`[SAS/debug] theirUser=${this.theirUser} theirDevice=${this.theirDevice}`);
     console.log(`[SAS/debug] ourSigningKey=${this.ourSigningKey}`);
-    console.log(`[SAS/debug] keyInfo=${keyInfo}`);
-    console.log(`[SAS/debug] keyMac=${keyMac}`);
+    console.log(`[SAS/debug] macKeys=${keyIds}`);
+    for (const keyId of Object.keys(mac).sort()) {
+      console.log(`[SAS/debug] keyInfo[${keyId}]=${this.macInfoSending(keyId)}`);
+      console.log(`[SAS/debug] keyMac[${keyId}]=${mac[keyId]}`);
+    }
     console.log(`[SAS/debug] keysInfo=${keysInfo}`);
     console.log(`[SAS/debug] keysMac=${keysMac}`);
 
     await this.send('m.key.verification.mac', {
-      mac: { [keyId]: keyMac },
+      mac,
       keys: keysMac,
     });
     console.log(`[SAS/${this.flow.kind}] Sent MAC for ${this.ourUser}/${this.ourDevice}`);
   }
 
   async handleMac(content: any): Promise<void> {
-    const theirSigningKey = await this.fetchTheirSigningKey();
-    if (!theirSigningKey) {
+    const theirKeys = await this.fetchTheirMacKeys(content.mac || {});
+    if (!theirKeys.size) {
       await this.cancel('m.key_mismatch');
       return;
     }
     const keyId = `ed25519:${this.theirDevice}`;
-    const expectedKeyMac = this.sas.calculate_mac_fixed_base64(theirSigningKey, this.macInfoReceiving(keyId));
-    const expectedKeysMac = this.sas.calculate_mac_fixed_base64(keyId, this.macInfoReceiving('KEY_IDS'));
-
     const mac = content.mac || {};
     const keysMac = content.keys || '';
+    const macKeyIds = Object.keys(mac).sort();
+    const expectedKeysMac = this.sas.calculate_mac_fixed_base64(macKeyIds.join(','), this.macInfoReceiving('KEY_IDS'));
 
-    if (mac[keyId] !== expectedKeyMac || keysMac !== expectedKeysMac) {
+    let mismatch = keysMac !== expectedKeysMac;
+    for (const macKeyId of macKeyIds) {
+      const keyValue = theirKeys.get(macKeyId);
+      const expectedKeyMac = keyValue
+        ? this.sas.calculate_mac_fixed_base64(keyValue, this.macInfoReceiving(macKeyId))
+        : null;
+      if (!expectedKeyMac || mac[macKeyId] !== expectedKeyMac) {
+        mismatch = true;
+        console.warn(`[SAS]   got     mac[${macKeyId}]=${mac[macKeyId]}`);
+        console.warn(`[SAS]   expected             =${expectedKeyMac || '(unknown key)'}`);
+      }
+    }
+
+    if (!mac[keyId]) {
+      mismatch = true;
+      console.warn(`[SAS]   missing required device key MAC ${keyId}`);
+    }
+
+    if (mismatch) {
       console.warn(`[SAS/${this.flow.kind}] MAC mismatch for ${this.theirUser}/${this.theirDevice}`);
-      console.warn(`[SAS]   got     mac[${keyId}]=${mac[keyId]}`);
-      console.warn(`[SAS]   expected             =${expectedKeyMac}`);
       console.warn(`[SAS]   got     keys=${keysMac}`);
       console.warn(`[SAS]   expected    =${expectedKeysMac}`);
       await this.cancel('m.key_mismatch');
@@ -211,17 +241,44 @@ class SASSession {
     await this.send('m.key.verification.done', {});
   }
 
-  private async fetchTheirSigningKey(): Promise<string | null> {
+  private async fetchOwnMasterKey(): Promise<string | null> {
+    const crypto = this.client.getCrypto() as any;
+    if (!crypto?.getCrossSigningKeyId) return null;
+    try {
+      return await crypto.getCrossSigningKeyId('master');
+    } catch (err: any) {
+      console.warn(`[SAS] getCrossSigningKeyId failed:`, err.message);
+      return null;
+    }
+  }
+
+  private async fetchTheirMacKeys(mac: Record<string, string>): Promise<Map<string, string>> {
+    const keys = new Map<string, string>();
     const crypto = this.client.getCrypto();
-    if (!crypto) return null;
+    if (!crypto) return keys;
     try {
       const devices = await crypto.getUserDeviceInfo([this.theirUser], true);
       const device = devices.get(this.theirUser)?.get(this.theirDevice);
-      return device?.getFingerprint() || null;
+      const fingerprint = device?.getFingerprint();
+      if (fingerprint) keys.set(`ed25519:${this.theirDevice}`, fingerprint);
     } catch (err: any) {
       console.warn(`[SAS] getUserDeviceInfo failed:`, err.message);
-      return null;
     }
+
+    const wantedMasterKeyId = Object.keys(mac).find(keyId =>
+      keyId.startsWith('ed25519:') && keyId !== `ed25519:${this.theirDevice}`);
+    if (!wantedMasterKeyId) return keys;
+
+    try {
+      const result = await (this.client as any).downloadKeysForUsers([this.theirUser]);
+      const masterKeys = result?.master_keys?.[this.theirUser]?.keys || {};
+      const masterKey = masterKeys[wantedMasterKeyId];
+      if (masterKey) keys.set(wantedMasterKeyId, masterKey);
+    } catch (err: any) {
+      console.warn(`[SAS] downloadKeysForUsers failed:`, err.message);
+    }
+
+    return keys;
   }
 
   async cancel(code: string, reason: string = ''): Promise<void> {

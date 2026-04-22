@@ -87,6 +87,7 @@ export class MatrixPlatform implements Platform {
   private config: MatrixPlatformConfig;
   private channelRooms = new Map<string, string>();
   private entryEventMap = new Map<string, string>();
+  private drivenVerifications = new Set<string>();
 
   constructor(config: MatrixPlatformConfig) {
     this.config = config;
@@ -821,12 +822,25 @@ export class MatrixPlatform implements Platform {
 
   /**
    * Drive a VerificationRequest through to completion.
-   * Idempotent: safe to call multiple times for the same request.
+   * Idempotent across different VerificationRequest wrappers of the same
+   * underlying rust request — both the to-device handler and the in-room
+   * timeline listener get separate JS wrappers for the same transaction, so
+   * we dedupe by transactionId (stable across wrappers). Without this guard,
+   * both call paths call startVerification()/sas.confirm() in parallel,
+   * producing two MAC events with different ephemeral material, and the
+   * other side cancels with m.mismatched_sas.
    */
   private driveVerification(request: VerificationRequest): void {
-    const driven = (request as any).__routerDriven;
-    if (driven) return;
-    (request as any).__routerDriven = true;
+    const txnId = request.transactionId;
+    if (!txnId) {
+      console.warn('[Matrix/Verify] Request has no transactionId, skipping');
+      return;
+    }
+    if (this.drivenVerifications.has(txnId)) {
+      console.log(`[Matrix/Verify] Already driving ${txnId}, skipping duplicate`);
+      return;
+    }
+    this.drivenVerifications.add(txnId);
 
     let sasStarted = false;
     let accepting = false;
@@ -875,10 +889,12 @@ export class MatrixPlatform implements Platform {
       console.log(`[Matrix/Verify] Phase change: ${VerificationPhase[request.phase]} (chosenMethod=${request.chosenMethod || 'none'})`);
       if (request.phase === VerificationPhase.Done) {
         console.log(`[Matrix/Verify] ✅ Verification with ${request.otherUserId} complete`);
+        this.drivenVerifications.delete(txnId);
         return;
       }
       if (request.phase === VerificationPhase.Cancelled) {
         console.log(`[Matrix/Verify] ❌ Verification with ${request.otherUserId} cancelled: ${request.cancellationCode}`);
+        this.drivenVerifications.delete(txnId);
         return;
       }
       await maybeWire();

@@ -25,6 +25,14 @@ import {
   ClientEvent,
   KnownMembership,
 } from 'matrix-js-sdk';
+import {
+  CryptoEvent,
+  VerificationPhase,
+  VerifierEvent,
+  type VerificationRequest,
+  type Verifier,
+  type ShowSasCallbacks,
+} from 'matrix-js-sdk/lib/crypto-api/index.js';
 import type {
   Platform,
   PlatformRoom,
@@ -207,8 +215,9 @@ export class MatrixPlatform implements Platform {
       console.warn('[Matrix] Crypto init failed, running without E2EE:', e.message);
     }
 
-    // Set up event listeners
+    // Set up event listeners (messages, invites, verification requests)
     this.setupEventListeners();
+    this.setupVerificationHandler();
 
     // Start syncing (must happen before cross-signing bootstrap so we can query our own keys)
     await this.client.startClient({ initialSyncLimit: 0 });
@@ -581,6 +590,91 @@ export class MatrixPlatform implements Platform {
       } catch (err) {
         console.error(`[Matrix] Failed to join room ${roomId}:`, err);
       }
+    });
+  }
+
+  /**
+   * Auto-accept verification requests.
+   *
+   * When a user clicks "Verify" on the bot in Element, Element sends a
+   * VerificationRequest. The bot auto-accepts, auto-confirms SAS (emoji)
+   * match without checking, and completes the flow. This is the pattern
+   * from Andrew's sas_verification.py (shape-rotator-matrix lessons): for
+   * a bot, trust-on-first-verify is correct — no human is looking at emojis.
+   *
+   * Result: Element shows the bot as verified, the green shield appears,
+   * and Megolm keys flow freely between your device and the bot.
+   */
+  private setupVerificationHandler(): void {
+    if (!this.client) return;
+    if (!this.client.getCrypto()) return;
+
+    // MatrixClient re-emits CryptoEvent.VerificationRequestReceived from the crypto impl
+    (this.client as any).on(CryptoEvent.VerificationRequestReceived, async (request: VerificationRequest) => {
+      console.log(`[Matrix/Verify] Request from ${request.otherUserId}, phase=${VerificationPhase[request.phase]}`);
+
+      // Step 1: accept the request (sends m.key.verification.ready)
+      try {
+        if (request.phase === VerificationPhase.Requested) {
+          await request.accept();
+          console.log(`[Matrix/Verify] Accepted request from ${request.otherUserId}`);
+        }
+      } catch (err: any) {
+        console.error(`[Matrix/Verify] Accept failed:`, err.message);
+        return;
+      }
+
+      // Step 2: follow the state machine
+      request.on('change' as any, async () => {
+        console.log(`[Matrix/Verify] Phase change: ${VerificationPhase[request.phase]}`);
+
+        // When the other side starts SAS, grab the verifier and attach handlers
+        if (request.phase === VerificationPhase.Started && request.verifier) {
+          this.wireVerifier(request.verifier, request.otherUserId);
+        }
+
+        if (request.phase === VerificationPhase.Done) {
+          console.log(`[Matrix/Verify] ✅ Verification with ${request.otherUserId} complete`);
+        }
+        if (request.phase === VerificationPhase.Cancelled) {
+          console.log(`[Matrix/Verify] ❌ Verification with ${request.otherUserId} cancelled: ${request.cancellationCode}`);
+        }
+      });
+    });
+  }
+
+  /**
+   * Attach callbacks to a Verifier to auto-confirm SAS emojis.
+   */
+  private wireVerifier(verifier: Verifier, otherUserId: string): void {
+    // If the verifier has already exposed SAS callbacks, confirm immediately
+    const existing = verifier.getShowSasCallbacks();
+    if (existing) {
+      this.confirmSas(existing, otherUserId);
+    }
+
+    verifier.on(VerifierEvent.ShowSas, (sas: ShowSasCallbacks) => {
+      this.confirmSas(sas, otherUserId);
+    });
+
+    verifier.on(VerifierEvent.Cancel, (e: any) => {
+      console.log(`[Matrix/Verify] Verifier cancelled:`, e?.message || e);
+    });
+
+    // Kick off verification from our side
+    verifier.verify().catch(err => {
+      console.error(`[Matrix/Verify] verify() failed:`, err.message);
+    });
+  }
+
+  /**
+   * Auto-confirm SAS emojis without showing them to anyone.
+   * Safe for a bot: we're verifying cryptographic identity, not human intent.
+   */
+  private confirmSas(sas: ShowSasCallbacks, otherUserId: string): void {
+    console.log(`[Matrix/Verify] Auto-confirming SAS for ${otherUserId}`);
+    sas.confirm().catch(err => {
+      console.error(`[Matrix/Verify] SAS confirm failed:`, err.message);
     });
   }
 

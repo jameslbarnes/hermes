@@ -261,8 +261,11 @@ async function onPlatformMention(ctx: HookContext): Promise<void> {
     const reply = [
       `Your one-time link code: **${code}**`,
       '',
-      `To finish linking, tell your Claude:`,
-      `"Link my ${platformName} account, code is ${code}"`,
+      `In the Hermes notebook, tell Claude:`,
+      `"Link my ${platformName} account with code ${code}"`,
+      '',
+      `Claude should use the \`hermes_link_platform\` tool automatically.`,
+      `If you haven't created a Hermes handle yet, do that first, then run the link step again.`,
       '',
       `(expires in 10 minutes)`,
     ].join('\n');

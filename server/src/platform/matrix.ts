@@ -191,8 +191,9 @@ export class MatrixPlatform implements Platform {
       } catch (err: any) {
         // Snapshots written by the old post-init restore path can be internally
         // inconsistent: the meta store decrypts, but encrypted records were
-        // written under a different store cipher. Quarantine and retry once so
-        // this deploy repairs itself instead of running permanently E2EE-blind.
+        // written under a different store cipher. The failed Rust open can keep
+        // IndexedDB handles alive, so repair by quarantining the snapshot and
+        // exiting. Docker/Phala restarts the service into a clean process.
         const message = err?.message || '';
         const isUnusableSnapshot =
           message.includes('failed to be decrypted')
@@ -200,9 +201,10 @@ export class MatrixPlatform implements Platform {
           || message.includes('pickle');
         if (!isUnusableSnapshot) throw err;
 
-        console.warn(`[Matrix] Crypto store snapshot unusable, resetting and retrying: ${message}`);
+        console.warn(`[Matrix] Crypto store snapshot unusable, resetting before process restart: ${message}`);
         await resetCryptoStoreSnapshot(snapshotPath, storeName);
-        await this.client.initRustCrypto(cryptoInitOpts);
+        console.warn('[Matrix] Exiting so rust-crypto restarts with clean IndexedDB handles');
+        process.exit(1);
       }
 
       console.log('[Matrix] Rust crypto initialized');

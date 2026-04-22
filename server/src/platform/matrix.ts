@@ -43,6 +43,7 @@ import { SASVerificationManager } from './sas-verification.js';
 import 'fake-indexeddb/auto';
 import {
   restoreCryptoStore,
+  resetCryptoStoreSnapshot,
   startPersisting,
   flushCryptoStore,
   stopPersisting,
@@ -179,17 +180,38 @@ export class MatrixPlatform implements Platform {
     // Initialize Rust crypto
     try {
       const storeName = this.config.cryptoStoreName || `router-crypto-${this.config.botHandle}`;
-      await this.client.initRustCrypto({
+      const cryptoInitOpts = {
         useIndexedDB: true,
         cryptoDatabasePrefix: storeName,
         storagePassword: this.config.cryptoStorePassword || `${userId}:${deviceId}`,
-      });
+      };
+
+      try {
+        await this.client.initRustCrypto(cryptoInitOpts);
+      } catch (err: any) {
+        // Snapshots written by the old post-init restore path can be internally
+        // inconsistent: the meta store decrypts, but encrypted records were
+        // written under a different store cipher. Quarantine and retry once so
+        // this deploy repairs itself instead of running permanently E2EE-blind.
+        const message = err?.message || '';
+        const isUnusableSnapshot =
+          message.includes('failed to be decrypted')
+          || message.includes('unpickling')
+          || message.includes('pickle');
+        if (!isUnusableSnapshot) throw err;
+
+        console.warn(`[Matrix] Crypto store snapshot unusable, resetting and retrying: ${message}`);
+        await resetCryptoStoreSnapshot(snapshotPath, storeName);
+        await this.client.initRustCrypto(cryptoInitOpts);
+      }
+
       console.log('[Matrix] Rust crypto initialized');
       const ownKeys = await this.client.getCrypto()?.getOwnDeviceKeys();
       console.log(`[Matrix] Own device keys: device=${deviceId} ed25519=${ownKeys?.ed25519 || 'unavailable'}`);
 
       // Start periodic persistence so state survives the next restart
       startPersisting({ filePath: snapshotPath, flushIntervalMs: 30_000 });
+      await flushCryptoStore();
     } catch (e: any) {
       console.warn('[Matrix] Crypto init failed, running without E2EE:', e.message);
     }

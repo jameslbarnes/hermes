@@ -14,7 +14,7 @@
  * loaded or freshly generated.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'fs';
 import { dirname } from 'path';
 
 export interface PersistOptions {
@@ -242,6 +242,34 @@ async function deleteDatabaseIfExists(dbName: string): Promise<void> {
     req.onerror = () => reject(req.error);
     req.onblocked = () => reject(new Error(`delete blocked for ${dbName}`));
   });
+}
+
+/**
+ * Quarantine an unusable snapshot and clear any restored in-memory databases.
+ * This is intentionally scoped to the rust-crypto DB prefix so unrelated
+ * fake-indexeddb users are not touched.
+ */
+export async function resetCryptoStoreSnapshot(filePath: string, dbPrefix: string): Promise<void> {
+  if (existsSync(filePath)) {
+    const quarantinePath = `${filePath}.corrupt-${Date.now()}`;
+    try {
+      renameSync(filePath, quarantinePath);
+      console.warn(`[CryptoPersist] Quarantined incompatible snapshot at ${quarantinePath}`);
+    } catch (err: any) {
+      console.warn('[CryptoPersist] Snapshot quarantine failed, deleting instead:', err.message);
+      try { unlinkSync(filePath); } catch { /* ignore */ }
+    }
+  }
+
+  const dbNames = await listDatabasesWithPrefix(`${dbPrefix}::matrix-sdk-crypto`);
+  for (const dbName of dbNames) {
+    try {
+      await deleteDatabaseIfExists(dbName);
+      console.warn(`[CryptoPersist] Cleared restored database ${dbName}`);
+    } catch (err: any) {
+      console.warn(`[CryptoPersist] Failed to clear ${dbName}:`, err.message);
+    }
+  }
 }
 
 /**

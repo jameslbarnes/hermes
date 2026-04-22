@@ -28,6 +28,7 @@ import {
 import {
   CryptoEvent,
   VerificationPhase,
+  VerificationRequestEvent,
   VerifierEvent,
   type VerificationRequest,
   type Verifier,
@@ -640,23 +641,29 @@ export class MatrixPlatform implements Platform {
     (this.client as any).on(CryptoEvent.VerificationRequestReceived, async (request: VerificationRequest) => {
       console.log(`[Matrix/Verify] Request from ${request.otherUserId}, phase=${VerificationPhase[request.phase]}`);
 
-      // Step 1: accept the request (sends m.key.verification.ready)
-      try {
-        if (request.phase === VerificationPhase.Requested) {
-          await request.accept();
-          console.log(`[Matrix/Verify] Accepted request from ${request.otherUserId}`);
+      // Listen for phase transitions BEFORE accepting — some transitions happen
+      // synchronously inside accept() and we'd miss them otherwise.
+      let sasStarted = false;
+      request.on(VerificationRequestEvent.Change, async () => {
+        console.log(`[Matrix/Verify] Phase change: ${VerificationPhase[request.phase]} (methods=${request.methods?.join(',') || 'none'})`);
+
+        // Once both sides have exchanged ready, proactively start SAS.
+        // The other side (Element) may wait for us to initiate — we're the
+        // one that was asked to verify, so push the flow forward.
+        if (request.phase === VerificationPhase.Ready && !sasStarted) {
+          sasStarted = true;
+          try {
+            console.log(`[Matrix/Verify] Starting SAS verification with ${request.otherUserId}`);
+            const verifier = await request.startVerification('m.sas.v1');
+            this.wireVerifier(verifier, request.otherUserId);
+          } catch (err: any) {
+            console.error(`[Matrix/Verify] startVerification failed:`, err.message);
+          }
         }
-      } catch (err: any) {
-        console.error(`[Matrix/Verify] Accept failed:`, err.message);
-        return;
-      }
 
-      // Step 2: follow the state machine
-      request.on('change' as any, async () => {
-        console.log(`[Matrix/Verify] Phase change: ${VerificationPhase[request.phase]}`);
-
-        // When the other side starts SAS, grab the verifier and attach handlers
-        if (request.phase === VerificationPhase.Started && request.verifier) {
+        // If the other side started SAS first, wire the verifier from the request
+        if (request.phase === VerificationPhase.Started && request.verifier && !sasStarted) {
+          sasStarted = true;
           this.wireVerifier(request.verifier, request.otherUserId);
         }
 
@@ -667,6 +674,17 @@ export class MatrixPlatform implements Platform {
           console.log(`[Matrix/Verify] ❌ Verification with ${request.otherUserId} cancelled: ${request.cancellationCode}`);
         }
       });
+
+      // Accept the request (sends m.key.verification.ready → phase becomes Ready)
+      try {
+        if (request.phase === VerificationPhase.Requested) {
+          await request.accept();
+          console.log(`[Matrix/Verify] Accepted request from ${request.otherUserId}`);
+        }
+      } catch (err: any) {
+        console.error(`[Matrix/Verify] Accept failed:`, err.message);
+        return;
+      }
     });
   }
 

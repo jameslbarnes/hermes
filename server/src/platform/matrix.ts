@@ -24,19 +24,9 @@ import {
   EventType,
   MsgType,
   RoomMemberEvent,
-  RoomEvent,
   ClientEvent,
   KnownMembership,
 } from 'matrix-js-sdk';
-import {
-  CryptoEvent,
-  VerificationPhase,
-  VerificationRequestEvent,
-  VerifierEvent,
-  type VerificationRequest,
-  type Verifier,
-  type ShowSasCallbacks,
-} from 'matrix-js-sdk/lib/crypto-api/index.js';
 import type {
   Platform,
   PlatformRoom,
@@ -47,6 +37,7 @@ import type {
   RoomType,
 } from './types.js';
 import { pushEvent } from '../events.js';
+import { SASVerificationManager } from './sas-verification.js';
 
 // Polyfill IndexedDB for Node.js (required by matrix-sdk-crypto-wasm)
 import 'fake-indexeddb/auto';
@@ -87,7 +78,6 @@ export class MatrixPlatform implements Platform {
   private config: MatrixPlatformConfig;
   private channelRooms = new Map<string, string>();
   private entryEventMap = new Map<string, string>();
-  private drivenVerifications = new Set<string>();
 
   constructor(config: MatrixPlatformConfig) {
     this.config = config;
@@ -207,12 +197,22 @@ export class MatrixPlatform implements Platform {
       console.warn('[Matrix] Crypto init failed, running without E2EE:', e.message);
     }
 
-    // Set up event listeners (messages, invites, verification requests)
+    // Set up event listeners (messages, invites)
     this.setupEventListeners();
-    this.setupVerificationHandler();
 
     // Start syncing (must happen before cross-signing bootstrap so we can query our own keys)
     await this.client.startClient({ initialSyncLimit: 0 });
+
+    // Install the hand-rolled SAS verification manager. Replaces the SDK's
+    // broken VerificationRequest/Verifier high-level API which produces MACs
+    // that Continuwuity rejects with m.mismatched_sas. Ports Andrew Miller's
+    // sas_verification.py working implementation. Must happen AFTER
+    // startClient (needs user/device/crypto to be populated).
+    try {
+      await SASVerificationManager.create(this.client);
+    } catch (err: any) {
+      console.warn('[Matrix] SAS manager init failed (non-fatal):', err.message);
+    }
 
     // Bootstrap cross-signing and secret storage — makes the bot a first-class
     // Matrix citizen that Element clients trust like any other verified user.
@@ -772,206 +772,6 @@ export class MatrixPlatform implements Platform {
       } catch (err) {
         console.error(`[Matrix] Failed to join room ${roomId}:`, err);
       }
-    });
-  }
-
-  /**
-   * Auto-accept verification requests.
-   *
-   * When a user clicks "Verify" on the bot in Element, Element sends a
-   * VerificationRequest. The bot auto-accepts, auto-confirms SAS (emoji)
-   * match without checking, and completes the flow. This is the pattern
-   * from Andrew's sas_verification.py (shape-rotator-matrix lessons): for
-   * a bot, trust-on-first-verify is correct — no human is looking at emojis.
-   *
-   * Result: Element shows the bot as verified, the green shield appears,
-   * and Megolm keys flow freely between your device and the bot.
-   */
-  private setupVerificationHandler(): void {
-    if (!this.client) return;
-    if (!this.client.getCrypto()) return;
-
-    // Path 1: to-device m.key.verification.request — emitted by rust crypto
-    // when Element's user clicks "Verify" in the standard flow.
-    (this.client as any).on(CryptoEvent.VerificationRequestReceived, async (request: VerificationRequest) => {
-      console.log(`[Matrix/Verify] to-device request from ${request.otherUserId}, phase=${VerificationPhase[request.phase]}`);
-      this.driveVerification(request);
-    });
-
-    // Path 2: in-room verification — Element can send m.key.verification.start
-    // directly into a DM room (especially when "Verify by emoji" is clicked).
-    // That doesn't fire VerificationRequestReceived, so we watch room timelines
-    // for any m.key.verification.* event and pull the live request via
-    // findVerificationRequestDMInProgress().
-    (this.client as any).on(RoomEvent.Timeline, async (event: MatrixEvent, room: Room | undefined) => {
-      if (!room) return;
-      const type = event.getType();
-      if (!type.startsWith('m.key.verification.')) {
-        // Also catch m.room.message with verification request msgtype
-        if (type !== EventType.RoomMessage) return;
-        const msgtype = event.getContent().msgtype;
-        if (msgtype !== 'm.key.verification.request') return;
-      }
-      const sender = event.getSender();
-      if (!sender || sender === this.botUserId) return;
-
-      const crypto = this.client!.getCrypto();
-      if (!crypto) return;
-
-      // Rust SDK needs a tick to process the event before the request is
-      // queryable. Retry a few times because the gap between sync delivery
-      // and olm machine ingestion is variable.
-      const tryFind = (remainingTries: number): void => {
-        try {
-          const request = crypto.findVerificationRequestDMInProgress(room.roomId, sender);
-          if (request) {
-            console.log(`[Matrix/Verify] in-room request from ${sender}, phase=${VerificationPhase[request.phase]}, trigger=${type}`);
-            this.driveVerification(request);
-            return;
-          }
-        } catch (err: any) {
-          console.error(`[Matrix/Verify] findVerificationRequestDMInProgress failed:`, err.message);
-          return;
-        }
-        if (remainingTries <= 0) {
-          const toDevice = crypto.getVerificationRequestsToDeviceInProgress(sender);
-          console.log(`[Matrix/Verify] No request found for ${sender} in ${room.roomId} after ${type}; ` +
-            `to-device in progress: ${toDevice.length}` +
-            (toDevice.length > 0 ? ` [${toDevice.map(r => VerificationPhase[r.phase]).join(',')}]` : '') +
-            ` — user should cancel in Element and start a fresh Verify`);
-          return;
-        }
-        setTimeout(() => tryFind(remainingTries - 1), 300);
-      };
-      tryFind(5);
-    });
-  }
-
-  /**
-   * Drive a VerificationRequest through to completion.
-   * Idempotent across different VerificationRequest wrappers of the same
-   * underlying rust request — both the to-device handler and the in-room
-   * timeline listener get separate JS wrappers for the same transaction, so
-   * we dedupe by transactionId (stable across wrappers). Without this guard,
-   * both call paths call startVerification()/sas.confirm() in parallel,
-   * producing two MAC events with different ephemeral material, and the
-   * other side cancels with m.mismatched_sas.
-   */
-  private driveVerification(request: VerificationRequest): void {
-    const txnId = request.transactionId;
-    if (!txnId) {
-      console.warn('[Matrix/Verify] Request has no transactionId, skipping');
-      return;
-    }
-    if (this.drivenVerifications.has(txnId)) {
-      console.log(`[Matrix/Verify] Already driving ${txnId}, skipping duplicate`);
-      return;
-    }
-    this.drivenVerifications.add(txnId);
-
-    let sasStarted = false;
-    let accepting = false;
-    const maybeWire = async () => {
-      if (sasStarted) return;
-
-      // Phase Requested → accept (sends ready). Guard against concurrent
-      // accept calls: the Change listener can fire while the initial
-      // maybeWire() is still awaiting request.accept().
-      if (request.phase === VerificationPhase.Requested) {
-        if (accepting) return;
-        accepting = true;
-        try {
-          await request.accept();
-          console.log(`[Matrix/Verify] Accepted from ${request.otherUserId}`);
-        } catch (err: any) {
-          console.error(`[Matrix/Verify] Accept failed:`, err.message);
-        }
-        return;
-      }
-
-      // Phase Ready → start SAS proactively
-      if (request.phase === VerificationPhase.Ready) {
-        sasStarted = true;
-        try {
-          console.log(`[Matrix/Verify] Starting SAS for ${request.otherUserId}`);
-          const verifier = await request.startVerification('m.sas.v1');
-          this.wireVerifier(verifier, request.otherUserId, /* weStarted */ true);
-        } catch (err: any) {
-          console.error(`[Matrix/Verify] startVerification failed:`, err.message);
-          sasStarted = false;
-        }
-        return;
-      }
-
-      // Phase Started → other side started, grab their verifier
-      if (request.phase === VerificationPhase.Started && request.verifier) {
-        sasStarted = true;
-        this.wireVerifier(request.verifier, request.otherUserId, /* weStarted */ false);
-      }
-    };
-
-    request.on(VerificationRequestEvent.Change, async () => {
-      // NB: request.methods throws "not implemented" on RustVerificationRequest —
-      // don't access it.
-      console.log(`[Matrix/Verify] Phase change: ${VerificationPhase[request.phase]} (chosenMethod=${request.chosenMethod || 'none'})`);
-      if (request.phase === VerificationPhase.Done) {
-        console.log(`[Matrix/Verify] ✅ Verification with ${request.otherUserId} complete`);
-        this.drivenVerifications.delete(txnId);
-        return;
-      }
-      if (request.phase === VerificationPhase.Cancelled) {
-        console.log(`[Matrix/Verify] ❌ Verification with ${request.otherUserId} cancelled: ${request.cancellationCode}`);
-        this.drivenVerifications.delete(txnId);
-        return;
-      }
-      await maybeWire();
-    });
-
-    // Immediate wire-up for requests that are already past Requested
-    maybeWire().catch(err => console.error(`[Matrix/Verify] initial wire failed:`, err.message));
-  }
-
-  /**
-   * Attach callbacks to a Verifier to auto-confirm SAS emojis.
-   *
-   * @param weStarted - true if we called request.startVerification() ourselves
-   *   (start event already sent). false if the other side started and we need
-   *   to send accept. Skips redundant verify() call in the "we started" case,
-   *   which was a no-op per rust-crypto but muddied the state machine.
-   */
-  private wireVerifier(verifier: Verifier, otherUserId: string, weStarted: boolean): void {
-    // If the verifier has already exposed SAS callbacks, confirm immediately
-    const existing = verifier.getShowSasCallbacks();
-    if (existing) {
-      this.confirmSas(existing, otherUserId);
-    }
-
-    verifier.on(VerifierEvent.ShowSas, (sas: ShowSasCallbacks) => {
-      this.confirmSas(sas, otherUserId);
-    });
-
-    verifier.on(VerifierEvent.Cancel, (e: any) => {
-      console.log(`[Matrix/Verify] Verifier cancelled:`, e?.message || e);
-    });
-
-    // Only send m.key.verification.accept if the OTHER side started the flow.
-    // If we started (via request.startVerification), the start event is
-    // already sent and we're waiting for their accept + key exchange.
-    if (!weStarted) {
-      verifier.verify().catch(err => {
-        console.error(`[Matrix/Verify] verify() failed:`, err.message);
-      });
-    }
-  }
-
-  /**
-   * Auto-confirm SAS emojis without showing them to anyone.
-   * Safe for a bot: we're verifying cryptographic identity, not human intent.
-   */
-  private confirmSas(sas: ShowSasCallbacks, otherUserId: string): void {
-    console.log(`[Matrix/Verify] Auto-confirming SAS for ${otherUserId}`);
-    sas.confirm().catch(err => {
-      console.error(`[Matrix/Verify] SAS confirm failed:`, err.message);
     });
   }
 

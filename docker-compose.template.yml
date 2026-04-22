@@ -27,6 +27,9 @@ services:
       - MATRIX_BOT_HANDLE
       - MATRIX_REGISTRATION_TOKEN
       - MATRIX_SIGNUP_URL
+      # Set to 1 once to wipe persisted credentials + crypto snapshot and
+      # start fresh. Remove after verifying / one successful boot.
+      - MATRIX_FRESH_CRYPTO
     volumes:
       - hermes-data:/data
     restart: unless-stopped

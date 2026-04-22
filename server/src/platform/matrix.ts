@@ -100,6 +100,27 @@ export class MatrixPlatform implements Platform {
     // This restores device keys, cross-signing, Olm/Megolm sessions across
     // restarts — without this, every deploy wipes the bot's identity.
     const snapshotPath = process.env.MATRIX_CRYPTO_SNAPSHOT_PATH || '/data/matrix-crypto-snapshot.json';
+
+    // Escape hatch: MATRIX_FRESH_CRYPTO=1 wipes the snapshot + credentials at
+    // boot. We lose Megolm history but get deterministic crypto state matching
+    // the current device_id. Use when the persisted store has drifted from the
+    // server's view (symptom: persistent m.mismatched_sas / MAC validation
+    // failures even with a clean device list).
+    if (process.env.MATRIX_FRESH_CRYPTO === '1') {
+      const credsPath = process.env.MATRIX_CREDS_PATH || '/data/matrix-credentials.json';
+      for (const p of [snapshotPath, credsPath]) {
+        if (existsSync(p)) {
+          try {
+            const { unlinkSync } = await import('fs');
+            unlinkSync(p);
+            console.log(`[Matrix] MATRIX_FRESH_CRYPTO=1 — deleted ${p}`);
+          } catch (err: any) {
+            console.warn(`[Matrix] Failed to delete ${p}:`, err.message);
+          }
+        }
+      }
+    }
+
     await restoreCryptoStore({ filePath: snapshotPath });
 
     const password = createHmac('sha256', this.config.botSecretKey)

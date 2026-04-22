@@ -787,7 +787,9 @@ export class MatrixPlatform implements Platform {
     };
 
     request.on(VerificationRequestEvent.Change, async () => {
-      console.log(`[Matrix/Verify] Phase change: ${VerificationPhase[request.phase]} (methods=${request.methods?.join(',') || 'none'})`);
+      // NB: request.methods throws "not implemented" on RustVerificationRequest —
+      // don't access it.
+      console.log(`[Matrix/Verify] Phase change: ${VerificationPhase[request.phase]} (chosenMethod=${request.chosenMethod || 'none'})`);
       if (request.phase === VerificationPhase.Done) {
         console.log(`[Matrix/Verify] ✅ Verification with ${request.otherUserId} complete`);
         return;

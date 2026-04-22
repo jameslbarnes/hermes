@@ -75,7 +75,7 @@ def main() -> None:
 
     key_file = hermes_home / "secret_key"
     explicit_key = os.environ.get("HERMES_SECRET_KEY", "").strip()
-    desired_handle = normalize_handle(os.environ.get("HERMES_HANDLE", "hermes"))
+    desired_handle = normalize_handle(os.environ.get("HERMES_HANDLE", "router"))
     mcp_url = os.environ.get("HERMES_MCP_URL", "http://hermes:3000/mcp/http")
 
     if not HANDLE_RE.fullmatch(desired_handle):

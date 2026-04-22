@@ -10,7 +10,7 @@ services:
       - STAGING_DELAY_MS=3600000
       - GIT_SHA=${GIT_SHA}
       - IMAGE_DIGEST=${IMAGE_DIGEST}
-      - MODERATOR_HANDLES=hermes
+      - MODERATOR_HANDLES=router,hermes
       # Names only — values injected via encrypted --env-file at deploy time
       - BASE_URL
       - FIREBASE_SERVICE_ACCOUNT_BASE64
@@ -44,7 +44,7 @@ services:
       - ANTHROPIC_API_KEY
       - HERMES_MCP_URL=http://hermes:3000/mcp/http
       - HERMES_SECRET_KEY
-      - HERMES_HANDLE=hermes
+      - HERMES_HANDLE=router
       - TELEGRAM_BOT_TOKEN
       - GITHUB_TOKEN
     volumes:

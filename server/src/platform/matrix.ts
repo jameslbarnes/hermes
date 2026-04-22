@@ -564,16 +564,20 @@ export class MatrixPlatform implements Platform {
         await this.client!.joinRoom(roomId);
         console.log(`[Matrix] Auto-joined room ${roomId}`);
 
-        // Send wake message in encrypted rooms
-        try {
-          const room = this.client!.getRoom(roomId);
-          if (room) {
+        // Delay the welcome message so room encryption state has time to sync.
+        // Element withholds Megolm keys from devices that haven't "spoken" —
+        // the wake message triggers key sharing — but sending too early fails
+        // with "Cannot encrypt event in unconfigured room".
+        setTimeout(async () => {
+          try {
             await this.client!.sendMessage(roomId, {
               msgtype: MsgType.Text,
-              body: 'Hello! I\'m the Router — I connect people and ideas from the notebook.',
+              body: 'Hi — I\'m the Router. Say `help` for what I can do, or `link` to connect your Hermes notebook account.',
             });
+          } catch (err) {
+            console.error(`[Matrix] Welcome message failed in ${roomId}:`, err);
           }
-        } catch { /* Non-fatal */ }
+        }, 5000);
       } catch (err) {
         console.error(`[Matrix] Failed to join room ${roomId}:`, err);
       }

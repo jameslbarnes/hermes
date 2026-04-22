@@ -3,7 +3,6 @@
 echo "[entrypoint] Starting Hermes agent..."
 echo "[entrypoint] ANTHROPIC_API_KEY set: $(test -n "$ANTHROPIC_API_KEY" && echo yes || echo no)"
 echo "[entrypoint] TELEGRAM_BOT_TOKEN set: $(test -n "$TELEGRAM_BOT_TOKEN" && echo yes || echo no)"
-echo "[entrypoint] HERMES_SECRET_KEY set: $(test -n "$HERMES_SECRET_KEY" && echo yes || echo no)"
 echo "[entrypoint] HERMES_MCP_URL: ${HERMES_MCP_URL:-not set}"
 echo "[entrypoint] GITHUB_TOKEN set: $(test -n "$GITHUB_TOKEN" && echo yes || echo no)"
 
@@ -32,6 +31,24 @@ else
   echo "[entrypoint] state.db NOT FOUND — fresh state"
 fi
 echo "[entrypoint] Existing skills: $(ls $HERMES_HOME/skills 2>/dev/null || echo none)"
+
+# Bootstrap a stable Hermes notebook identity.
+# Order of precedence:
+#   1. HERMES_SECRET_KEY from env
+#   2. persisted key in /data/hermes-agent/secret_key
+#   3. generate once, register the configured handle, persist to disk
+IDENTITY_ENV=$(mktemp)
+if ! python3 /app/bootstrap_identity.py > "$IDENTITY_ENV"; then
+  rm -f "$IDENTITY_ENV"
+  exit 1
+fi
+# shellcheck disable=SC1090
+. "$IDENTITY_ENV"
+rm -f "$IDENTITY_ENV"
+
+echo "[entrypoint] HERMES_SECRET_KEY set: $(test -n "$HERMES_SECRET_KEY" && echo yes || echo no)"
+echo "[entrypoint] HERMES_SECRET_KEY source: ${HERMES_SECRET_KEY_SOURCE:-unknown}"
+echo "[entrypoint] HERMES agent handle: ${HERMES_AGENT_HANDLE:-unknown}"
 
 # Write secrets to .env
 cat > "$HERMES_HOME/.env" << EOF

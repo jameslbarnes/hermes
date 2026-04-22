@@ -17,6 +17,7 @@ on:
 env:
   REGISTRY: docker.io
   IMAGE_NAME: generalsemantics/hermes
+  AGENT_IMAGE_NAME: generalsemantics/hermes-agent
 
 jobs:
   build:
@@ -28,6 +29,8 @@ jobs:
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       tags: ${{ steps.meta.outputs.tags }}
+      agent_digest: ${{ steps.agent_build.outputs.digest }}
+      agent_tags: ${{ steps.agent_meta.outputs.tags }}
 
     steps:
       - name: Checkout repository
@@ -55,6 +58,18 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=
 
+      - name: Extract agent metadata
+        id: agent_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.AGENT_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+
       - name: Build and push
         id: build
         uses: docker/build-push-action@v5
@@ -63,8 +78,20 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=server
+          cache-to: type=gha,scope=server,mode=max
+
+      - name: Build and push agent
+        id: agent_build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./agent
+          file: ./agent/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.agent_meta.outputs.tags }}
+          labels: ${{ steps.agent_meta.outputs.labels }}
+          cache-from: type=gha,scope=agent
+          cache-to: type=gha,scope=agent,mode=max
 
       - name: Output digest
         run: |
@@ -72,14 +99,17 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Image:** \`${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Agent Image:** \`${{ env.AGENT_IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Agent Digest:** \`${{ steps.agent_build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Git SHA:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Verification" >> $GITHUB_STEP_SUMMARY
           echo "To verify the Phala TEE attestation matches this build:" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
           echo "# 1. Get attestation from Phala dashboard or /attestation endpoint" >> $GITHUB_STEP_SUMMARY
-          echo "# 2. Compare the image digest in vm_config with:" >> $GITHUB_STEP_SUMMARY
+          echo "# 2. Compare the image digests in vm_config with:" >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.agent_build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
   deploy:
@@ -100,6 +130,7 @@ jobs:
         env:
           GIT_SHA_FULL: ${{ github.sha }}
           IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          AGENT_IMAGE_DIGEST: ${{ needs.build.outputs.agent_digest }}
         run: |
           # Only non-secret values go into the compose (visible in TEE metadata)
           export GIT_SHA=$(echo "$GIT_SHA_FULL" | cut -c1-7)
@@ -134,7 +165,7 @@ jobs:
 
           # Redact secrets from metadata before committing
           if [ -f "$DIR/metadata-raw.json" ]; then
-            sed -E 's/(ANTHROPIC_API_KEY|SENDGRID_API_KEY|FIREBASE_SERVICE_ACCOUNT_BASE64|FIRECRAWL_API_KEY|CLOUDFLARE_API_TOKEN|TELEGRAM_BOT_TOKEN|TELEGRAM_BOT_SECRET_KEY)=[^",\\]*/\1=[REDACTED]/g' \
+            sed -E 's/(ANTHROPIC_API_KEY|SENDGRID_API_KEY|FIREBASE_SERVICE_ACCOUNT_BASE64|FIRECRAWL_API_KEY|CLOUDFLARE_API_TOKEN|TELEGRAM_BOT_TOKEN|TELEGRAM_BOT_SECRET_KEY|HERMES_SECRET_KEY|GITHUB_TOKEN|GH_TOKEN)=[^",\\]*/\1=[REDACTED]/g' \
               "$DIR/metadata-raw.json" > "$DIR/metadata.json"
             rm "$DIR/metadata-raw.json"
           fi
@@ -145,6 +176,7 @@ jobs:
           "git_sha": "${{ github.sha }}",
           "git_sha_short": "$(echo ${{ github.sha }} | cut -c1-7)",
           "image_digest": "${{ needs.build.outputs.digest }}",
+          "agent_image_digest": "${{ needs.build.outputs.agent_digest }}",
           "app_id": "${{ secrets.PHALA_APP_ID }}",
           "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
           "workflow_run": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -172,5 +204,6 @@ jobs:
           echo "✅ Deployed to Phala Cloud CVM" >> $GITHUB_STEP_SUMMARY
           echo "**App ID:** \`${{ secrets.PHALA_APP_ID }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Image Digest:** \`${{ needs.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Agent Digest:** \`${{ needs.build.outputs.agent_digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**KMS:** Pha (cloud) — Base on-chain KMS pending CVM recreation" >> $GITHUB_STEP_SUMMARY
           echo "**Evidences:** Archived to \`evidences/$(date -u +%Y-%m-%d)/\`" >> $GITHUB_STEP_SUMMARY

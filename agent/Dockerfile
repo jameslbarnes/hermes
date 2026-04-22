@@ -26,6 +26,7 @@ ENV VIRTUAL_ENV="/opt/venv"
 WORKDIR /app
 COPY config.yaml /app/defaults/config.yaml
 COPY skills/ /app/defaults/skills/
+COPY bootstrap_identity.py /app/bootstrap_identity.py
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 

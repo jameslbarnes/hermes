@@ -21,11 +21,12 @@ describe('getMatrixRoutingTargets', () => {
     });
   });
 
-  it('posts channel-addressed public entries to feed and channel rooms', () => {
+  it('posts channel-addressed entries to channel rooms only', () => {
     expect(getMatrixRoutingTargets(makeEntry({
       to: ['#books', '#feed'],
+      visibility: 'private',
     }))).toEqual({
-      postToFeed: true,
+      postToFeed: false,
       channelDests: ['books', 'feed'],
     });
   });

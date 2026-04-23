@@ -60,7 +60,6 @@ export function getPublishedEntryFromEvent(
 }
 
 export function getMatrixRoutingTargets(entry: JournalEntry): { postToFeed: boolean; channelDests: string[] } {
-  if (entry.visibility === 'private') return { postToFeed: false, channelDests: [] };
   if (entry.aiOnly === true || entry.humanVisible === false) return { postToFeed: false, channelDests: [] };
   if (entry.content.length < MIN_PLATFORM_CONTENT_LENGTH) return { postToFeed: false, channelDests: [] };
 
@@ -68,10 +67,13 @@ export function getMatrixRoutingTargets(entry: JournalEntry): { postToFeed: bool
   const channelDests = destinations
     .filter(dest => dest.startsWith('#'))
     .map(dest => dest.slice(1));
-  const hasNonChannelRecipients = destinations.some(dest => !dest.startsWith('#'));
+
+  if (entry.visibility === 'private' && channelDests.length === 0) {
+    return { postToFeed: false, channelDests: [] };
+  }
 
   return {
-    postToFeed: !hasNonChannelRecipients,
+    postToFeed: destinations.length === 0,
     channelDests,
   };
 }

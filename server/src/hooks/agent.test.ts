@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { JournalEntry } from '../storage.js';
-import { getMatrixRoutingTargets } from './agent.js';
+import { getMatrixRoutingTargets, getPublishedEntryFromEvent } from './agent.js';
 
 function makeEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
   return {
@@ -48,5 +48,22 @@ describe('getMatrixRoutingTargets', () => {
       postToFeed: false,
       channelDests: [],
     });
+  });
+});
+
+describe('getPublishedEntryFromEvent', () => {
+  it('uses the stored entry when available', () => {
+    const entry = makeEntry({ id: 'stored-entry' });
+    expect(getPublishedEntryFromEvent(entry, {})).toBe(entry);
+  });
+
+  it('falls back to the event snapshot when storage misses', () => {
+    const snapshot = makeEntry({ id: 'snapshot-entry', handle: 'james' });
+    expect(getPublishedEntryFromEvent(null, { entry: snapshot })).toEqual(snapshot);
+  });
+
+  it('returns null when neither storage nor the event has a usable entry', () => {
+    expect(getPublishedEntryFromEvent(null, {})).toBeNull();
+    expect(getPublishedEntryFromEvent(null, { entry: { id: 'bad' } })).toBeNull();
   });
 });

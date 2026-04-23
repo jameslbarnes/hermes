@@ -1078,6 +1078,7 @@ if (storage instanceof StagedStorage) {
     // Push entry_published event for the agent (no content — agent reads via hermes_get_entry)
     pushEvent('entry_published', {
       entry_id: entry.id,
+      entry,
       author_handle: entry.handle || null,
       author_pseudonym: entry.pseudonym,
       is_reflection: entry.isReflection || false,
@@ -4955,6 +4956,7 @@ const server = createServer(async (req, res) => {
       if (!(storage instanceof StagedStorage)) {
         pushEvent('entry_published', {
           entry_id: entry.id,
+          entry,
           author_handle: entry.handle || null,
           author_pseudonym: entry.pseudonym,
           is_reflection: entry.isReflection || false,

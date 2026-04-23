@@ -39,6 +39,23 @@ function matrixMentionsHandledByHermesAgent(): boolean {
   return ['1', 'true', 'yes', 'remote'].includes(raw.trim().toLowerCase());
 }
 
+export function getPublishedEntryFromEvent(
+  storedEntry: JournalEntry | null,
+  eventData: Record<string, any>,
+): JournalEntry | null {
+  if (storedEntry) return storedEntry;
+
+  const snapshot = eventData.entry;
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  if (typeof snapshot.id !== 'string') return null;
+  if (typeof snapshot.pseudonym !== 'string') return null;
+  if (snapshot.client !== 'desktop' && snapshot.client !== 'mobile' && snapshot.client !== 'code') return null;
+  if (typeof snapshot.content !== 'string') return null;
+  if (typeof snapshot.timestamp !== 'number') return null;
+
+  return snapshot as JournalEntry;
+}
+
 export function getMatrixRoutingTargets(entry: JournalEntry): { postToFeed: boolean; channelDests: string[] } {
   if (entry.visibility === 'private') return { postToFeed: false, channelDests: [] };
   if (entry.aiOnly === true || entry.humanVisible === false) return { postToFeed: false, channelDests: [] };
@@ -101,8 +118,15 @@ async function onEntryPublished(ctx: HookContext): Promise<void> {
   const entryId = event.data.entry_id;
   if (!entryId) return;
 
-  const entry = await storage.getEntry(entryId);
-  if (!entry) return;
+  const storedEntry = await storage.getEntry(entryId);
+  const entry = getPublishedEntryFromEvent(storedEntry, event.data);
+  if (!entry) {
+    console.warn(`[Agent] Published entry ${entryId} not found in storage and no usable snapshot was attached`);
+    return;
+  }
+  if (!storedEntry) {
+    console.warn(`[Agent] Published entry ${entryId} missing from storage lookup, using event snapshot`);
+  }
 
   const authorDisplay = entry.handle ? `@${entry.handle}` : entry.pseudonym;
   console.log(`[Agent] Entry published by ${authorDisplay}: ${entry.content.substring(0, 80)}...`);

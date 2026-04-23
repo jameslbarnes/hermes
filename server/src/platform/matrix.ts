@@ -79,6 +79,15 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export function isMatrixMention(params: {
   isDM: boolean;
   text: string;
@@ -706,23 +715,37 @@ export class MatrixPlatform implements Platform {
 
     const baseUrl = this.config.baseUrl || 'https://hermes.teleport.computer';
     const permalink = `${baseUrl}/#entry-${entry.id}`;
-    const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
+    const linkedAuthorId = entry.handle
+      ? await this.config.resolveLinkedPlatformId?.(this.name, entry.handle)
+      : null;
+    const author = linkedAuthorId || (entry.handle ? `@${entry.handle}` : entry.pseudonym);
+    const renderedBody = await this.renderLinkedHandlesForMatrix(entry.content.substring(0, 500));
+    const authorHtml = linkedAuthorId
+      ? `<a href="https://matrix.to/#/${encodeURIComponent(linkedAuthorId)}">${escapeHtml(linkedAuthorId)}</a>`
+      : escapeHtml(author);
+    const permalinkHtml = `<a href="${escapeHtml(permalink)}">${escapeHtml(permalink)}</a>`;
+    const formattedBody = editorialHook
+      ? `${escapeHtml(editorialHook)}<br><br>&mdash; ${authorHtml} &middot; ${permalinkHtml}`
+      : `${authorHtml}: ${renderedBody.html}${entry.content.length > 500 ? '...' : ''}<br><br>${permalinkHtml}`;
 
     const content: any = {
       msgtype: MsgType.Text,
       // Custom fields for Router Client rendering
       entry_id: entry.id,
       author_handle: entry.handle,
+      author_platform_id: linkedAuthorId || undefined,
       author_pseudonym: entry.pseudonym,
       content: entry.content,
       editorial_hook: editorialHook,
       permalink,
       topic_hints: entry.topicHints,
       is_reflection: entry.isReflection,
+      format: 'org.matrix.custom.html',
+      formatted_body: formattedBody,
       // Fallback text for stock clients
       body: editorialHook
         ? `${editorialHook}\n\n— ${author} · ${permalink}`
-        : `${author}: ${entry.content.substring(0, 500)}${entry.content.length > 500 ? '...' : ''}\n\n${permalink}`,
+        : `${author}: ${renderedBody.plain}${entry.content.length > 500 ? '...' : ''}\n\n${permalink}`,
     };
 
     // We use m.room.message with custom fields instead of a custom event type
@@ -811,6 +834,44 @@ export class MatrixPlatform implements Platform {
   }
 
   // ── Private ────────────────────────────────────────────────
+
+  private async renderLinkedHandlesForMatrix(text: string): Promise<{ plain: string; html: string }> {
+    const handlePattern = /(^|[\s([{"'`])@([a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?)(?=$|[\s)\]}:.,!?'"`])/g;
+    const linkedCache = new Map<string, string | null>();
+
+    let plain = '';
+    let html = '';
+    let lastIndex = 0;
+
+    for (const match of text.matchAll(handlePattern)) {
+      const prefix = match[1] || '';
+      const handle = match[2];
+      const index = match.index ?? 0;
+      const mentionStart = index + prefix.length;
+
+      plain += text.slice(lastIndex, mentionStart);
+      html += escapeHtml(text.slice(lastIndex, mentionStart));
+
+      let linkedId = linkedCache.get(handle);
+      if (linkedId === undefined) {
+        linkedId = await this.config.resolveLinkedPlatformId?.(this.name, handle) ?? null;
+        linkedCache.set(handle, linkedId);
+      }
+
+      const replacement = linkedId || `@${handle}`;
+      plain += replacement;
+      html += linkedId
+        ? `<a href="https://matrix.to/#/${encodeURIComponent(linkedId)}">${escapeHtml(linkedId)}</a>`
+        : escapeHtml(replacement);
+
+      lastIndex = mentionStart + (`@${handle}`).length;
+    }
+
+    plain += text.slice(lastIndex);
+    html += escapeHtml(text.slice(lastIndex));
+
+    return { plain, html };
+  }
 
   private setupEventListeners(): void {
     if (!this.client) return;

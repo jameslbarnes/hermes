@@ -215,3 +215,69 @@ describe('MatrixPlatform channel rooms', () => {
     );
   });
 });
+
+describe('MatrixPlatform post rendering', () => {
+  const createPlatform = (overrides: Partial<ConstructorParameters<typeof MatrixPlatform>[0]> = {}) => new MatrixPlatform({
+    serverUrl: 'https://mtrx.example.test',
+    serverName: 'mtrx.example.test',
+    botSecretKey: 'test-secret',
+    botHandle: 'router',
+    baseUrl: 'https://hermes.example.test',
+    ...overrides,
+  });
+
+  it('renders linked Matrix IDs for authors and inline handles in Matrix posts', async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const platform = createPlatform({
+      resolveLinkedPlatformId: async (name, handle) => {
+        if (name !== 'matrix') return null;
+        if (handle === 'james') return '@specularist:matrix.org';
+        if (handle === 'socrates1024') return '@socrates1024:matrix.org';
+        return null;
+      },
+    });
+
+    (platform as any).client = { sendMessage };
+
+    await expect(platform.postEntry('!room:mtrx.example.test', {
+      id: 'entry-1',
+      handle: 'james',
+      pseudonym: 'Solitary Feather#123',
+      content: 'Looping in @socrates1024 on this one.',
+      timestamp: Date.now(),
+    })).resolves.toBe('$event');
+
+    expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
+      author_handle: 'james',
+      author_platform_id: '@specularist:matrix.org',
+      body: expect.stringContaining('@specularist:matrix.org: Looping in @socrates1024:matrix.org on this one.'),
+      formatted_body: expect.stringContaining('https://matrix.to/#/%40specularist%3Amatrix.org'),
+    }));
+    expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
+      formatted_body: expect.stringContaining('https://matrix.to/#/%40socrates1024%3Amatrix.org'),
+    }));
+  });
+
+  it('leaves Hermes handles untouched when no linked Matrix ID exists', async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const platform = createPlatform({
+      resolveLinkedPlatformId: async () => null,
+    });
+
+    (platform as any).client = { sendMessage };
+
+    await platform.postEntry('!room:mtrx.example.test', {
+      id: 'entry-2',
+      handle: 'james',
+      pseudonym: 'Solitary Feather#123',
+      content: 'Asking @someone-else to weigh in.',
+      timestamp: Date.now(),
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
+      author_platform_id: undefined,
+      body: expect.stringContaining('@james: Asking @someone-else to weigh in.'),
+      formatted_body: expect.stringContaining('@james'),
+    }));
+  });
+});

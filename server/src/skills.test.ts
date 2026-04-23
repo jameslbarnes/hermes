@@ -28,6 +28,14 @@ describe('Skills System', () => {
       expect(skill!.handlerType).toBe('builtin');
     });
 
+    it('should have hermes_send_dm as a system skill', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_send_dm');
+      expect(skill).toBeDefined();
+      expect(skill!.handlerType).toBe('builtin');
+      expect(skill!.inputSchema?.required).toEqual(['platform', 'text']);
+      expect(skill!.inputSchema?.properties?.handle).toBeDefined();
+    });
+
     it('should have hermes_skills with expanded action enum', () => {
       const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_skills');
       expect(skill).toBeDefined();

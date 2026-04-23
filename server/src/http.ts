@@ -736,6 +736,23 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
+    id: 'system_hermes_send_dm',
+    name: 'hermes_send_dm',
+    description: 'Send a direct message to a linked account on a connected platform. Defaults to your own linked account. Moderators may target another handle.',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        platform: { type: 'string', description: 'Platform name (e.g. "matrix", "telegram")' },
+        text: { type: 'string', description: 'Message text (markdown supported)' },
+        handle: { type: 'string', description: 'Optional Hermes handle to DM instead of yourself. Moderators only.' },
+      },
+      required: ['platform', 'text'],
+    },
+    createdAt: 0,
+  },
+  {
     id: 'system_hermes_platform_create_room',
     name: 'hermes_platform_create_room',
     description: 'Create a new room on a platform. Use for introductions, channels, or ad-hoc groups.',
@@ -3945,6 +3962,77 @@ function createMCPServer(secretKey: string) {
         return { content: [{ type: 'text' as const, text: `Message sent (${messageId})` }] };
       } catch (err: any) {
         return { content: [{ type: 'text' as const, text: `Send failed: ${err.message}` }], isError: true };
+      }
+    }
+
+    if (name === 'hermes_send_dm') {
+      const a = args as { platform?: string; text?: string; handle?: string };
+      const platformName = a.platform?.trim();
+      const text = a.text?.trim();
+      const requestedHandle = a.handle?.replace(/^@/, '').trim().toLowerCase();
+
+      if (!platformName || !text) {
+        return {
+          content: [{ type: 'text' as const, text: 'platform and text are required.' }],
+          isError: true,
+        };
+      }
+
+      const requester = await storage.getUserByKeyHash(keyHash);
+      if (!requester?.handle) {
+        return {
+          content: [{ type: 'text' as const, text: 'You need to register a Hermes handle first.' }],
+          isError: true,
+        };
+      }
+
+      const targetHandle = requestedHandle || requester.handle;
+      const isModerator = MODERATOR_HANDLES.size === 0 || MODERATOR_HANDLES.has(requester.handle);
+      if (targetHandle !== requester.handle && !isModerator) {
+        return {
+          content: [{ type: 'text' as const, text: 'Only moderators can send DMs on behalf of another handle.' }],
+          isError: true,
+        };
+      }
+
+      const targetUser = await storage.getUser(targetHandle);
+      if (!targetUser?.handle) {
+        return {
+          content: [{ type: 'text' as const, text: `User @${targetHandle} not found.` }],
+          isError: true,
+        };
+      }
+
+      const linkedAccount = targetUser.linkedAccounts?.find(account =>
+        account.platform === platformName
+        && account.platformUserId
+        && account.verified !== false,
+      );
+      if (!linkedAccount) {
+        return {
+          content: [{ type: 'text' as const, text: `@${targetHandle} has no linked ${platformName} account.` }],
+          isError: true,
+        };
+      }
+
+      const platform = getPlatform(platformName);
+      if (!platform) {
+        return {
+          content: [{ type: 'text' as const, text: `Platform "${platformName}" not connected.` }],
+          isError: true,
+        };
+      }
+
+      try {
+        const messageId = await platform.sendDM(linkedAccount.platformUserId, text);
+        return {
+          content: [{ type: 'text' as const, text: `DM sent to @${targetHandle} on ${platformName} (${messageId})` }],
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: 'text' as const, text: `DM send failed: ${err.message}` }],
+          isError: true,
+        };
       }
     }
 

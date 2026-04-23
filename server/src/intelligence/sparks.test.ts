@@ -133,7 +133,7 @@ describe('getConnectionInfo', () => {
     expect(info.sharedRoomIds).toEqual([]);
   });
 
-  it('detects connection when users share a channel', async () => {
+  it('does not treat shared channel membership as an existing spark room', async () => {
     await storage.createUser({ handle: 'alice', secretKeyHash: 'hash-a' });
     await storage.createUser({ handle: 'bob', secretKeyHash: 'hash-b' });
     await storage.createChannel({
@@ -149,8 +149,19 @@ describe('getConnectionInfo', () => {
     await storage.addSubscriber('tees', 'bob', 'member');
 
     const info = await getConnectionInfo('alice', 'bob', [], storage);
+    expect(info.isConnected).toBe(false);
+    expect(info.sharedRoomIds).toEqual([]);
+  });
+
+  it('detects connection when users already have a spark pair room', async () => {
+    await storage.createUser({ handle: 'alice', secretKeyHash: 'hash-a' });
+    await storage.createUser({ handle: 'bob', secretKeyHash: 'hash-b' });
+    await storage.setSparkPairRoom('alice', 'bob', '!pair-room:example.test');
+
+    const info = await getConnectionInfo('alice', 'bob', [], storage);
     expect(info.isConnected).toBe(true);
-    expect(info.recentInteractions).toBeGreaterThan(0);
+    expect(info.sharedRoomIds).toEqual(['!pair-room:example.test']);
+    await expect(storage.getSparkPairRoom('bob', 'alice')).resolves.toBe('!pair-room:example.test');
   });
 
   it('detects connection via mutual follows', async () => {

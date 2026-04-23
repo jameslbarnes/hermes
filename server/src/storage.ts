@@ -417,6 +417,16 @@ export interface Storage {
   /** Get entries for a channel */
   getChannelEntries(channelId: string, limit?: number): Promise<JournalEntry[]>;
 
+  /** Get the private spark room for a pair of handles, if one exists */
+  getSparkPairRoom(handleA: string, handleB: string): Promise<string | null>;
+
+  /** Persist the private spark room for a pair of handles */
+  setSparkPairRoom(handleA: string, handleB: string, roomId: string): Promise<void>;
+
+}
+
+function getSparkPairKey(handleA: string, handleB: string): string {
+  return [handleA.toLowerCase(), handleB.toLowerCase()].sort().join(':');
 }
 
 /**
@@ -426,6 +436,7 @@ export class MemoryStorage implements Storage {
   private entries: JournalEntry[] = [];
   private users: Map<string, User> = new Map(); // handle -> User
   private nextId = 1;
+  private sparkPairRooms: Map<string, string> = new Map();
 
   async addEntry(entry: Omit<JournalEntry, 'id'>, _stagingDelayMs?: number): Promise<JournalEntry> {
     const newEntry: JournalEntry = {
@@ -765,6 +776,14 @@ export class MemoryStorage implements Storage {
       .filter(e => e.channel === channelId || (e.to && e.to.includes(channelDest)))
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, limit);
+  }
+
+  async getSparkPairRoom(handleA: string, handleB: string): Promise<string | null> {
+    return this.sparkPairRooms.get(getSparkPairKey(handleA, handleB)) || null;
+  }
+
+  async setSparkPairRoom(handleA: string, handleB: string, roomId: string): Promise<void> {
+    this.sparkPairRooms.set(getSparkPairKey(handleA, handleB), roomId);
   }
 
 }
@@ -1490,6 +1509,7 @@ export class FirestoreStorage implements Storage {
 
   private channelsCollection = 'channels';
   private invitesCollection = 'channel_invites';
+  private sparkPairRoomsCollection = 'spark_pair_rooms';
 
   async createChannel(channel: Channel): Promise<Channel> {
     const existing = await this.db.collection(this.channelsCollection).doc(channel.id).get();
@@ -1648,6 +1668,27 @@ export class FirestoreStorage implements Storage {
     return results
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, limit);
+  }
+
+  async getSparkPairRoom(handleA: string, handleB: string): Promise<string | null> {
+    const doc = await this.db
+      .collection(this.sparkPairRoomsCollection)
+      .doc(getSparkPairKey(handleA, handleB))
+      .get();
+    if (!doc.exists) return null;
+    const data = doc.data() as { roomId?: string } | undefined;
+    return data?.roomId || null;
+  }
+
+  async setSparkPairRoom(handleA: string, handleB: string, roomId: string): Promise<void> {
+    await this.db
+      .collection(this.sparkPairRoomsCollection)
+      .doc(getSparkPairKey(handleA, handleB))
+      .set({
+        handles: [handleA.toLowerCase(), handleB.toLowerCase()].sort(),
+        roomId,
+        updatedAt: Date.now(),
+      });
   }
 
 }
@@ -2182,6 +2223,14 @@ export class StagedStorage implements Storage {
     return [...pendingEntries, ...published]
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, limit);
+  }
+
+  async getSparkPairRoom(handleA: string, handleB: string): Promise<string | null> {
+    return this.published.getSparkPairRoom(handleA, handleB);
+  }
+
+  async setSparkPairRoom(handleA: string, handleB: string, roomId: string): Promise<void> {
+    return this.published.setSparkPairRoom(handleA, handleB, roomId);
   }
 
 }

@@ -207,12 +207,12 @@ export async function evaluateSpark(
 
 /**
  * Check the connection between two users across all platforms and the notebook.
- * Returns info about shared rooms, interaction history, and follow status.
+ * Returns info about reusable private spark rooms and prior interaction signals.
  */
 export async function getConnectionInfo(
   handleA: string,
   handleB: string,
-  platforms: Platform[],
+  _platforms: Platform[],
   storage?: Storage,
 ): Promise<ConnectionInfo> {
   const sharedRoomIds: string[] = [];
@@ -241,22 +241,12 @@ export async function getConnectionInfo(
       // Non-fatal
     }
 
-    // Check Hermes: are they in the same channels?
+    // Check Hermes: do they already have a dedicated private spark room?
     try {
-      const channels = await storage.listChannels();
-      for (const channel of channels) {
-        const aInChannel = channel.subscribers.some(s => s.handle === handleA);
-        const bInChannel = channel.subscribers.some(s => s.handle === handleB);
-        if (aInChannel && bInChannel) {
-          // Find the Matrix room for this channel
-          for (const platform of platforms) {
-            if ('getChannelRoomId' in platform) {
-              const roomId = (platform as any).getChannelRoomId(channel.id);
-              if (roomId) sharedRoomIds.push(roomId);
-            }
-          }
-          recentInteractions++;
-        }
+      const pairRoomId = await storage.getSparkPairRoom(handleA, handleB);
+      if (pairRoomId) {
+        sharedRoomIds.push(pairRoomId);
+        recentInteractions++;
       }
     } catch {
       // Non-fatal

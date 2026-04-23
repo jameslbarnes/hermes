@@ -11,7 +11,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { HookContext } from './types.js';
 import type { HookDispatcher } from './dispatcher.js';
-import type { JournalEntry } from '../storage.js';
+import type { JournalEntry, Storage } from '../storage.js';
 import { shouldRoute, evaluateEntry, type RecentPost } from '../intelligence/scoring.js';
 import { detectSparks, evaluateSpark, getConnectionInfo, executeSpark, type SparkAction } from '../intelligence/sparks.js';
 import { RoomBufferManager, type BufferedMessage } from '../intelligence/heat.js';
@@ -415,7 +415,7 @@ async function executeSparkWithContext(
   candidate: import('../intelligence/sparks.js').SparkCandidate,
   sourceEntry: JournalEntry,
   platforms: import('../platform/types.js').Platform[],
-  storage?: import('../storage.js').Storage,
+  storage?: Storage,
 ): Promise<void> {
   if (action.action === 'skip') return;
 
@@ -444,41 +444,22 @@ async function executeSparkWithContext(
     }
   }
 
-  if (action.action === 'introduce' && matrixPlatform) {
-    const room = await matrixPlatform.createRoom(
-      `@${action.sourceHandle} ↔ @${action.targetHandle}`,
-      {
-        type: 'group',
-        invite: [action.sourceHandle, action.targetHandle],
-        topic: action.reason,
-        encrypted: true,
-      },
+  if (matrixPlatform && storage && (action.action === 'introduce' || action.action === 'nudge')) {
+    const pairRoom = await ensureSparkPairRoom(
+      action,
+      sourceEntry,
+      candidate,
+      matrixPlatform,
+      storage,
     );
 
-    await matrixPlatform.postSparkContext(room.id, {
-      sourceHandle: action.sourceHandle,
-      targetHandle: action.targetHandle,
-      reason: action.reason,
-      evidence: [
-        {
-          entryId: sourceEntry.id,
-          author: `@${action.sourceHandle}`,
-          snippet: sourceEntry.content.substring(0, 200),
-        },
-        ...candidate.matchingEntries.slice(0, 2).map(e => ({
-          entryId: e.id,
-          author: `@${candidate.handle}`,
-          snippet: e.content.substring(0, 200),
-        })),
-      ],
-    });
-
-    // Post the warm introduction message
     if (warmMessage) {
-      await matrixPlatform.sendMessage(room.id, warmMessage);
+      await matrixPlatform.sendMessage(pairRoom.id, warmMessage);
     }
 
-    console.log(`[Agent] Introduction room created: ${room.id}`);
+    if (pairRoom.created) {
+      console.log(`[Agent] Spark room created: ${pairRoom.id}`);
+    }
     return;
   }
 
@@ -487,4 +468,50 @@ async function executeSparkWithContext(
     action = { ...action, message: warmMessage };
   }
   await executeSpark(action, platforms, 'router');
+}
+
+async function ensureSparkPairRoom(
+  action: SparkAction,
+  sourceEntry: JournalEntry,
+  candidate: import('../intelligence/sparks.js').SparkCandidate,
+  matrixPlatform: MatrixPlatform,
+  storage: Storage,
+): Promise<{ id: string; created: boolean }> {
+  const existingRoomId = action.existingRoomId
+    || await storage.getSparkPairRoom(action.sourceHandle, action.targetHandle);
+  if (existingRoomId) {
+    return { id: existingRoomId, created: false };
+  }
+
+  const room = await matrixPlatform.createRoom(
+    `@${action.sourceHandle} ↔ @${action.targetHandle}`,
+    {
+      type: 'group',
+      invite: [action.sourceHandle, action.targetHandle],
+      topic: action.reason,
+      encrypted: true,
+    },
+  );
+
+  await storage.setSparkPairRoom(action.sourceHandle, action.targetHandle, room.id);
+
+  await matrixPlatform.postSparkContext(room.id, {
+    sourceHandle: action.sourceHandle,
+    targetHandle: action.targetHandle,
+    reason: action.reason,
+    evidence: [
+      {
+        entryId: sourceEntry.id,
+        author: `@${action.sourceHandle}`,
+        snippet: sourceEntry.content.substring(0, 200),
+      },
+      ...candidate.matchingEntries.slice(0, 2).map(e => ({
+        entryId: e.id,
+        author: `@${candidate.handle}`,
+        snippet: e.content.substring(0, 200),
+      })),
+    ],
+  });
+
+  return { id: room.id, created: true };
 }

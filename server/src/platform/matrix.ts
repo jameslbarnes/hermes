@@ -57,6 +57,7 @@ export interface MatrixPlatformConfig {
   serverName: string;
   botSecretKey: string;
   botHandle: string;
+  spaceRoomId?: string;
   registrationToken?: string;
   /** Signup wrapper URL (e.g. Shape Rotator's /signup/api). If set, registration
    *  uses this wrapper instead of the native Matrix registration endpoint. */
@@ -624,6 +625,30 @@ export class MatrixPlatform implements Platform {
     }
   }
 
+  private async ensureSpaceMembership(roomId: string, channelId: string): Promise<void> {
+    if (!this.client) throw new Error('Matrix client not started');
+    if (!this.config.spaceRoomId) return;
+    if (roomId === this.config.spaceRoomId) return;
+
+    try {
+      await this.client.sendStateEvent(
+        this.config.spaceRoomId,
+        EventType.SpaceChild,
+        { via: [this.config.serverName], suggested: true },
+        roomId,
+      );
+
+      await this.client.sendStateEvent(
+        roomId,
+        EventType.SpaceParent,
+        { via: [this.config.serverName], canonical: true },
+        this.config.spaceRoomId,
+      );
+    } catch (error) {
+      console.warn(`[Matrix] Failed to attach #${channelId} to space ${this.config.spaceRoomId}:`, error);
+    }
+  }
+
   async ensureChannelRoom(channelId: string, channelName: string, description?: string): Promise<string> {
     const cached = this.channelRooms.get(channelId);
     if (cached) return cached;
@@ -636,6 +661,7 @@ export class MatrixPlatform implements Platform {
       const resolved = await this.client.getRoomIdForAlias(alias);
       this.channelRooms.set(channelId, resolved.room_id);
       await this.ensureRoomDirectoryVisibility(resolved.room_id, channelId);
+      await this.ensureSpaceMembership(resolved.room_id, channelId);
       return resolved.room_id;
     } catch {
       // Room doesn't exist, create it
@@ -658,6 +684,7 @@ export class MatrixPlatform implements Platform {
 
     this.channelRooms.set(channelId, result.room_id);
     await this.ensureRoomDirectoryVisibility(result.room_id, channelId);
+    await this.ensureSpaceMembership(result.room_id, channelId);
     console.log(`[Matrix] Created room for #${channelId}: ${result.room_id}`);
     return result.room_id;
   }

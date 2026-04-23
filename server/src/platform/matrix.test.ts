@@ -126,6 +126,35 @@ describe('MatrixPlatform channel rooms', () => {
     expect(setRoomDirectoryVisibility).toHaveBeenCalledWith('!books:mtrx.example.test', 'public');
   });
 
+  it('attaches existing alias-backed rooms to the configured Matrix space', async () => {
+    const getRoomIdForAlias = vi.fn().mockResolvedValue({ room_id: '!books:mtrx.example.test' });
+    const setRoomDirectoryVisibility = vi.fn().mockResolvedValue({});
+    const sendStateEvent = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const platform = createPlatform({ spaceRoomId: '!space:mtrx.example.test' });
+
+    (platform as any).client = {
+      getRoomIdForAlias,
+      setRoomDirectoryVisibility,
+      sendStateEvent,
+    };
+
+    await expect(platform.ensureChannelRoom('books', 'Books')).resolves.toBe('!books:mtrx.example.test');
+    expect(sendStateEvent).toHaveBeenNthCalledWith(
+      1,
+      '!space:mtrx.example.test',
+      'm.space.child',
+      { via: ['mtrx.example.test'], suggested: true },
+      '!books:mtrx.example.test',
+    );
+    expect(sendStateEvent).toHaveBeenNthCalledWith(
+      2,
+      '!books:mtrx.example.test',
+      'm.space.parent',
+      { via: ['mtrx.example.test'], canonical: true },
+      '!space:mtrx.example.test',
+    );
+  });
+
   it('creates new rooms as public and publishes them to the Matrix room directory', async () => {
     const getRoomIdForAlias = vi.fn().mockRejectedValue(new Error('not found'));
     const createRoom = vi.fn().mockResolvedValue({ room_id: '!books-created:mtrx.example.test' });
@@ -147,5 +176,36 @@ describe('MatrixPlatform channel rooms', () => {
       preset: 'public_chat',
     }));
     expect(setRoomDirectoryVisibility).toHaveBeenCalledWith('!books-created:mtrx.example.test', 'public');
+  });
+
+  it('attaches newly created rooms to the configured Matrix space', async () => {
+    const getRoomIdForAlias = vi.fn().mockRejectedValue(new Error('not found'));
+    const createRoom = vi.fn().mockResolvedValue({ room_id: '!books-created:mtrx.example.test' });
+    const setRoomDirectoryVisibility = vi.fn().mockResolvedValue({});
+    const sendStateEvent = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const platform = createPlatform({ spaceRoomId: '!space:mtrx.example.test' });
+
+    (platform as any).client = {
+      getRoomIdForAlias,
+      createRoom,
+      setRoomDirectoryVisibility,
+      sendStateEvent,
+    };
+
+    await expect(platform.ensureChannelRoom('books', 'Books', 'Book discussion')).resolves.toBe('!books-created:mtrx.example.test');
+    expect(sendStateEvent).toHaveBeenNthCalledWith(
+      1,
+      '!space:mtrx.example.test',
+      'm.space.child',
+      { via: ['mtrx.example.test'], suggested: true },
+      '!books-created:mtrx.example.test',
+    );
+    expect(sendStateEvent).toHaveBeenNthCalledWith(
+      2,
+      '!books-created:mtrx.example.test',
+      'm.space.parent',
+      { via: ['mtrx.example.test'], canonical: true },
+      '!space:mtrx.example.test',
+    );
   });
 });

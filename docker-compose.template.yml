@@ -28,6 +28,7 @@ services:
       - MATRIX_SERVER_NAME
       - MATRIX_BOT_SECRET_KEY
       - MATRIX_BOT_HANDLE
+      - MATRIX_SPACE_ROOM_ID=!4FL8uL5OEYLATG1VH4wC2CD3pfIV6BMFId9VT7rmm-g
       - MATRIX_REGISTRATION_TOKEN
       - MATRIX_SIGNUP_URL
       # One-shot recovery: rotate the Matrix device once if stale device keys

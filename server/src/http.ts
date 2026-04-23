@@ -7949,6 +7949,7 @@ server.listen(PORT, async () => {
   const matrixServerName = process.env.MATRIX_SERVER_NAME;
   const matrixBotKey = process.env.MATRIX_BOT_SECRET_KEY;
   const matrixBotHandle = process.env.MATRIX_BOT_HANDLE || 'router';
+  const matrixSpaceRoomId = process.env.MATRIX_SPACE_ROOM_ID;
 
   if (matrixServerUrl && matrixServerName && matrixBotKey) {
     const matrixPlatform = new MatrixPlatform({
@@ -7956,6 +7957,7 @@ server.listen(PORT, async () => {
       serverName: matrixServerName,
       botSecretKey: matrixBotKey,
       botHandle: matrixBotHandle,
+      spaceRoomId: matrixSpaceRoomId,
       registrationToken: process.env.MATRIX_REGISTRATION_TOKEN,
       signupUrl: process.env.MATRIX_SIGNUP_URL,
       baseUrl: process.env.BASE_URL,

@@ -6951,7 +6951,7 @@ const server = createServer(async (req, res) => {
       }
 
       console.log(`[Digest] Personalized Matrix digest trigger requested by @${requester.handle} for @${targetHandle}`);
-      const result = await sendPersonalizedDigests(storage, { handles: [targetHandle] });
+      const result = await sendPersonalizedDigests(storage, { handles: [targetHandle], force: true });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, targetHandle, ...result }));
       return;

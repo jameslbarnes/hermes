@@ -128,7 +128,7 @@ export async function generateDailyDigest(storage: Storage): Promise<void> {
  */
 export async function sendPersonalizedDigests(
   storage: Storage,
-  opts?: { handles?: string[] },
+  opts?: { handles?: string[]; force?: boolean },
 ): Promise<{ sent: number; failed: number; skipped: number }> {
   const matrix = getPlatform('matrix') as MatrixPlatform | undefined;
   if (!matrix) return { sent: 0, failed: 0, skipped: 0 };
@@ -147,7 +147,7 @@ export async function sendPersonalizedDigests(
     e.timestamp >= startOfDay && e.timestamp < endOfDay && !e.aiOnly
   );
 
-  if (yesterdayEntries.length < 2) return { sent: 0, failed: 0, skipped: 0 };
+  if (yesterdayEntries.length < 2 && !opts?.force) return { sent: 0, failed: 0, skipped: 0 };
 
   // Get all users with interest profiles
   // For now, get users who have entries (active users)
@@ -163,6 +163,20 @@ export async function sendPersonalizedDigests(
     try {
       const user = await storage.getUser(handle);
       if (!user?.interestProfile) {
+        if (opts?.force) {
+          const userId = await matrix.resolvePlatformId(handle);
+          if (userId) {
+            await matrix.sendDM(
+              userId,
+              `📰 Your daily digest\n\nRouter test: Matrix daily digest delivery is working, but there is not enough profile context yet to generate a personalized update.`,
+            );
+            console.log(`[Cron] Sent forced digest placeholder to @${handle} (missing interest profile)`);
+            sent++;
+          } else {
+            skipped++;
+          }
+          continue;
+        }
         skipped++;
         continue;
       }
@@ -180,6 +194,20 @@ export async function sendPersonalizedDigests(
       );
 
       if (followedEntries.length === 0 && discoveryEntries.length === 0) {
+        if (opts?.force) {
+          const userId = await matrix.resolvePlatformId(handle);
+          if (userId) {
+            await matrix.sendDM(
+              userId,
+              `📰 Your daily digest\n\nRouter test: Matrix daily digest delivery is working, but there was not enough recent relevant notebook activity to generate a full personalized update right now.`,
+            );
+            console.log(`[Cron] Sent forced digest placeholder to @${handle} (insufficient relevant activity)`);
+            sent++;
+          } else {
+            skipped++;
+          }
+          continue;
+        }
         skipped++;
         continue;
       }

@@ -23,6 +23,7 @@ import { MatrixPlatform } from '../platform/matrix.js';
 
 const recentPosts: RecentPost[] = [];
 const MAX_RECENT_POSTS = 20;
+const MIN_PLATFORM_CONTENT_LENGTH = 50;
 
 const roomBuffers = new RoomBufferManager();
 
@@ -36,6 +37,23 @@ function matrixMentionsHandledByHermesAgent(): boolean {
   const raw = process.env.HERMES_AGENT_HANDLES_MATRIX;
   if (!raw) return false;
   return ['1', 'true', 'yes', 'remote'].includes(raw.trim().toLowerCase());
+}
+
+export function getMatrixRoutingTargets(entry: JournalEntry): { postToFeed: boolean; channelDests: string[] } {
+  if (entry.visibility === 'private') return { postToFeed: false, channelDests: [] };
+  if (entry.aiOnly === true || entry.humanVisible === false) return { postToFeed: false, channelDests: [] };
+  if (entry.content.length < MIN_PLATFORM_CONTENT_LENGTH) return { postToFeed: false, channelDests: [] };
+
+  const destinations = entry.to || [];
+  const channelDests = destinations
+    .filter(dest => dest.startsWith('#'))
+    .map(dest => dest.slice(1));
+  const hasNonChannelRecipients = destinations.some(dest => !dest.startsWith('#'));
+
+  return {
+    postToFeed: !hasNonChannelRecipients,
+    channelDests,
+  };
 }
 
 // ── Registration ─────────────────────────────────────────────
@@ -91,6 +109,61 @@ async function onEntryPublished(ctx: HookContext): Promise<void> {
 
   const anthropic = getAnthropic();
 
+  // ── Routing: should this entry be surfaced on platforms? ──
+  let evaluationKeywords: string[] | undefined;
+  const matrixTargets = getMatrixRoutingTargets(entry);
+  const shouldEvaluateForPlatforms = shouldRoute(entry) || matrixTargets.channelDests.length > 0;
+
+  let evaluation: { route: boolean; hook?: string; score?: number; keywords?: string[] } = { route: false };
+  if (shouldEvaluateForPlatforms) {
+    const evaluableEntry = entry.to && entry.to.length > 0
+      ? { ...entry, to: undefined }
+      : entry;
+    evaluation = await evaluateEntry(evaluableEntry, anthropic, storage, recentPosts);
+    evaluationKeywords = evaluation.keywords;
+  }
+
+  const shouldRecordRecentPost = evaluation.route || matrixTargets.postToFeed || matrixTargets.channelDests.length > 0;
+  if (shouldRecordRecentPost) {
+    recentPosts.push({
+      author: authorDisplay,
+      contentSnippet: entry.content.slice(0, 200),
+      hook: evaluation.hook,
+    });
+    if (recentPosts.length > MAX_RECENT_POSTS) recentPosts.shift();
+  }
+
+  for (const platform of platforms) {
+    try {
+      if (platform instanceof MatrixPlatform) {
+        if (matrixTargets.postToFeed || matrixTargets.channelDests.length > 0) {
+          console.log(
+            `[Agent] Matrix routing plan for ${entry.id}: feed=${matrixTargets.postToFeed} channels=${matrixTargets.channelDests.join(',') || '(none)'}`
+          );
+        }
+
+        if (matrixTargets.channelDests.length > 0) {
+          for (const channelId of matrixTargets.channelDests) {
+            const roomId = await platform.ensureChannelRoom(channelId, channelId);
+            await platform.postEntry(roomId, entry, evaluation.hook);
+            console.log(`[Agent] Posted entry to #${channelId} on Matrix`);
+          }
+        }
+
+        if (matrixTargets.postToFeed) {
+          const feedRoomId = await platform.ensureChannelRoom('feed', 'Feed', 'All public notebook entries');
+          await platform.postEntry(feedRoomId, entry, evaluation.hook);
+          console.log(`[Agent] Posted entry to #feed on Matrix`);
+        }
+      } else if (evaluation.route) {
+        const content = evaluation.hook || entry.content;
+        console.log(`[Agent] Routing to ${platform.name}: ${content.substring(0, 80)}...`);
+      }
+    } catch (err) {
+      console.error(`[Agent] Failed to route to ${platform.name}:`, err);
+    }
+  }
+
   // ── Update interest profile ──────────────────────────────
   if (entry.handle && anthropic) {
     try {
@@ -104,52 +177,6 @@ async function onEntryPublished(ctx: HookContext): Promise<void> {
       }
     } catch (err) {
       console.error('[Agent] Profile update failed:', err);
-    }
-  }
-
-  // ── Routing: should this entry be surfaced on platforms? ──
-  let evaluationKeywords: string[] | undefined;
-
-  if (shouldRoute(entry)) {
-    const evaluation = await evaluateEntry(entry, anthropic, storage, recentPosts);
-    evaluationKeywords = evaluation.keywords;
-
-    if (evaluation.route) {
-      // Determine which channels this entry targets
-      const channelDests = (entry.to || []).filter(d => d.startsWith('#')).map(d => d.slice(1));
-
-      for (const platform of platforms) {
-        try {
-          if (platform instanceof MatrixPlatform) {
-            // Post as rich custom events to Matrix
-            if (channelDests.length > 0) {
-              // Route to specific channel rooms
-              for (const channelId of channelDests) {
-                const roomId = await platform.ensureChannelRoom(channelId, channelId);
-                await platform.postEntry(roomId, entry, evaluation.hook);
-                console.log(`[Agent] Posted entry to #${channelId} on Matrix`);
-              }
-            }
-            // Always also post to #feed
-            const feedRoomId = await platform.ensureChannelRoom('feed', 'Feed', 'All public notebook entries');
-            await platform.postEntry(feedRoomId, entry, evaluation.hook);
-            console.log(`[Agent] Posted entry to #feed on Matrix`);
-          } else {
-            // Other platforms: send as formatted text
-            const content = evaluation.hook || entry.content;
-            console.log(`[Agent] Routing to ${platform.name}: ${content.substring(0, 80)}...`);
-          }
-
-          recentPosts.push({
-            author: authorDisplay,
-            contentSnippet: entry.content.slice(0, 200),
-            hook: evaluation.hook,
-          });
-          if (recentPosts.length > MAX_RECENT_POSTS) recentPosts.shift();
-        } catch (err) {
-          console.error(`[Agent] Failed to route to ${platform.name}:`, err);
-        }
-      }
     }
   }
 

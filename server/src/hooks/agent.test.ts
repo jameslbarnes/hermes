@@ -1,0 +1,52 @@
+import { describe, expect, it } from 'vitest';
+import type { JournalEntry } from '../storage.js';
+import { getMatrixRoutingTargets } from './agent.js';
+
+function makeEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
+  return {
+    id: 'entry-1',
+    pseudonym: 'Test User#abc123',
+    client: 'desktop' as const,
+    content: 'This is a public notebook entry that is long enough to be eligible for Matrix posting.',
+    timestamp: Date.now(),
+    ...overrides,
+  };
+}
+
+describe('getMatrixRoutingTargets', () => {
+  it('posts normal public entries to feed', () => {
+    expect(getMatrixRoutingTargets(makeEntry())).toEqual({
+      postToFeed: true,
+      channelDests: [],
+    });
+  });
+
+  it('posts channel-addressed public entries to feed and channel rooms', () => {
+    expect(getMatrixRoutingTargets(makeEntry({
+      to: ['#books', '#feed'],
+    }))).toEqual({
+      postToFeed: true,
+      channelDests: ['books', 'feed'],
+    });
+  });
+
+  it('does not post direct messages to feed', () => {
+    expect(getMatrixRoutingTargets(makeEntry({
+      to: ['@alice'],
+      visibility: 'private',
+    }))).toEqual({
+      postToFeed: false,
+      channelDests: [],
+    });
+  });
+
+  it('does not post ai-only entries', () => {
+    expect(getMatrixRoutingTargets(makeEntry({
+      aiOnly: true,
+      humanVisible: false,
+    } as Partial<JournalEntry>))).toEqual({
+      postToFeed: false,
+      channelDests: [],
+    });
+  });
+});

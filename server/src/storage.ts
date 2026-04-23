@@ -251,20 +251,6 @@ export function tokenize(text: string): string[] {
     .filter((word, index, arr) => arr.indexOf(word) === index); // unique
 }
 
-/**
- * Whether an author is allowed to force-publish their own pending entry.
- * Ordinary pending entries are allowed; moderation-held entries are not.
- */
-export function canSelfPublishPendingEntry(entry: JournalEntry): { allowed: boolean; error?: string } {
-  if (entry.moderationHeld) {
-    return {
-      allowed: false,
-      error: 'Entry is held for moderation and cannot be self-published',
-    };
-  }
-  return { allowed: true };
-}
-
 interface PageCursor {
   t: number;
   id: string;

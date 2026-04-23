@@ -23,7 +23,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { derivePseudonym, generateSecretKey, isValidSecretKey, hashSecretKey, isValidHandle, normalizeHandle } from './identity.js';
-import { MemoryStorage, StagedStorage, canSelfPublishPendingEntry, type Storage, type JournalEntry, type Summary, type DailySummary, type Conversation, type User, type Skill, type SkillParameter, type Channel, type ChannelInvite, tokenize, isValidChannelId, generateEntryId, encodePageCursor } from './storage.js';
+import { MemoryStorage, StagedStorage, type Storage, type JournalEntry, type Summary, type DailySummary, type Conversation, type User, type Skill, type SkillParameter, type Channel, type ChannelInvite, tokenize, isValidChannelId, generateEntryId, encodePageCursor } from './storage.js';
 import { scrapeConversation, detectPlatform, isValidShareUrl, ScrapeError } from './scraper.js';
 import { createNotificationService, createSendGridClient, verifyUnsubscribeToken, verifyEmailToken, type NotificationService } from './notifications.js';
 import { deliverEntry, getDefaultVisibility, canViewEntry, canView, normalizeEntry, isDefaultAiOnly, isEntryAiOnly, type DeliveryConfig } from './delivery.js';
@@ -4832,13 +4832,6 @@ const server = createServer(async (req, res) => {
       if (!(storage instanceof StagedStorage) || !storage.isPending(entryId)) {
         res.writeHead(400);
         res.end(JSON.stringify({ error: 'Entry is not pending' }));
-        return;
-      }
-
-      const publishPolicy = canSelfPublishPendingEntry(entry);
-      if (!publishPolicy.allowed) {
-        res.writeHead(403);
-        res.end(JSON.stringify({ error: publishPolicy.error }));
         return;
       }
 

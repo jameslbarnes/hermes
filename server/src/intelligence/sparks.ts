@@ -47,6 +47,24 @@ export interface ConnectionInfo {
   isConnected: boolean;
 }
 
+export function formatEntryForSparkEvaluation(entry: JournalEntry): string {
+  const date = new Date(entry.timestamp).toISOString().split('T')[0];
+
+  if (entry.content.trim().length > 0) {
+    return `[${date}] ${entry.content.slice(0, 300)}`;
+  }
+
+  if (entry.aiOnly) {
+    const topics = [...(entry.topicHints || []), ...(entry.keywords || [])]
+      .filter(Boolean)
+      .slice(0, 8);
+    const topicText = topics.length > 0 ? topics.join(', ') : 'no topics provided';
+    return `[${date}] [AI-only entry] Topics: ${topicText}`;
+  }
+
+  return `[${date}]`;
+}
+
 // ── Detection ────────────────────────────────────────────────
 
 /**
@@ -71,7 +89,7 @@ export async function detectSparks(
   // Search for related entries by other authors
   const relatedEntries = await storage.searchEntries(searchTerms.join(' '), 30);
   const otherEntries = relatedEntries.filter(e =>
-    e.handle && e.handle !== authorHandle && !e.aiOnly
+    e.handle && e.handle !== authorHandle
   );
 
   // Group by author
@@ -128,7 +146,7 @@ export async function evaluateSpark(
 
     const sourceContent = sourceEntry.content.slice(0, 500);
     const targetContent = candidate.matchingEntries
-      .map(e => `[${new Date(e.timestamp).toISOString().split('T')[0]}] ${e.content.slice(0, 300)}`)
+      .map(formatEntryForSparkEvaluation)
       .join('\n\n');
 
     const connectionContext = connectionInfo.isConnected

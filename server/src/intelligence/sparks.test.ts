@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { detectSparks, getConnectionInfo } from './sparks.js';
+import { detectSparks, formatEntryForSparkEvaluation, getConnectionInfo } from './sparks.js';
 import { MemoryStorage } from '../storage.js';
 import type { JournalEntry } from '../storage.js';
 
@@ -90,7 +90,7 @@ describe('detectSparks', () => {
     expect(sparks.every(s => s.handle !== 'alice')).toBe(true);
   });
 
-  it('excludes AI-only entries from candidates', async () => {
+  it('includes AI-only entries in spark candidates', async () => {
     await storage.addEntry({
       handle: 'bob',
       pseudonym: 'Bob#001',
@@ -113,7 +113,41 @@ describe('detectSparks', () => {
     });
 
     const sparks = await detectSparks(aliceEntry, storage);
-    expect(sparks.every(s => s.handle !== 'bob')).toBe(true);
+    expect(sparks.map(s => s.handle)).toContain('bob');
+  });
+
+  it('uses AI-only content for evaluation when present', () => {
+    const summary = formatEntryForSparkEvaluation({
+      id: '1',
+      handle: 'bob',
+      pseudonym: 'Bob#001',
+      client: 'desktop',
+      content: 'AI-only entry about TEE attestation and model verification.',
+      timestamp: Date.now(),
+      aiOnly: true,
+      topicHints: ['TEE'],
+      keywords: ['attestation'],
+    });
+
+    expect(summary).toContain('AI-only entry about TEE attestation');
+    expect(summary).not.toContain('[AI-only entry] Topics:');
+  });
+
+  it('falls back to AI-only topics when content is empty', () => {
+    const summary = formatEntryForSparkEvaluation({
+      id: '1',
+      handle: 'bob',
+      pseudonym: 'Bob#001',
+      client: 'desktop',
+      content: '',
+      timestamp: Date.now(),
+      aiOnly: true,
+      topicHints: ['TEE', 'attestation'],
+      keywords: ['verifier'],
+    });
+
+    expect(summary).toContain('[AI-only entry] Topics:');
+    expect(summary).toContain('TEE');
   });
 });
 

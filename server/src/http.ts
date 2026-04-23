@@ -10,6 +10,7 @@
 
 import 'dotenv/config';
 import { createServer } from 'http';
+import { randomUUID } from 'crypto';
 import { readFile } from 'fs/promises';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, accessSync, statSync, constants } from 'fs';
 import { join, extname, dirname } from 'path';
@@ -67,8 +68,20 @@ function isInternalUrl(urlString: string): boolean {
   }
 }
 
+type McpSession =
+  | {
+      kind: 'sse';
+      transport: SSEServerTransport;
+      secretKey: string;
+    }
+  | {
+      kind: 'streamable-http';
+      transport: StreamableHTTPServerTransport;
+      secretKey: string;
+    };
+
 // Store active MCP sessions
-const mcpSessions = new Map<string, { transport: SSEServerTransport; secretKey: string }>();
+const mcpSessions = new Map<string, McpSession>();
 
 /**
  * Strip content from entries/conversations with humanVisible: false (for non-authors)
@@ -7045,24 +7058,40 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      // For StreamableHTTP, we need to manage sessions per secret key
-      const sessionKey = `http_${hashSecretKey(secretKey)}`;
-      let session = mcpSessions.get(sessionKey);
+      const sessionIdHeader = req.headers['mcp-session-id'];
+      const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
 
-      if (!session) {
+      let transport: StreamableHTTPServerTransport;
+      if (sessionId) {
+        const session = mcpSessions.get(sessionId);
+        if (!session || session.kind !== 'streamable-http') {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: 'Session not found' }));
+          return;
+        }
+
+        if (session.secretKey !== secretKey) {
+          res.writeHead(403);
+          res.end(JSON.stringify({ error: 'Session does not belong to this secret key' }));
+          return;
+        }
+
+        transport = session.transport;
+      } else {
         const mcpServer = createMCPServer(secretKey);
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => sessionKey,
+        transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => `http_${hashSecretKey(secretKey)}_${randomUUID()}`,
           onsessioninitialized: (sid) => {
             console.log(`[MCP/HTTP] Session initialized: ${sid}`);
+            mcpSessions.set(sid, { kind: 'streamable-http', transport, secretKey });
+          },
+          onsessionclosed: (sid) => {
+            console.log(`[MCP/HTTP] Session closed: ${sid}`);
+            mcpSessions.delete(sid);
           },
         });
         await mcpServer.connect(transport);
-        mcpSessions.set(sessionKey, { transport: transport as any, secretKey });
-        session = mcpSessions.get(sessionKey)!;
       }
-
-      const transport = session.transport as unknown as StreamableHTTPServerTransport;
       try {
         await transport.handleRequest(req as any, res as any);
       } catch (error) {
@@ -7094,7 +7123,7 @@ const server = createServer(async (req, res) => {
 
       // Store session by transport's generated sessionId
       const sessionId = transport.sessionId;
-      mcpSessions.set(sessionId, { transport, secretKey });
+      mcpSessions.set(sessionId, { kind: 'sse', transport, secretKey });
 
       // Connect server to transport (this calls transport.start() which sends headers)
       await mcpServer.connect(transport);
@@ -7120,7 +7149,7 @@ const server = createServer(async (req, res) => {
       }
 
       const session = mcpSessions.get(sessionId);
-      if (!session) {
+      if (!session || session.kind !== 'sse') {
         res.writeHead(404);
         res.end(JSON.stringify({ error: 'Session not found' }));
         return;

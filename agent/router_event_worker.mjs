@@ -12,6 +12,20 @@ function log(message) {
   console.log(`[worker] ${message}`);
 }
 
+function formatError(error) {
+  if (error instanceof Error) {
+    return error.stack || error.message;
+  }
+  return String(error);
+}
+
+function formatExecFailure(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const stdout = typeof error?.stdout === 'string' ? error.stdout.trim() : '';
+  const stderr = typeof error?.stderr === 'string' ? error.stderr.trim() : '';
+  return [message, stderr, stdout].filter(Boolean).join('\n').slice(0, 4000);
+}
+
 function buildMcpUrl(baseUrl, secretKey) {
   const url = new URL(baseUrl);
   url.searchParams.set('key', secretKey);
@@ -80,15 +94,21 @@ After acting, return a one-line summary of what you did.`;
     HERMES_HOME: process.env.HERMES_HOME || '/data/hermes-agent',
   };
 
-  const { stdout, stderr } = await execFileAsync(
-    'hermes',
-    ['chat', '-q', prompt, '--provider', 'anthropic', '-Q', '--yolo'],
-    {
-      env,
-      timeout: 180_000,
-      maxBuffer: 1024 * 1024,
-    },
-  );
+  let stdout;
+  let stderr;
+  try {
+    ({ stdout, stderr } = await execFileAsync(
+      'hermes',
+      ['chat', '-q', prompt, '--provider', 'anthropic', '-Q', '--yolo'],
+      {
+        env,
+        timeout: 180_000,
+        maxBuffer: 1024 * 1024,
+      },
+    ));
+  } catch (error) {
+    throw new Error(`hermes chat failed for event ${event.id}: ${formatExecFailure(error)}`);
+  }
 
   const summary = String(stdout || stderr || '').trim().split('\n').filter(Boolean).at(-1);
   log(`Event ${event.id} handled${summary ? `: ${summary.slice(0, 300)}` : ''}`);
@@ -134,6 +154,7 @@ async function main() {
   log(`Starting event loop at cursor ${cursor}`);
 
   while (true) {
+    let events;
     try {
       const result = await client.callTool({
         name: 'hermes_poll_events',
@@ -141,7 +162,7 @@ async function main() {
       });
 
       const structured = result.structuredContent || {};
-      const events = Array.isArray(structured.events) ? structured.events : [];
+      events = Array.isArray(structured.events) ? structured.events : [];
       const nextCursor = Number.parseInt(String(structured.next_cursor ?? structured.latest_cursor ?? cursor), 10) || cursor;
 
       if (events.length === 0) {
@@ -151,40 +172,48 @@ async function main() {
         await sleep(pollIntervalMs);
         continue;
       }
-
-      for (const event of events) {
-        const eventId = Number.parseInt(String(event.id || 0), 10);
-        const eventType = event.type;
-        const data = event.data || {};
-
-        if (eventType !== 'platform_mention') {
-          cursor = Math.max(cursor, eventId);
-          state.cursor = cursor;
-          await saveState(statePath, state);
-          continue;
-        }
-
-        if (data.platform !== 'matrix') {
-          log(`Skipping event ${eventId} on unsupported platform ${data.platform}`);
-          cursor = Math.max(cursor, eventId);
-          state.cursor = cursor;
-          await saveState(statePath, state);
-          continue;
-        }
-
-        await runAgentChat(event);
-        cursor = Math.max(cursor, eventId);
-        state.cursor = cursor;
-        await saveState(statePath, state);
-      }
     } catch (error) {
-      log(`Loop error: ${error instanceof Error ? error.message : String(error)}`);
+      log(`Poll error: ${formatError(error)}`);
       try {
         await reconnect();
       } catch (reconnectError) {
-        log(`Reconnect failed: ${reconnectError instanceof Error ? reconnectError.message : String(reconnectError)}`);
+        log(`Reconnect failed: ${formatError(reconnectError)}`);
       }
       await sleep(Math.max(pollIntervalMs, 2000));
+      continue;
+    }
+
+    for (const event of events) {
+      const eventId = Number.parseInt(String(event.id || 0), 10);
+      const eventType = event.type;
+      const data = event.data || {};
+
+      if (eventType !== 'platform_mention') {
+        cursor = Math.max(cursor, eventId);
+        state.cursor = cursor;
+        await saveState(statePath, state);
+        continue;
+      }
+
+      if (data.platform !== 'matrix') {
+        log(`Skipping event ${eventId} on unsupported platform ${data.platform}`);
+        cursor = Math.max(cursor, eventId);
+        state.cursor = cursor;
+        await saveState(statePath, state);
+        continue;
+      }
+
+      try {
+        await runAgentChat(event);
+      } catch (error) {
+        log(`Event ${eventId} handler error: ${formatError(error)}`);
+        await sleep(Math.max(pollIntervalMs, 2000));
+        break;
+      }
+
+      cursor = Math.max(cursor, eventId);
+      state.cursor = cursor;
+      await saveState(statePath, state);
     }
   }
 }

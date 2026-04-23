@@ -631,6 +631,8 @@ export class MatrixPlatform implements Platform {
     if (roomId === this.config.spaceRoomId) return;
 
     try {
+      await this.client.joinRoom(this.config.spaceRoomId);
+
       await this.client.sendStateEvent(
         this.config.spaceRoomId,
         EventType.SpaceChild,
@@ -644,6 +646,8 @@ export class MatrixPlatform implements Platform {
         { via: [this.config.serverName], canonical: true },
         this.config.spaceRoomId,
       );
+
+      console.log(`[Matrix] Attached #${channelId} (${roomId}) to space ${this.config.spaceRoomId}`);
     } catch (error) {
       console.warn(`[Matrix] Failed to attach #${channelId} to space ${this.config.spaceRoomId}:`, error);
     }

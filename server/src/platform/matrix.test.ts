@@ -128,17 +128,20 @@ describe('MatrixPlatform channel rooms', () => {
 
   it('attaches existing alias-backed rooms to the configured Matrix space', async () => {
     const getRoomIdForAlias = vi.fn().mockResolvedValue({ room_id: '!books:mtrx.example.test' });
+    const joinRoom = vi.fn().mockResolvedValue({});
     const setRoomDirectoryVisibility = vi.fn().mockResolvedValue({});
     const sendStateEvent = vi.fn().mockResolvedValue({ event_id: '$event' });
     const platform = createPlatform({ spaceRoomId: '!space:mtrx.example.test' });
 
     (platform as any).client = {
       getRoomIdForAlias,
+      joinRoom,
       setRoomDirectoryVisibility,
       sendStateEvent,
     };
 
     await expect(platform.ensureChannelRoom('books', 'Books')).resolves.toBe('!books:mtrx.example.test');
+    expect(joinRoom).toHaveBeenCalledWith('!space:mtrx.example.test');
     expect(sendStateEvent).toHaveBeenNthCalledWith(
       1,
       '!space:mtrx.example.test',
@@ -181,6 +184,7 @@ describe('MatrixPlatform channel rooms', () => {
   it('attaches newly created rooms to the configured Matrix space', async () => {
     const getRoomIdForAlias = vi.fn().mockRejectedValue(new Error('not found'));
     const createRoom = vi.fn().mockResolvedValue({ room_id: '!books-created:mtrx.example.test' });
+    const joinRoom = vi.fn().mockResolvedValue({});
     const setRoomDirectoryVisibility = vi.fn().mockResolvedValue({});
     const sendStateEvent = vi.fn().mockResolvedValue({ event_id: '$event' });
     const platform = createPlatform({ spaceRoomId: '!space:mtrx.example.test' });
@@ -188,11 +192,13 @@ describe('MatrixPlatform channel rooms', () => {
     (platform as any).client = {
       getRoomIdForAlias,
       createRoom,
+      joinRoom,
       setRoomDirectoryVisibility,
       sendStateEvent,
     };
 
     await expect(platform.ensureChannelRoom('books', 'Books', 'Book discussion')).resolves.toBe('!books-created:mtrx.example.test');
+    expect(joinRoom).toHaveBeenCalledWith('!space:mtrx.example.test');
     expect(sendStateEvent).toHaveBeenNthCalledWith(
       1,
       '!space:mtrx.example.test',

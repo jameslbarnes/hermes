@@ -33,6 +33,10 @@ export interface JournalEntry {
 
   // Channel
   channel?: string;          // @deprecated Use #channel in `to`. Channel ID if posted via a channel skill.
+
+  // Moderation state for staged entries only. Must not persist to published storage.
+  moderationHeld?: boolean;
+  moderationHoldReason?: string;
 }
 
 export interface Summary {
@@ -245,6 +249,20 @@ export function tokenize(text: string): string[] {
     .filter(word => word.length > 2)
     .filter(word => !STOP_WORDS.has(word))
     .filter((word, index, arr) => arr.indexOf(word) === index); // unique
+}
+
+/**
+ * Whether an author is allowed to force-publish their own pending entry.
+ * Ordinary pending entries are allowed; moderation-held entries are not.
+ */
+export function canSelfPublishPendingEntry(entry: JournalEntry): { allowed: boolean; error?: string } {
+  if (entry.moderationHeld) {
+    return {
+      allowed: false,
+      error: 'Entry is held for moderation and cannot be self-published',
+    };
+  }
+  return { allowed: true };
 }
 
 interface PageCursor {
@@ -1684,7 +1702,7 @@ export class StagedStorage implements Storage {
     for (const [id, entry] of this.pending) {
       if (entry.publishAt && entry.publishAt <= now) {
         // Move to Firestore without publishAt field
-        const { publishAt, ...publishedEntry } = entry;
+        const { publishAt, moderationHeld, moderationHoldReason, ...publishedEntry } = entry;
         const saved = await this.published.addEntry(publishedEntry);
         this.pending.delete(id);
 
@@ -1810,7 +1828,7 @@ export class StagedStorage implements Storage {
     if (!entry) return null;
 
     // Move to Firestore without publishAt field
-    const { publishAt, ...publishedEntry } = entry;
+    const { publishAt, moderationHeld, moderationHoldReason, ...publishedEntry } = entry;
     const saved = await this.published.addEntry(publishedEntry);
     this.pending.delete(id);
 
@@ -1857,6 +1875,18 @@ export class StagedStorage implements Storage {
     const entry = this.pending.get(id);
     if (!entry) return false;
     entry.publishAt = newPublishAt;
+    return true;
+  }
+
+  /**
+   * Mark a pending entry as held by moderation.
+   */
+  holdEntry(id: string, reason: string, holdUntil: number): boolean {
+    const entry = this.pending.get(id);
+    if (!entry) return false;
+    entry.publishAt = holdUntil;
+    entry.moderationHeld = true;
+    entry.moderationHoldReason = reason;
     return true;
   }
 

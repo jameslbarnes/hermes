@@ -210,6 +210,16 @@ describe('MCP Tool Integration Tests', () => {
       expect(text).toContain(heldEntryId);
     });
 
+    it('blocks self-publish for a moderator-held entry', async () => {
+      const res = await fetch(`http://localhost:${TEST_PORT}/api/entries/${heldEntryId}/publish?key=${REGULAR_KEY}`, {
+        method: 'POST',
+      });
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toMatchObject({
+        error: 'Entry is held for moderation and cannot be self-published',
+      });
+    });
+
     it('rejects non-existent entry', async () => {
       const text = await callTool(modClient, 'hermes_hold_entry', { entry_id: 'fake-id' });
       expect(text).toContain('not in the staging buffer');
@@ -222,6 +232,23 @@ describe('MCP Tool Integration Tests', () => {
   });
 
   describe('hermes_release_entry', () => {
+    it('allows self-publish for an ordinary pending entry', async () => {
+      const wr = await callTool(regularClient, 'hermes_write_entry', {
+        sensitivity_check: 'No sensitive content. I, Claude, certify I am completing this check.',
+        client: 'code',
+        entry: 'Ordinary pending entry for self-publish test',
+      });
+      const entryId = wr.match(/Entry ID: (\S+)/)![1];
+
+      const res = await fetch(`http://localhost:${TEST_PORT}/api/entries/${entryId}/publish?key=${REGULAR_KEY}`, {
+        method: 'POST',
+      });
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({
+        success: true,
+      });
+    });
+
     it('releases a held entry', async () => {
       const wr = await callTool(regularClient, 'hermes_write_entry', {
         sensitivity_check: 'No sensitive content. I, Claude, certify I am completing this check.',

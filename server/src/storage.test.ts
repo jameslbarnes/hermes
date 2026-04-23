@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MemoryStorage, StagedStorage, isValidChannelId, encodePageCursor } from './storage.js';
+import { MemoryStorage, StagedStorage, canSelfPublishPendingEntry, isValidChannelId, encodePageCursor } from './storage.js';
 import type { Channel, ChannelInvite } from './storage.js';
 import { hashSecretKey } from './identity.js';
 
@@ -915,7 +915,7 @@ describe('MemoryStorage Channels', () => {
 });
 
 // StagedStorage tests - require Firestore
-describe.skipIf(!hasFirestore)('StagedStorage', () => {
+  describe.skipIf(!hasFirestore)('StagedStorage', () => {
   describe('Dynamic buffer time', () => {
     it('should use custom stagingDelayMs when provided', async () => {
       const defaultDelay = 60 * 60 * 1000; // 1 hour default
@@ -1069,13 +1069,16 @@ describe.skipIf(!hasFirestore)('StagedStorage', () => {
 
       // Hold the entry
       const FOREVER = Date.now() + (999999 * 365.25 * 24 * 60 * 60 * 1000);
-      storage.updateEntryPublishAt(entry.id, FOREVER);
+      storage.holdEntry(entry.id, 'sensitive content', FOREVER);
 
       // Wait a bit for the publish loop to run
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Entry should still be pending
       expect(storage.isPending(entry.id)).toBe(true);
+      const held = await storage.getEntry(entry.id);
+      expect(held?.moderationHeld).toBe(true);
+      expect(held?.moderationHoldReason).toBe('sensitive content');
 
       // Clean up
       storage.stop();
@@ -1101,6 +1104,37 @@ describe.skipIf(!hasFirestore)('StagedStorage', () => {
 
       // Clean up
       storage.stop();
+    });
+  });
+});
+
+describe('canSelfPublishPendingEntry', () => {
+  it('allows ordinary pending entries', () => {
+    const result = canSelfPublishPendingEntry({
+      id: 'pending-1',
+      timestamp: Date.now(),
+      content: 'Ordinary pending entry',
+      pseudonym: 'User#abc',
+      client: 'desktop',
+    });
+
+    expect(result).toEqual({ allowed: true });
+  });
+
+  it('blocks moderation-held pending entries', () => {
+    const result = canSelfPublishPendingEntry({
+      id: 'pending-2',
+      timestamp: Date.now(),
+      content: 'Held pending entry',
+      pseudonym: 'User#abc',
+      client: 'desktop',
+      moderationHeld: true,
+      moderationHoldReason: 'sensitive content',
+    });
+
+    expect(result).toEqual({
+      allowed: false,
+      error: 'Entry is held for moderation and cannot be self-published',
     });
   });
 });

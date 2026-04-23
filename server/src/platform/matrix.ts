@@ -27,6 +27,8 @@ import {
   RoomMemberEvent,
   ClientEvent,
   KnownMembership,
+  Preset,
+  Visibility,
 } from 'matrix-js-sdk';
 import type {
   Platform,
@@ -612,6 +614,16 @@ export class MatrixPlatform implements Platform {
 
   // ── Deep Notebook Integration ──────────────────────────────
 
+  private async ensureRoomDirectoryVisibility(roomId: string, channelId: string): Promise<void> {
+    if (!this.client) throw new Error('Matrix client not started');
+
+    try {
+      await this.client.setRoomDirectoryVisibility(roomId, Visibility.Public);
+    } catch (error) {
+      console.warn(`[Matrix] Failed to publish #${channelId} to room directory:`, error);
+    }
+  }
+
   async ensureChannelRoom(channelId: string, channelName: string, description?: string): Promise<string> {
     const cached = this.channelRooms.get(channelId);
     if (cached) return cached;
@@ -623,6 +635,7 @@ export class MatrixPlatform implements Platform {
     try {
       const resolved = await this.client.getRoomIdForAlias(alias);
       this.channelRooms.set(channelId, resolved.room_id);
+      await this.ensureRoomDirectoryVisibility(resolved.room_id, channelId);
       return resolved.room_id;
     } catch {
       // Room doesn't exist, create it
@@ -632,7 +645,8 @@ export class MatrixPlatform implements Platform {
       name: channelName,
       topic: description || `Hermes channel: #${channelId}`,
       room_alias_name: channelId,
-      preset: 'public_chat' as any,
+      visibility: Visibility.Public,
+      preset: Preset.PublicChat,
       initial_state: [
         {
           type: ROUTER_CHANNEL_STATE,
@@ -643,6 +657,7 @@ export class MatrixPlatform implements Platform {
     });
 
     this.channelRooms.set(channelId, result.room_id);
+    await this.ensureRoomDirectoryVisibility(result.room_id, channelId);
     console.log(`[Matrix] Created room for #${channelId}: ${result.room_id}`);
     return result.room_id;
   }

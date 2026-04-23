@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MatrixPlatform, isMatrixMention } from './matrix.js';
 
 describe('isMatrixMention', () => {
@@ -99,5 +99,53 @@ describe('MatrixPlatform identity resolution', () => {
 
     await expect(platform.resolveHermesHandle('@specularist:matrix.org')).resolves.toBe('james');
     await expect(platform.resolveHermesHandle('@alice:mtrx.example.test')).resolves.toBe('alice');
+  });
+});
+
+describe('MatrixPlatform channel rooms', () => {
+  const createPlatform = (overrides: Partial<ConstructorParameters<typeof MatrixPlatform>[0]> = {}) => new MatrixPlatform({
+    serverUrl: 'https://mtrx.example.test',
+    serverName: 'mtrx.example.test',
+    botSecretKey: 'test-secret',
+    botHandle: 'router',
+    ...overrides,
+  });
+
+  it('publishes existing alias-backed rooms to the Matrix room directory', async () => {
+    const getRoomIdForAlias = vi.fn().mockResolvedValue({ room_id: '!books:mtrx.example.test' });
+    const setRoomDirectoryVisibility = vi.fn().mockResolvedValue({});
+    const platform = createPlatform();
+
+    (platform as any).client = {
+      getRoomIdForAlias,
+      setRoomDirectoryVisibility,
+    };
+
+    await expect(platform.ensureChannelRoom('books', 'Books')).resolves.toBe('!books:mtrx.example.test');
+    expect(getRoomIdForAlias).toHaveBeenCalledWith('#books:mtrx.example.test');
+    expect(setRoomDirectoryVisibility).toHaveBeenCalledWith('!books:mtrx.example.test', 'public');
+  });
+
+  it('creates new rooms as public and publishes them to the Matrix room directory', async () => {
+    const getRoomIdForAlias = vi.fn().mockRejectedValue(new Error('not found'));
+    const createRoom = vi.fn().mockResolvedValue({ room_id: '!books-created:mtrx.example.test' });
+    const setRoomDirectoryVisibility = vi.fn().mockResolvedValue({});
+    const platform = createPlatform();
+
+    (platform as any).client = {
+      getRoomIdForAlias,
+      createRoom,
+      setRoomDirectoryVisibility,
+    };
+
+    await expect(platform.ensureChannelRoom('books', 'Books', 'Book discussion')).resolves.toBe('!books-created:mtrx.example.test');
+    expect(createRoom).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Books',
+      topic: 'Book discussion',
+      room_alias_name: 'books',
+      visibility: 'public',
+      preset: 'public_chat',
+    }));
+    expect(setRoomDirectoryVisibility).toHaveBeenCalledWith('!books-created:mtrx.example.test', 'public');
   });
 });

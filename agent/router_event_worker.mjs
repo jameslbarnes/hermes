@@ -75,8 +75,9 @@ You received a notebook event from the real-time event queue.
 Event:
 ${JSON.stringify(event, null, 2)}
 
-If this event is a platform mention or direct DM from a human, respond directly and helpfully.
-Use Hermes notebook tools as needed. If you send a reply, you must call hermes_platform_send with:
+This event is directed at Router. If it is a human platform_mention, you must send exactly one reply in the originating platform room.
+This applies to channel mentions as well as direct DMs.
+Use Hermes notebook tools as needed. Your reply must be sent by calling hermes_platform_send with:
 - platform = event.data.platform
 - room_id = event.data.room_id
 - reply_to = event.data.message_id
@@ -85,7 +86,8 @@ Hard rules:
 - Do not ask the user to manually invoke Hermes tools.
 - link/help commands are already handled upstream; do nothing for those.
 - Keep replies concise and natural.
-- If no reply is needed, explain that briefly.
+- Do not silently choose not to answer a human platform_mention.
+- If you truly cannot answer, send a brief apology or clarification via hermes_platform_send.
 
 After acting, return a one-line summary of what you did.`;
 
@@ -202,6 +204,10 @@ async function main() {
         await saveState(statePath, state);
         continue;
       }
+
+      log(
+        `Processing Matrix platform_mention ${eventId} in ${data.room_id} from ${data.sender_id || 'unknown'} (dm=${data.is_dm ? 'yes' : 'no'})`,
+      );
 
       try {
         await runAgentChat(event);

@@ -49,6 +49,7 @@ rm -f "$IDENTITY_ENV"
 echo "[entrypoint] HERMES_SECRET_KEY set: $(test -n "$HERMES_SECRET_KEY" && echo yes || echo no)"
 echo "[entrypoint] HERMES_SECRET_KEY source: ${HERMES_SECRET_KEY_SOURCE:-unknown}"
 echo "[entrypoint] HERMES agent handle: ${HERMES_AGENT_HANDLE:-unknown}"
+echo "[entrypoint] HERMES_ENABLE_GATEWAY: ${HERMES_ENABLE_GATEWAY:-auto}"
 
 # Write secrets to .env
 cat > "$HERMES_HOME/.env" << EOF
@@ -117,6 +118,36 @@ for skill_dir in /app/defaults/skills/*/; do
   fi
 done
 
-# Start the gateway
-echo "[entrypoint] Starting gateway..."
-exec hermes gateway run --verbose 2>&1
+should_start_gateway() {
+  local mode="${HERMES_ENABLE_GATEWAY:-auto}"
+  case "$mode" in
+    1|true|TRUE|yes|YES|on|ON)
+      return 0
+      ;;
+    0|false|FALSE|no|NO|off|OFF)
+      return 1
+      ;;
+    auto|AUTO|"")
+      test -n "$TELEGRAM_BOT_TOKEN"
+      return
+      ;;
+    *)
+      echo "[entrypoint] Unknown HERMES_ENABLE_GATEWAY=$mode, defaulting to auto"
+      test -n "$TELEGRAM_BOT_TOKEN"
+      return
+      ;;
+  esac
+}
+
+if should_start_gateway; then
+  echo "[entrypoint] Starting gateway in background..."
+  (
+    hermes gateway run --verbose 2>&1 || \
+      echo "[entrypoint] Gateway exited (continuing with direct MCP event worker)"
+  ) &
+else
+  echo "[entrypoint] Gateway disabled for this deployment"
+fi
+
+echo "[entrypoint] Starting direct MCP event worker..."
+exec node /app/router_event_worker.mjs

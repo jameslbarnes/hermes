@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 # System deps for hermes-agent build
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl build-essential && \
+    git curl build-essential nodejs npm && \
     rm -rf /var/lib/apt/lists/*
 
 # Install uv (fast Python package manager)
@@ -26,8 +26,11 @@ ENV VIRTUAL_ENV="/opt/venv"
 WORKDIR /app
 COPY config.yaml /app/defaults/config.yaml
 COPY skills/ /app/defaults/skills/
+COPY package.json /app/package.json
 COPY bootstrap_identity.py /app/bootstrap_identity.py
+COPY router_event_worker.mjs /app/router_event_worker.mjs
 COPY entrypoint.sh /app/entrypoint.sh
+RUN npm install --omit=dev
 RUN chmod +x /app/entrypoint.sh
 
 VOLUME /root/.hermes

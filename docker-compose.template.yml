@@ -45,6 +45,7 @@ services:
       - HERMES_MCP_URL=http://hermes:3000/mcp/http
       - HERMES_SECRET_KEY
       - HERMES_HANDLE=router
+      - HERMES_ENABLE_GATEWAY=0
       - TELEGRAM_BOT_TOKEN
       - GITHUB_TOKEN
     volumes:

@@ -3580,11 +3580,16 @@ function createMCPServer(secretKey: string) {
       const cursor = (args as { cursor?: number; limit?: number })?.cursor || 0;
       const limit = (args as { cursor?: number; limit?: number })?.limit || 50;
       const events = getEventsSince(cursor, limit);
+      const latestCursor = events.length > 0 ? events[events.length - 1].id : getLatestCursor();
 
       if (events.length === 0) {
-        const latestCursor = getLatestCursor();
         return {
           content: [{ type: 'text' as const, text: `No new events. Latest cursor: ${latestCursor}` }],
+          structuredContent: {
+            events: [],
+            latest_cursor: latestCursor,
+            next_cursor: latestCursor,
+          },
         };
       }
 
@@ -3592,10 +3597,13 @@ function createMCPServer(secretKey: string) {
         const time = new Date(e.timestamp).toISOString();
         return `[${e.id}] ${time} ${e.type}: ${JSON.stringify(e.data)}`;
       }).join('\n');
-
-      const nextCursor = events[events.length - 1].id;
       return {
-        content: [{ type: 'text' as const, text: `${events.length} events (cursor ${nextCursor}):\n\n${formatted}` }],
+        content: [{ type: 'text' as const, text: `${events.length} events (cursor ${latestCursor}):\n\n${formatted}` }],
+        structuredContent: {
+          events,
+          latest_cursor: latestCursor,
+          next_cursor: latestCursor,
+        },
       };
     }
 

@@ -137,8 +137,15 @@ describe('MCP Tool Integration Tests', () => {
 
   describe('hermes_poll_events', () => {
     it('returns no events initially', async () => {
-      const text = await callTool(modClient, 'hermes_poll_events', { cursor: 0 });
+      const result = await modClient.callTool({ name: 'hermes_poll_events', arguments: { cursor: 0 } });
+      const textBlock = (result.content as any[])?.find((b: any) => b.type === 'text');
+      const text = textBlock?.text || '';
       expect(text).toContain('No new events');
+      expect(result.structuredContent).toMatchObject({
+        events: [],
+        latest_cursor: 0,
+        next_cursor: 0,
+      });
     });
 
     it('sees entry_staged after write', async () => {

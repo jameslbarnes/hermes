@@ -24,6 +24,9 @@ import { MatrixPlatform } from '../platform/matrix.js';
 const recentPosts: RecentPost[] = [];
 const MAX_RECENT_POSTS = 20;
 const MIN_PLATFORM_CONTENT_LENGTH = 50;
+const MATRIX_DEFAULT_FIREHOSE_CHANNEL_ID = 'bot-noise';
+const MATRIX_DEFAULT_FIREHOSE_CHANNEL_NAME = 'Bot Noise';
+const MATRIX_DEFAULT_FIREHOSE_DESCRIPTION = 'Router firehose for public notebook entries';
 
 const roomBuffers = new RoomBufferManager();
 
@@ -175,9 +178,13 @@ async function onEntryPublished(ctx: HookContext): Promise<void> {
         }
 
         if (matrixTargets.postToFeed) {
-          const feedRoomId = await platform.ensureChannelRoom('feed', 'Feed', 'All public notebook entries');
+          const feedRoomId = await platform.ensureChannelRoom(
+            MATRIX_DEFAULT_FIREHOSE_CHANNEL_ID,
+            MATRIX_DEFAULT_FIREHOSE_CHANNEL_NAME,
+            MATRIX_DEFAULT_FIREHOSE_DESCRIPTION,
+          );
           await platform.postEntry(feedRoomId, entry, evaluation.hook);
-          console.log(`[Agent] Posted entry to #feed on Matrix`);
+          console.log(`[Agent] Posted entry to #${MATRIX_DEFAULT_FIREHOSE_CHANNEL_ID} on Matrix`);
         }
       } else if (evaluation.route) {
         const content = evaluation.hook || entry.content;

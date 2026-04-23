@@ -280,11 +280,11 @@ export async function initializeChannelRooms(storage: Storage): Promise<void> {
       }
     }
 
-    // Always ensure #feed and #digest exist
-    await matrix.ensureChannelRoom('feed', 'Feed', 'All public notebook entries');
+    // Always ensure the public firehose room and #digest exist
+    await matrix.ensureChannelRoom('bot-noise', 'Bot Noise', 'Router firehose for public notebook entries');
     await matrix.ensureChannelRoom('digest', 'Daily Digest', 'Daily summary of notebook activity');
 
-    console.log(`[Cron] Channel rooms initialized (${channels.length} channels + feed + digest)`);
+    console.log(`[Cron] Channel rooms initialized (${channels.length} channels + bot-noise + digest)`);
   } catch (err) {
     console.error('[Cron] Failed to initialize channel rooms:', err);
   }

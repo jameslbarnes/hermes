@@ -70,6 +70,36 @@ export const ROUTER_SPARK_EVENT = 'com.router.spark';
 export const ROUTER_DIGEST_EVENT = 'com.router.digest';
 export const ROUTER_CHANNEL_STATE = 'com.router.channel';
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function isMatrixMention(params: {
+  isDM: boolean;
+  text: string;
+  content: Record<string, any>;
+  botUserId: string | null;
+  botHandle: string;
+}): boolean {
+  const { isDM, text, content, botUserId, botHandle } = params;
+
+  if (isDM) return true;
+
+  const mentions = content['m.mentions'];
+  const mentionedUserIds = Array.isArray(mentions?.user_ids) ? mentions.user_ids : [];
+  if (botUserId && mentionedUserIds.includes(botUserId)) {
+    return true;
+  }
+
+  const formattedBody = typeof content.formatted_body === 'string' ? content.formatted_body : '';
+  if (botUserId && (formattedBody.includes(botUserId) || formattedBody.includes(encodeURIComponent(botUserId)))) {
+    return true;
+  }
+
+  const plainMention = new RegExp(`(^|\\s|[<(])@${escapeRegExp(botHandle)}(?=$|\\s|[)>:.,!?])`, 'i');
+  return plainMention.test(text);
+}
+
 export class MatrixPlatform implements Platform {
   readonly name = 'matrix';
   readonly maxMessageLength = 65536;
@@ -796,8 +826,14 @@ export class MatrixPlatform implements Platform {
     const room = this.client.getRoom(roomId);
     const isDM = room ? room.getJoinedMemberCount() === 2 : false;
 
-    // Treat @mentions AND direct DMs as mentions (agent should respond)
-    const isMention = isDM || text.includes(`@${this.config.botHandle}`);
+    // Treat direct DMs and explicit mentions as agent-directed messages.
+    const isMention = isMatrixMention({
+      isDM,
+      text,
+      content,
+      botUserId: this.botUserId,
+      botHandle: this.config.botHandle,
+    });
 
     // Check if this is a reply to a notebook entry
     const replyToEventId = content['m.relates_to']?.['m.in_reply_to']?.event_id;

@@ -26,6 +26,11 @@ function formatExecFailure(error) {
   return [message, stderr, stdout].filter(Boolean).join('\n').slice(0, 4000);
 }
 
+function parseCursor(value, fallback) {
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function buildMcpUrl(baseUrl, secretKey) {
   const url = new URL(baseUrl);
   url.searchParams.set('key', secretKey);
@@ -165,9 +170,12 @@ async function main() {
 
       const structured = result.structuredContent || {};
       events = Array.isArray(structured.events) ? structured.events : [];
-      const nextCursor = Number.parseInt(String(structured.next_cursor ?? structured.latest_cursor ?? cursor), 10) || cursor;
+      const nextCursor = parseCursor(structured.next_cursor ?? structured.latest_cursor ?? cursor, cursor);
 
       if (events.length === 0) {
+        if (nextCursor < cursor) {
+          log(`Cursor reset detected (${cursor} -> ${nextCursor}); server likely restarted`);
+        }
         cursor = nextCursor;
         state.cursor = cursor;
         await saveState(statePath, state);
@@ -186,7 +194,7 @@ async function main() {
     }
 
     for (const event of events) {
-      const eventId = Number.parseInt(String(event.id || 0), 10);
+      const eventId = parseCursor(event.id, 0);
       const eventType = event.type;
       const data = event.data || {};
 

@@ -126,12 +126,15 @@ export async function generateDailyDigest(storage: Storage): Promise<void> {
  * Send personalized digests to individual users via Matrix DM.
  * Each user gets a digest curated for their interests using their profile.
  */
-export async function sendPersonalizedDigests(storage: Storage): Promise<void> {
+export async function sendPersonalizedDigests(
+  storage: Storage,
+  opts?: { handles?: string[] },
+): Promise<{ sent: number; failed: number; skipped: number }> {
   const matrix = getPlatform('matrix') as MatrixPlatform | undefined;
-  if (!matrix) return;
+  if (!matrix) return { sent: 0, failed: 0, skipped: 0 };
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return;
+  if (!apiKey) return { sent: 0, failed: 0, skipped: 0 };
   const anthropic = new Anthropic({ apiKey });
 
   // Get yesterday's entries
@@ -144,16 +147,25 @@ export async function sendPersonalizedDigests(storage: Storage): Promise<void> {
     e.timestamp >= startOfDay && e.timestamp < endOfDay && !e.aiOnly
   );
 
-  if (yesterdayEntries.length < 2) return;
+  if (yesterdayEntries.length < 2) return { sent: 0, failed: 0, skipped: 0 };
 
   // Get all users with interest profiles
   // For now, get users who have entries (active users)
-  const activeHandles = [...new Set(yesterdayEntries.map(e => e.handle).filter(Boolean))] as string[];
+  const activeHandles = opts?.handles?.length
+    ? opts.handles
+    : [...new Set(yesterdayEntries.map(e => e.handle).filter(Boolean))] as string[];
+
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
 
   for (const handle of activeHandles) {
     try {
       const user = await storage.getUser(handle);
-      if (!user?.interestProfile) continue;
+      if (!user?.interestProfile) {
+        skipped++;
+        continue;
+      }
 
       const profile = user.interestProfile;
       const following = user.following || [];
@@ -167,7 +179,10 @@ export async function sendPersonalizedDigests(storage: Storage): Promise<void> {
         e.handle && e.handle !== handle && !following.some(f => f.handle === e.handle)
       );
 
-      if (followedEntries.length === 0 && discoveryEntries.length === 0) continue;
+      if (followedEntries.length === 0 && discoveryEntries.length === 0) {
+        skipped++;
+        continue;
+      }
 
       const profileContext = `Summary: ${profile.summary}
 Working on: ${profile.currentWork.join(', ')}
@@ -204,11 +219,17 @@ Follows: ${following.map(f => `@${f.handle}${f.note ? ` (${f.note})` : ''}`).joi
       if (userId) {
         await matrix.sendDM(userId, `📰 Your daily digest\n\n${digestContent}`);
         console.log(`[Cron] Sent personalized digest to @${handle}`);
+        sent++;
+      } else {
+        skipped++;
       }
     } catch (err) {
       console.error(`[Cron] Failed personalized digest for @${handle}:`, err);
+      failed++;
     }
   }
+
+  return { sent, failed, skipped };
 }
 
 // ── Channel Room Initialization ──────────────────────────────

@@ -33,7 +33,7 @@ import { registerPlatform, getPlatform, getAllPlatforms, startAllPlatforms, stop
 import { MatrixPlatform } from './platform/matrix.js';
 import { getDispatcher } from './hooks/dispatcher.js';
 import { registerAgentHooks } from './hooks/agent.js';
-import { startCronJobs, stopCronJobs } from './hooks/cron.js';
+import { sendPersonalizedDigests, startCronJobs, stopCronJobs } from './hooks/cron.js';
 
 // Security: Check if a URL points to internal/private IP ranges
 function isInternalUrl(urlString: string): boolean {
@@ -6917,6 +6917,43 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, subject: result.subject, htmlLength: result.html.length }));
       }
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/trigger-personalized-digest?key=...&handle=james
+    // Trigger a Matrix personalized digest DM for the authenticated user.
+    // Moderators may specify another handle.
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/trigger-personalized-digest') {
+      const secretKey = url.searchParams.get('key');
+      if (!secretKey || !isValidSecretKey(secretKey)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Valid key query parameter required' }));
+        return;
+      }
+
+      const requester = await storage.getUserByKeyHash(hashSecretKey(secretKey));
+      if (!requester?.handle) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Account required. Register a handle first.' }));
+        return;
+      }
+
+      const requestedHandle = url.searchParams.get('handle')?.replace(/^@/, '').trim().toLowerCase();
+      const targetHandle = requestedHandle || requester.handle;
+      const isModerator = MODERATOR_HANDLES.size === 0 || MODERATOR_HANDLES.has(requester.handle);
+
+      if (targetHandle !== requester.handle && !isModerator) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Only moderators can trigger another user’s digest.' }));
+        return;
+      }
+
+      console.log(`[Digest] Personalized Matrix digest trigger requested by @${requester.handle} for @${targetHandle}`);
+      const result = await sendPersonalizedDigests(storage, { handles: [targetHandle] });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, targetHandle, ...result }));
       return;
     }
 

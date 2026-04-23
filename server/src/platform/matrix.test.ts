@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isMatrixMention } from './matrix.js';
+import { MatrixPlatform, isMatrixMention } from './matrix.js';
 
 describe('isMatrixMention', () => {
   const botUserId = '@router:mtrx.shaperotator.xyz';
@@ -69,5 +69,35 @@ describe('isMatrixMention', () => {
         botHandle,
       }),
     ).toBe(false);
+  });
+});
+
+describe('MatrixPlatform identity resolution', () => {
+  const createPlatform = (overrides: Partial<ConstructorParameters<typeof MatrixPlatform>[0]> = {}) => new MatrixPlatform({
+    serverUrl: 'https://mtrx.example.test',
+    serverName: 'mtrx.example.test',
+    botSecretKey: 'test-secret',
+    botHandle: 'router',
+    ...overrides,
+  });
+
+  it('resolves linked Matrix user IDs before falling back to the local convention', async () => {
+    const platform = createPlatform({
+      resolveLinkedPlatformId: async (name, handle) =>
+        name === 'matrix' && handle === 'james' ? '@specularist:matrix.org' : null,
+    });
+
+    await expect(platform.resolvePlatformId('james')).resolves.toBe('@specularist:matrix.org');
+    await expect(platform.resolvePlatformId('alice')).resolves.toBe('@alice:mtrx.example.test');
+  });
+
+  it('resolves Hermes handles from linked Matrix accounts before parsing MXIDs', async () => {
+    const platform = createPlatform({
+      resolveLinkedHermesHandle: async (name, userId) =>
+        name === 'matrix' && userId === '@specularist:matrix.org' ? 'james' : null,
+    });
+
+    await expect(platform.resolveHermesHandle('@specularist:matrix.org')).resolves.toBe('james');
+    await expect(platform.resolveHermesHandle('@alice:mtrx.example.test')).resolves.toBe('alice');
   });
 });

@@ -62,6 +62,8 @@ export interface MatrixPlatformConfig {
   cryptoStoreName?: string;
   cryptoStorePassword?: string;
   baseUrl?: string;
+  resolveLinkedPlatformId?: (platform: string, hermesHandle: string) => Promise<string | null>;
+  resolveLinkedHermesHandle?: (platform: string, platformUserId: string) => Promise<string | null>;
 }
 
 // Custom Matrix event types for tight notebook integration
@@ -742,11 +744,17 @@ export class MatrixPlatform implements Platform {
   // ── Identity ───────────────────────────────────────────────
 
   async resolveHermesHandle(platformUserId: string): Promise<string | null> {
+    const linkedHandle = await this.config.resolveLinkedHermesHandle?.(this.name, platformUserId);
+    if (linkedHandle) return linkedHandle;
+
     const match = platformUserId.match(/^@([^:]+):/);
     return match ? match[1] : null;
   }
 
   async resolvePlatformId(hermesHandle: string): Promise<string | null> {
+    const linkedUserId = await this.config.resolveLinkedPlatformId?.(this.name, hermesHandle);
+    if (linkedUserId) return linkedUserId;
+
     return `@${hermesHandle}:${this.config.serverName}`;
   }
 

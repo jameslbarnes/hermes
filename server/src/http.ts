@@ -7832,6 +7832,28 @@ server.listen(PORT, async () => {
       registrationToken: process.env.MATRIX_REGISTRATION_TOKEN,
       signupUrl: process.env.MATRIX_SIGNUP_URL,
       baseUrl: process.env.BASE_URL,
+      resolveLinkedPlatformId: async (platform, hermesHandle) => {
+        const user = await storage.getUser(hermesHandle);
+        if (!user?.linkedAccounts) return null;
+
+        const linked = user.linkedAccounts.find(account =>
+          account.platform === platform
+          && account.platformUserId
+          && account.verified !== false,
+        );
+        return linked?.platformUserId || null;
+      },
+      resolveLinkedHermesHandle: async (platform, platformUserId) => {
+        const users = await storage.getAllUsers();
+        const matchedUser = users.find(user =>
+          user.linkedAccounts?.some(account =>
+            account.platform === platform
+            && account.platformUserId === platformUserId
+            && account.verified !== false,
+          ),
+        );
+        return matchedUser?.handle || null;
+      },
     });
     registerPlatform(matrixPlatform);
     console.log('[Router] Matrix platform registered');

@@ -575,6 +575,11 @@ export class MatrixPlatform implements Platform {
 
     const result = await this.client.createRoom(createOpts);
 
+    if (opts.attachToSpace) {
+      const label = name || result.room_id;
+      await this.ensureSpaceMembership(result.room_id, label);
+    }
+
     // Send wake message in encrypted rooms (Element withholds keys until bot speaks)
     if (opts.encrypted !== false) {
       try {
@@ -634,7 +639,7 @@ export class MatrixPlatform implements Platform {
     }
   }
 
-  private async ensureSpaceMembership(roomId: string, channelId: string): Promise<void> {
+  private async ensureSpaceMembership(roomId: string, label: string): Promise<void> {
     if (!this.client) throw new Error('Matrix client not started');
     if (!this.config.spaceRoomId) return;
     if (roomId === this.config.spaceRoomId) return;
@@ -656,10 +661,14 @@ export class MatrixPlatform implements Platform {
         this.config.spaceRoomId,
       );
 
-      console.log(`[Matrix] Attached #${channelId} (${roomId}) to space ${this.config.spaceRoomId}`);
+      console.log(`[Matrix] Attached ${label} (${roomId}) to space ${this.config.spaceRoomId}`);
     } catch (error) {
-      console.warn(`[Matrix] Failed to attach #${channelId} to space ${this.config.spaceRoomId}:`, error);
+      console.warn(`[Matrix] Failed to attach ${label} to space ${this.config.spaceRoomId}:`, error);
     }
+  }
+
+  async attachRoomToSpace(roomId: string, label: string): Promise<void> {
+    await this.ensureSpaceMembership(roomId, label);
   }
 
   async ensureChannelRoom(channelId: string, channelName: string, description?: string): Promise<string> {
@@ -1104,18 +1113,45 @@ export class MatrixPlatform implements Platform {
       .replace(/\n/g, '<br/>');
   }
 
+  private getDirectRoomMap(): Record<string, string[]> {
+    if (!this.client) return {};
+
+    const content = this.client.getAccountData(EventType.Direct)?.getContent();
+    if (!content || typeof content !== 'object' || Array.isArray(content)) {
+      return {};
+    }
+
+    const directRoomMap: Record<string, string[]> = {};
+    for (const [userId, roomIds] of Object.entries(content as Record<string, unknown>)) {
+      if (!Array.isArray(roomIds)) continue;
+      const validRoomIds = roomIds.filter((roomId): roomId is string => typeof roomId === 'string' && roomId.length > 0);
+      if (validRoomIds.length > 0) {
+        directRoomMap[userId] = validRoomIds;
+      }
+    }
+
+    return directRoomMap;
+  }
+
+  private async markRoomAsDirect(userId: string, roomId: string): Promise<void> {
+    if (!this.client) throw new Error('Matrix client not started');
+
+    const directRoomMap = this.getDirectRoomMap();
+    const existingRoomIds = directRoomMap[userId] || [];
+    if (existingRoomIds.includes(roomId)) return;
+
+    directRoomMap[userId] = [...existingRoomIds, roomId];
+    await this.client.setAccountData(EventType.Direct, directRoomMap);
+  }
+
   private async findOrCreateDM(userId: string): Promise<string> {
     if (!this.client) throw new Error('Matrix client not started');
 
-    // Check existing rooms for DM
-    const rooms = this.client.getRooms();
-    for (const room of rooms) {
-      const members = room.getJoinedMembers();
-      if (members.length === 2) {
-        const memberIds = members.map(m => m.userId);
-        if (memberIds.includes(userId) && memberIds.includes(this.botUserId!)) {
-          return room.roomId;
-        }
+    const directRoomIds = this.getDirectRoomMap()[userId] || [];
+    for (const roomId of directRoomIds) {
+      const room = this.client.getRoom(roomId);
+      if (room?.getMyMembership() === KnownMembership.Join) {
+        return room.roomId;
       }
     }
 
@@ -1127,6 +1163,7 @@ export class MatrixPlatform implements Platform {
     });
 
     await this.inviteToRoom(room.id, userId);
+    await this.markRoomAsDirect(userId, room.id);
     return room.id;
   }
 }

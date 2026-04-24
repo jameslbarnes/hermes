@@ -11,7 +11,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { HookContext } from './types.js';
 import type { HookDispatcher } from './dispatcher.js';
-import type { JournalEntry, Storage } from '../storage.js';
+import type { JournalEntry, Storage, User } from '../storage.js';
 import { shouldRoute, evaluateEntry, type RecentPost } from '../intelligence/scoring.js';
 import { detectSparks, evaluateSpark, getConnectionInfo, executeSpark, type SparkAction } from '../intelligence/sparks.js';
 import { RoomBufferManager, type BufferedMessage } from '../intelligence/heat.js';
@@ -29,6 +29,17 @@ const MATRIX_DEFAULT_FIREHOSE_CHANNEL_NAME = 'Bot Noise';
 const MATRIX_DEFAULT_FIREHOSE_DESCRIPTION = 'Router firehose for public notebook entries';
 
 const roomBuffers = new RoomBufferManager();
+
+export function hasLinkedPlatformAccount(
+  user: Pick<User, 'linkedAccounts'> | null | undefined,
+  platform: string,
+): boolean {
+  return !!user?.linkedAccounts?.some(account =>
+    account.platform === platform
+    && !!account.platformUserId
+    && account.verified !== false,
+  );
+}
 
 function getAnthropic(): Anthropic | null {
   const key = process.env.ANTHROPIC_API_KEY;
@@ -422,6 +433,23 @@ async function executeSparkWithContext(
   const matrixPlatform = platforms.find(p => p instanceof MatrixPlatform) as MatrixPlatform | undefined;
   const anthropic = getAnthropic();
 
+  if (matrixPlatform && storage) {
+    const [sourceUser, targetUser] = await Promise.all([
+      storage.getUser(action.sourceHandle),
+      storage.getUser(action.targetHandle),
+    ]);
+    const sourceLinked = hasLinkedPlatformAccount(sourceUser, 'matrix');
+    const targetLinked = hasLinkedPlatformAccount(targetUser, 'matrix');
+
+    if (!sourceLinked || !targetLinked) {
+      console.log(
+        `[Agent] Skipping spark outreach for @${action.sourceHandle} ↔ @${action.targetHandle}: ` +
+        `linked Matrix required (source=${sourceLinked}, target=${targetLinked})`,
+      );
+      return;
+    }
+  }
+
   // Try to craft a warm introduction using interest profiles
   let warmMessage = action.message;
   if (anthropic && storage && (action.action === 'introduce' || action.action === 'suggest')) {
@@ -470,6 +498,46 @@ async function executeSparkWithContext(
   await executeSpark(action, platforms, 'router');
 }
 
+export async function triggerManualSpark(
+  sourceHandle: string,
+  targetHandle: string,
+  reason: string,
+  platforms: import('../platform/types.js').Platform[],
+  storage: Storage,
+  message?: string,
+): Promise<void> {
+  const [sourceEntries, targetEntries] = await Promise.all([
+    storage.getEntriesByHandle(sourceHandle, 1),
+    storage.getEntriesByHandle(targetHandle, 3),
+  ]);
+
+  const sourceEntry = sourceEntries[0] || {
+    id: `manual-spark-${Date.now()}`,
+    handle: sourceHandle,
+    pseudonym: `@${sourceHandle}`,
+    client: 'desktop' as const,
+    content: reason,
+    timestamp: Date.now(),
+  };
+
+  const candidate: import('../intelligence/sparks.js').SparkCandidate = {
+    handle: targetHandle,
+    matchingEntries: targetEntries,
+    overlapTopics: [],
+  };
+
+  const action: SparkAction = {
+    action: 'introduce',
+    confidence: 'high',
+    sourceHandle,
+    targetHandle,
+    reason,
+    message,
+  };
+
+  await executeSparkWithContext(action, candidate, sourceEntry, platforms, storage);
+}
+
 async function ensureSparkPairRoom(
   action: SparkAction,
   sourceEntry: JournalEntry,
@@ -480,6 +548,7 @@ async function ensureSparkPairRoom(
   const existingRoomId = action.existingRoomId
     || await storage.getSparkPairRoom(action.sourceHandle, action.targetHandle);
   if (existingRoomId) {
+    await matrixPlatform.attachRoomToSpace(existingRoomId, `@${action.sourceHandle} ↔ @${action.targetHandle}`);
     return { id: existingRoomId, created: false };
   }
 
@@ -490,6 +559,7 @@ async function ensureSparkPairRoom(
       invite: [action.sourceHandle, action.targetHandle],
       topic: action.reason,
       encrypted: true,
+      attachToSpace: true,
     },
   );
 

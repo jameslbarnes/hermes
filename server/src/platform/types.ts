@@ -43,6 +43,7 @@ export interface CreateRoomOptions {
   invite?: string[];    // Hermes handles to invite
   topic?: string;
   encrypted?: boolean;
+  attachToSpace?: boolean;
 }
 
 export interface Platform {

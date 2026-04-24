@@ -793,6 +793,24 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
+    id: 'system_hermes_trigger_spark',
+    name: 'hermes_trigger_spark',
+    description: 'Moderator-only: manually create or reuse a private spark room between two users for testing or facilitation.',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source_handle: { type: 'string', description: 'First Hermes handle' },
+        target_handle: { type: 'string', description: 'Second Hermes handle' },
+        reason: { type: 'string', description: 'Why these two should talk' },
+        message: { type: 'string', description: 'Optional message to post into the spark room' },
+      },
+      required: ['source_handle', 'target_handle', 'reason'],
+    },
+    createdAt: 0,
+  },
+  {
     id: 'system_hermes_connection_graph',
     name: 'hermes_connection_graph',
     description: 'Get a user\'s connection graph — who they\'re connected to, shared channels, mutual follows, and interaction history.',
@@ -1518,7 +1536,7 @@ function createMCPServer(secretKey: string) {
           }
         }
         // Moderation tools: only show to moderators (or if no moderators configured, show to all)
-        if (['hermes_poll_events', 'hermes_review_staged', 'hermes_hold_entry', 'hermes_release_entry'].includes(skill.name)) {
+        if (['hermes_poll_events', 'hermes_review_staged', 'hermes_hold_entry', 'hermes_release_entry', 'hermes_trigger_spark'].includes(skill.name)) {
           if (!(storage instanceof StagedStorage)) return false;
           if (MODERATOR_HANDLES.size > 0 && (!handle || !MODERATOR_HANDLES.has(handle))) return false;
         }
@@ -4087,6 +4105,67 @@ function createMCPServer(secretKey: string) {
         };
       } catch (err: any) {
         return { content: [{ type: 'text' as const, text: `Spark search failed: ${err.message}` }], isError: true };
+      }
+    }
+
+    if (name === 'hermes_trigger_spark') {
+      try {
+        const requester = await storage.getUserByKeyHash(keyHash);
+        const isModerator = !!requester?.handle && (MODERATOR_HANDLES.size === 0 || MODERATOR_HANDLES.has(requester.handle));
+        if (!isModerator) {
+          return {
+            content: [{ type: 'text' as const, text: 'Only moderators can manually trigger sparks.' }],
+            isError: true,
+          };
+        }
+
+        const a = args as { source_handle?: string; target_handle?: string; reason?: string; message?: string };
+        const sourceHandle = a.source_handle?.replace(/^@/, '').trim().toLowerCase();
+        const targetHandle = a.target_handle?.replace(/^@/, '').trim().toLowerCase();
+        const reason = a.reason?.trim();
+        const message = a.message?.trim();
+
+        if (!sourceHandle || !targetHandle || !reason) {
+          return {
+            content: [{ type: 'text' as const, text: 'source_handle, target_handle, and reason are required.' }],
+            isError: true,
+          };
+        }
+        if (sourceHandle === targetHandle) {
+          return {
+            content: [{ type: 'text' as const, text: 'source_handle and target_handle must be different.' }],
+            isError: true,
+          };
+        }
+
+        const [sourceUser, targetUser] = await Promise.all([
+          storage.getUser(sourceHandle),
+          storage.getUser(targetHandle),
+        ]);
+        if (!sourceUser?.handle || !targetUser?.handle) {
+          return {
+            content: [{ type: 'text' as const, text: 'Both source_handle and target_handle must exist.' }],
+            isError: true,
+          };
+        }
+
+        const { triggerManualSpark, hasLinkedPlatformAccount } = await import('./hooks/agent.js');
+        if (!hasLinkedPlatformAccount(sourceUser, 'matrix') || !hasLinkedPlatformAccount(targetUser, 'matrix')) {
+          return {
+            content: [{ type: 'text' as const, text: `Both @${sourceHandle} and @${targetHandle} need linked Matrix accounts for a spark room.` }],
+            isError: true,
+          };
+        }
+        await triggerManualSpark(sourceHandle, targetHandle, reason, getAllPlatforms(), storage, message);
+
+        const roomId = await storage.getSparkPairRoom(sourceHandle, targetHandle);
+        return {
+          content: [{ type: 'text' as const, text: roomId
+            ? `Spark triggered for @${sourceHandle} ↔ @${targetHandle} (${roomId})`
+            : `Spark trigger completed for @${sourceHandle} ↔ @${targetHandle}` }],
+        };
+      } catch (err: any) {
+        return { content: [{ type: 'text' as const, text: `Trigger spark failed: ${err.message}` }], isError: true };
       }
     }
 

@@ -1,3 +1,4 @@
+import { EventType, KnownMembership } from 'matrix-js-sdk';
 import { describe, expect, it, vi } from 'vitest';
 import { MatrixPlatform, isMatrixMention } from './matrix.js';
 
@@ -213,6 +214,159 @@ describe('MatrixPlatform channel rooms', () => {
       { via: ['mtrx.example.test'], canonical: true },
       '!space:mtrx.example.test',
     );
+  });
+
+  it('attaches private created rooms to the configured Matrix space when requested', async () => {
+    const createRoom = vi.fn().mockResolvedValue({ room_id: '!spark-room:mtrx.example.test' });
+    const joinRoom = vi.fn().mockResolvedValue({});
+    const sendStateEvent = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const sendMessage = vi.fn().mockResolvedValue({ event_id: '$wake' });
+    const platform = createPlatform({ spaceRoomId: '!space:mtrx.example.test' });
+
+    (platform as any).client = {
+      createRoom,
+      joinRoom,
+      sendStateEvent,
+      sendMessage,
+    };
+
+    await expect(platform.createRoom('@alice ↔ @bob', {
+      type: 'group',
+      invite: ['alice', 'bob'],
+      topic: 'Test spark',
+      encrypted: true,
+      attachToSpace: true,
+    })).resolves.toEqual(expect.objectContaining({
+      id: '!spark-room:mtrx.example.test',
+    }));
+
+    expect(joinRoom).toHaveBeenCalledWith('!space:mtrx.example.test');
+    expect(sendStateEvent).toHaveBeenNthCalledWith(
+      1,
+      '!space:mtrx.example.test',
+      'm.space.child',
+      { via: ['mtrx.example.test'], suggested: true },
+      '!spark-room:mtrx.example.test',
+    );
+    expect(sendStateEvent).toHaveBeenNthCalledWith(
+      2,
+      '!spark-room:mtrx.example.test',
+      'm.space.parent',
+      { via: ['mtrx.example.test'], canonical: true },
+      '!space:mtrx.example.test',
+    );
+  });
+});
+
+describe('MatrixPlatform DMs', () => {
+  const createPlatform = (overrides: Partial<ConstructorParameters<typeof MatrixPlatform>[0]> = {}) => new MatrixPlatform({
+    serverUrl: 'https://mtrx.example.test',
+    serverName: 'mtrx.example.test',
+    botSecretKey: 'test-secret',
+    botHandle: 'router',
+    ...overrides,
+  });
+
+  it('reuses rooms explicitly tracked in m.direct', async () => {
+    const clientSendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const getAccountData = vi.fn().mockReturnValue({
+      getContent: () => ({
+        '@james:matrix.org': ['!direct-room:mtrx.example.test'],
+      }),
+    });
+    const getRoom = vi.fn().mockReturnValue({
+      roomId: '!direct-room:mtrx.example.test',
+      getMyMembership: () => KnownMembership.Join,
+    });
+    const platform = createPlatform();
+
+    (platform as any).client = {
+      getAccountData,
+      getRoom,
+      sendMessage: clientSendMessage,
+    };
+
+    await expect(platform.sendDM('@james:matrix.org', 'digest check')).resolves.toBe('$event');
+    expect(getRoom).toHaveBeenCalledWith('!direct-room:mtrx.example.test');
+    expect(clientSendMessage).toHaveBeenCalledWith('!direct-room:mtrx.example.test', expect.objectContaining({
+      body: 'digest check',
+    }));
+  });
+
+  it('creates a fresh DM instead of reusing arbitrary two-person rooms', async () => {
+    const clientSendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const setAccountData = vi.fn().mockResolvedValue({});
+    const platform = createPlatform();
+
+    (platform as any).client = {
+      getAccountData: vi.fn().mockReturnValue(undefined),
+      getRoom: vi.fn().mockReturnValue({
+        roomId: '!fun-facts:mtrx.example.test',
+        getMyMembership: () => KnownMembership.Join,
+        getJoinedMembers: () => [
+          { userId: '@router:mtrx.example.test' },
+          { userId: '@james:matrix.org' },
+        ],
+      }),
+      setAccountData,
+      sendMessage: clientSendMessage,
+    };
+
+    vi.spyOn(platform, 'createRoom').mockResolvedValue({
+      id: '!fresh-dm:mtrx.example.test',
+      type: 'dm',
+      platform: 'matrix',
+    });
+    vi.spyOn(platform, 'inviteToRoom').mockResolvedValue();
+
+    await expect(platform.sendDM('@james:matrix.org', 'digest check')).resolves.toBe('$event');
+    expect(platform.createRoom).toHaveBeenCalledWith('', expect.objectContaining({
+      type: 'dm',
+      encrypted: true,
+    }));
+    expect(platform.inviteToRoom).toHaveBeenCalledWith('!fresh-dm:mtrx.example.test', '@james:matrix.org');
+    expect(setAccountData).toHaveBeenCalledWith(EventType.Direct, {
+      '@james:matrix.org': ['!fresh-dm:mtrx.example.test'],
+    });
+    expect(clientSendMessage).toHaveBeenCalledWith('!fresh-dm:mtrx.example.test', expect.objectContaining({
+      body: 'digest check',
+    }));
+  });
+
+  it('ignores stale m.direct room ids when the bot is no longer joined', async () => {
+    const clientSendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const setAccountData = vi.fn().mockResolvedValue({});
+    const platform = createPlatform();
+
+    (platform as any).client = {
+      getAccountData: vi.fn().mockReturnValue({
+        getContent: () => ({
+          '@james:matrix.org': ['!stale-dm:mtrx.example.test'],
+        }),
+      }),
+      getRoom: vi.fn().mockReturnValue({
+        roomId: '!stale-dm:mtrx.example.test',
+        getMyMembership: () => KnownMembership.Leave,
+      }),
+      setAccountData,
+      sendMessage: clientSendMessage,
+    };
+
+    vi.spyOn(platform, 'createRoom').mockResolvedValue({
+      id: '!replacement-dm:mtrx.example.test',
+      type: 'dm',
+      platform: 'matrix',
+    });
+    vi.spyOn(platform, 'inviteToRoom').mockResolvedValue();
+
+    await expect(platform.sendDM('@james:matrix.org', 'digest check')).resolves.toBe('$event');
+    expect(platform.createRoom).toHaveBeenCalledTimes(1);
+    expect(setAccountData).toHaveBeenCalledWith(EventType.Direct, {
+      '@james:matrix.org': ['!stale-dm:mtrx.example.test', '!replacement-dm:mtrx.example.test'],
+    });
+    expect(clientSendMessage).toHaveBeenCalledWith('!replacement-dm:mtrx.example.test', expect.objectContaining({
+      body: 'digest check',
+    }));
   });
 });
 

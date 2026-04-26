@@ -626,11 +626,18 @@ export class MatrixPlatform implements Platform {
         content: { algorithm: 'm.megolm.v1.aes-sha2' },
       });
     }
+    if (opts.type === 'channel') {
+      initialState.push(...this.getSpaceRestrictedStateEvents().map(event => ({
+        type: event.type,
+        state_key: '',
+        content: event.content,
+      })));
+    }
 
     const createOpts: any = {
       name: name || undefined,
       invite,
-      preset: opts.type === 'dm' ? 'trusted_private_chat' : opts.type === 'channel' ? 'public_chat' : 'private_chat',
+      preset: opts.type === 'dm' ? Preset.TrustedPrivateChat : Preset.PrivateChat,
       initial_state: initialState,
       is_direct: opts.type === 'dm',
     };
@@ -641,7 +648,7 @@ export class MatrixPlatform implements Platform {
 
     const result = await this.client.createRoom(createOpts);
 
-    if (opts.attachToSpace) {
+    if (opts.attachToSpace || opts.type === 'channel') {
       const label = name || result.room_id;
       await this.ensureSpaceMembership(result.room_id, label);
     }
@@ -695,13 +702,50 @@ export class MatrixPlatform implements Platform {
 
   // ── Deep Notebook Integration ──────────────────────────────
 
-  private async ensureRoomDirectoryVisibility(roomId: string, channelId: string): Promise<void> {
+  private getSpaceRestrictedStateEvents(): Array<{ type: EventType | string; content: Record<string, unknown> }> {
+    const joinRule = this.config.spaceRoomId
+      ? {
+        join_rule: 'restricted',
+        allow: [
+          {
+            type: 'm.room_membership',
+            room_id: this.config.spaceRoomId,
+          },
+        ],
+      }
+      : { join_rule: 'invite' };
+
+    return [
+      {
+        type: EventType.RoomJoinRules,
+        content: joinRule,
+      },
+      {
+        type: EventType.RoomHistoryVisibility,
+        content: { history_visibility: 'shared' },
+      },
+      {
+        type: EventType.RoomGuestAccess,
+        content: { guest_access: 'forbidden' },
+      },
+    ];
+  }
+
+  private async ensureChannelRoomAccess(roomId: string, channelId: string): Promise<void> {
     if (!this.client) throw new Error('Matrix client not started');
 
     try {
-      await this.client.setRoomDirectoryVisibility(roomId, Visibility.Public);
+      await this.client.setRoomDirectoryVisibility(roomId, Visibility.Private);
     } catch (error) {
-      console.warn(`[Matrix] Failed to publish #${channelId} to room directory:`, error);
+      console.warn(`[Matrix] Failed to make #${channelId} private in room directory:`, error);
+    }
+
+    for (const event of this.getSpaceRestrictedStateEvents()) {
+      try {
+        await this.client.sendStateEvent(roomId, event.type as any, event.content as any, '');
+      } catch (error) {
+        console.warn(`[Matrix] Failed to apply ${event.type} policy to #${channelId}:`, error);
+      }
     }
   }
 
@@ -748,7 +792,7 @@ export class MatrixPlatform implements Platform {
     try {
       const resolved = await this.client.getRoomIdForAlias(alias);
       this.channelRooms.set(channelId, resolved.room_id);
-      await this.ensureRoomDirectoryVisibility(resolved.room_id, channelId);
+      await this.ensureChannelRoomAccess(resolved.room_id, channelId);
       await this.ensureSpaceMembership(resolved.room_id, channelId);
       return resolved.room_id;
     } catch {
@@ -759,19 +803,24 @@ export class MatrixPlatform implements Platform {
       name: channelName,
       topic: description || `Hermes channel: #${channelId}`,
       room_alias_name: channelId,
-      visibility: Visibility.Public,
-      preset: Preset.PublicChat,
+      visibility: Visibility.Private,
+      preset: Preset.PrivateChat,
       initial_state: [
         {
           type: ROUTER_CHANNEL_STATE,
           state_key: '',
           content: { channel_id: channelId, name: channelName, description },
         },
+        ...this.getSpaceRestrictedStateEvents().map(event => ({
+          type: event.type,
+          state_key: '',
+          content: event.content,
+        })),
       ],
     });
 
     this.channelRooms.set(channelId, result.room_id);
-    await this.ensureRoomDirectoryVisibility(result.room_id, channelId);
+    await this.ensureChannelRoomAccess(result.room_id, channelId);
     await this.ensureSpaceMembership(result.room_id, channelId);
     console.log(`[Matrix] Created room for #${channelId}: ${result.room_id}`);
     return result.room_id;

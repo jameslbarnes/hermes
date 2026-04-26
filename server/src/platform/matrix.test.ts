@@ -112,19 +112,27 @@ describe('MatrixPlatform channel rooms', () => {
     ...overrides,
   });
 
-  it('publishes existing alias-backed rooms to the Matrix room directory', async () => {
+  it('keeps existing alias-backed rooms out of the public Matrix room directory', async () => {
     const getRoomIdForAlias = vi.fn().mockResolvedValue({ room_id: '!books:mtrx.example.test' });
     const setRoomDirectoryVisibility = vi.fn().mockResolvedValue({});
+    const sendStateEvent = vi.fn().mockResolvedValue({ event_id: '$event' });
     const platform = createPlatform();
 
     (platform as any).client = {
       getRoomIdForAlias,
       setRoomDirectoryVisibility,
+      sendStateEvent,
     };
 
     await expect(platform.ensureChannelRoom('books', 'Books')).resolves.toBe('!books:mtrx.example.test');
     expect(getRoomIdForAlias).toHaveBeenCalledWith('#books:mtrx.example.test');
-    expect(setRoomDirectoryVisibility).toHaveBeenCalledWith('!books:mtrx.example.test', 'public');
+    expect(setRoomDirectoryVisibility).toHaveBeenCalledWith('!books:mtrx.example.test', 'private');
+    expect(sendStateEvent).toHaveBeenCalledWith(
+      '!books:mtrx.example.test',
+      'm.room.join_rules',
+      { join_rule: 'invite' },
+      '',
+    );
   });
 
   it('attaches existing alias-backed rooms to the configured Matrix space', async () => {
@@ -143,15 +151,22 @@ describe('MatrixPlatform channel rooms', () => {
 
     await expect(platform.ensureChannelRoom('books', 'Books')).resolves.toBe('!books:mtrx.example.test');
     expect(joinRoom).toHaveBeenCalledWith('!space:mtrx.example.test');
-    expect(sendStateEvent).toHaveBeenNthCalledWith(
-      1,
+    expect(sendStateEvent).toHaveBeenCalledWith(
+      '!books:mtrx.example.test',
+      'm.room.join_rules',
+      {
+        join_rule: 'restricted',
+        allow: [{ type: 'm.room_membership', room_id: '!space:mtrx.example.test' }],
+      },
+      '',
+    );
+    expect(sendStateEvent).toHaveBeenCalledWith(
       '!space:mtrx.example.test',
       'm.space.child',
       { via: ['mtrx.example.test'], suggested: true },
       '!books:mtrx.example.test',
     );
-    expect(sendStateEvent).toHaveBeenNthCalledWith(
-      2,
+    expect(sendStateEvent).toHaveBeenCalledWith(
       '!books:mtrx.example.test',
       'm.space.parent',
       { via: ['mtrx.example.test'], canonical: true },
@@ -159,16 +174,19 @@ describe('MatrixPlatform channel rooms', () => {
     );
   });
 
-  it('creates new rooms as public and publishes them to the Matrix room directory', async () => {
+  it('creates new channel rooms as private restricted rooms in the configured Matrix space', async () => {
     const getRoomIdForAlias = vi.fn().mockRejectedValue(new Error('not found'));
     const createRoom = vi.fn().mockResolvedValue({ room_id: '!books-created:mtrx.example.test' });
     const setRoomDirectoryVisibility = vi.fn().mockResolvedValue({});
-    const platform = createPlatform();
+    const sendStateEvent = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const platform = createPlatform({ spaceRoomId: '!space:mtrx.example.test' });
 
     (platform as any).client = {
       getRoomIdForAlias,
       createRoom,
       setRoomDirectoryVisibility,
+      sendStateEvent,
+      joinRoom: vi.fn().mockResolvedValue({}),
     };
 
     await expect(platform.ensureChannelRoom('books', 'Books', 'Book discussion')).resolves.toBe('!books-created:mtrx.example.test');
@@ -176,10 +194,23 @@ describe('MatrixPlatform channel rooms', () => {
       name: 'Books',
       topic: 'Book discussion',
       room_alias_name: 'books',
-      visibility: 'public',
-      preset: 'public_chat',
+      visibility: 'private',
+      preset: 'private_chat',
+      initial_state: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'm.room.join_rules',
+          content: {
+            join_rule: 'restricted',
+            allow: [{ type: 'm.room_membership', room_id: '!space:mtrx.example.test' }],
+          },
+        }),
+        expect.objectContaining({
+          type: 'm.room.guest_access',
+          content: { guest_access: 'forbidden' },
+        }),
+      ]),
     }));
-    expect(setRoomDirectoryVisibility).toHaveBeenCalledWith('!books-created:mtrx.example.test', 'public');
+    expect(setRoomDirectoryVisibility).toHaveBeenCalledWith('!books-created:mtrx.example.test', 'private');
   });
 
   it('attaches newly created rooms to the configured Matrix space', async () => {
@@ -200,15 +231,13 @@ describe('MatrixPlatform channel rooms', () => {
 
     await expect(platform.ensureChannelRoom('books', 'Books', 'Book discussion')).resolves.toBe('!books-created:mtrx.example.test');
     expect(joinRoom).toHaveBeenCalledWith('!space:mtrx.example.test');
-    expect(sendStateEvent).toHaveBeenNthCalledWith(
-      1,
+    expect(sendStateEvent).toHaveBeenCalledWith(
       '!space:mtrx.example.test',
       'm.space.child',
       { via: ['mtrx.example.test'], suggested: true },
       '!books-created:mtrx.example.test',
     );
-    expect(sendStateEvent).toHaveBeenNthCalledWith(
-      2,
+    expect(sendStateEvent).toHaveBeenCalledWith(
       '!books-created:mtrx.example.test',
       'm.space.parent',
       { via: ['mtrx.example.test'], canonical: true },
@@ -254,6 +283,47 @@ describe('MatrixPlatform channel rooms', () => {
       'm.space.parent',
       { via: ['mtrx.example.test'], canonical: true },
       '!space:mtrx.example.test',
+    );
+  });
+
+  it('creates generic channel rooms as restricted children of the configured Matrix space', async () => {
+    const createRoom = vi.fn().mockResolvedValue({ room_id: '!channel-room:mtrx.example.test' });
+    const joinRoom = vi.fn().mockResolvedValue({});
+    const sendStateEvent = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const platform = createPlatform({ spaceRoomId: '!space:mtrx.example.test' });
+
+    (platform as any).client = {
+      createRoom,
+      joinRoom,
+      sendStateEvent,
+    };
+
+    await expect(platform.createRoom('Digest', {
+      type: 'channel',
+      encrypted: false,
+    })).resolves.toEqual(expect.objectContaining({
+      id: '!channel-room:mtrx.example.test',
+    }));
+
+    expect(createRoom).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Digest',
+      preset: 'private_chat',
+      initial_state: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'm.room.join_rules',
+          content: {
+            join_rule: 'restricted',
+            allow: [{ type: 'm.room_membership', room_id: '!space:mtrx.example.test' }],
+          },
+        }),
+      ]),
+    }));
+    expect(joinRoom).toHaveBeenCalledWith('!space:mtrx.example.test');
+    expect(sendStateEvent).toHaveBeenCalledWith(
+      '!space:mtrx.example.test',
+      'm.space.child',
+      { via: ['mtrx.example.test'], suggested: true },
+      '!channel-room:mtrx.example.test',
     );
   });
 });

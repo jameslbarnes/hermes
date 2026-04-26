@@ -33,7 +33,7 @@ import { registerPlatform, getPlatform, getAllPlatforms, startAllPlatforms, stop
 import { MatrixPlatform } from './platform/matrix.js';
 import { getDispatcher } from './hooks/dispatcher.js';
 import { registerAgentHooks } from './hooks/agent.js';
-import { sendPersonalizedDigests, startCronJobs, stopCronJobs } from './hooks/cron.js';
+import { generateDailyDigest, sendPersonalizedDigests, startCronJobs, stopCronJobs } from './hooks/cron.js';
 
 // Security: Check if a URL points to internal/private IP ranges
 function isInternalUrl(urlString: string): boolean {
@@ -7122,6 +7122,40 @@ const server = createServer(async (req, res) => {
       const result = await sendPersonalizedDigests(storage, { handles: [targetHandle], force: true });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, targetHandle, ...result }));
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/trigger-global-digest?key=...&date=YYYY-MM-DD
+    // Trigger the Matrix #digest global notebook digest.
+    // ─────────────────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/trigger-global-digest') {
+      const secretKey = url.searchParams.get('key');
+      if (!secretKey || !isValidSecretKey(secretKey)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Valid key query parameter required' }));
+        return;
+      }
+
+      const requester = await storage.getUserByKeyHash(hashSecretKey(secretKey));
+      const isModerator = !!requester?.handle && (MODERATOR_HANDLES.size === 0 || MODERATOR_HANDLES.has(requester.handle));
+      if (!isModerator) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Only moderators can trigger the global digest.' }));
+        return;
+      }
+
+      const date = url.searchParams.get('date')?.trim();
+      if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'date must be YYYY-MM-DD.' }));
+        return;
+      }
+
+      console.log(`[Digest] Global Matrix digest trigger requested by @${requester.handle}${date ? ` for ${date}` : ''}`);
+      const result = await generateDailyDigest(storage, date ? { date } : undefined);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, ...result }));
       return;
     }
 

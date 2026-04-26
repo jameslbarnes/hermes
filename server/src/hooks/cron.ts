@@ -11,17 +11,22 @@ import { getPlatform } from '../platform/registry.js';
 
 // ── Digest ───────────────────────────────────────────────────
 
-const DIGEST_PROMPT = `You are the Router, writing a daily digest of what happened in the shared notebook yesterday.
+export const GLOBAL_DIGEST_MODEL = 'claude-opus-4-7';
+export const PERSONALIZED_DIGEST_MODEL = 'claude-opus-4-7';
 
-Write like the editor of a small, smart newspaper. Group entries by theme, highlight surprising connections, note who's writing about what. Make it scannable but interesting.
+const DIGEST_PROMPT = `You are the Router, writing the global daily digest for the shared notebook.
+
+This is not a personal digest and not a raw feed recap. It is the shared "state of the notebook" for the whole community.
+
+Write like the editor of a small, smart newspaper. Group entries by theme, highlight surprising connections, note who's writing about what, and explain why the day mattered.
 
 Structure:
-- Lead with the most interesting thing that happened
-- Group related entries by theme (2-4 themes)
-- Note any connections made (introductions, overlapping work)
-- End with a "worth watching" note if there's an emerging trend
+- Lead with the strongest pattern or surprise
+- 3-5 short thematic sections
+- Note notable new/returning authors if relevant
+- Include one "worth watching" note when there is an emerging trend or unresolved question
 
-Cite @handles. Keep it under 800 words. Write in present tense.
+Cite @handles. Be specific, but do not list every entry. Keep it under 700 words. Write in present tense.
 
 If there were fewer than 3 entries, write a brief note instead of a full digest.`;
 
@@ -40,83 +45,202 @@ Voice: you're a thoughtful friend who reads everything and knows what this perso
 
 Keep it under 500 words. Cite @handles. Be specific about WHY something is relevant to them.`;
 
+export interface GlobalDigestResult {
+  posted: boolean;
+  entryCount: number;
+  includedEntryCount: number;
+  date: string;
+  roomId?: string;
+  skipped?: string;
+  failed?: boolean;
+}
+
+function getUtcDayRange(date: string): { start: number; end: number } {
+  const start = new Date(`${date}T00:00:00.000Z`).getTime();
+  return { start, end: start + 24 * 60 * 60 * 1000 };
+}
+
+function getYesterdayUtcDate(now = new Date()): string {
+  const yesterday = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() - 1,
+  ));
+  return yesterday.toISOString().slice(0, 10);
+}
+
+function isChannelDestination(dest: string): boolean {
+  return dest.trim().startsWith('#');
+}
+
+function isPublicDigestEntry(entry: JournalEntry): boolean {
+  if (entry.aiOnly === true || entry.humanVisible === false) return false;
+  if (entry.visibility === 'private' || entry.visibility === 'ai-only') return false;
+  if (entry.to && entry.to.length > 0 && !entry.to.every(isChannelDestination)) return false;
+  return true;
+}
+
+function selectEntriesForGlobalDigest(entries: JournalEntry[], maxEntries = 80): JournalEntry[] {
+  const sorted = [...entries].sort((a, b) => a.timestamp - b.timestamp);
+  if (sorted.length <= maxEntries) return sorted;
+  return sorted.slice(sorted.length - maxEntries);
+}
+
+function formatEntryForGlobalDigestPrompt(entry: JournalEntry, max = 420): string {
+  const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
+  const time = new Date(entry.timestamp).toISOString().slice(11, 16);
+  const content = entry.content.trim() || '[no text content]';
+  const channels = [
+    ...(entry.to || []).filter(isChannelDestination),
+    entry.channel ? `#${entry.channel}` : '',
+  ].filter(Boolean);
+  const metadata = [
+    channels.length > 0 ? `channels: ${channels.join(', ')}` : '',
+    entry.topicHints?.length ? `topics: ${entry.topicHints.join(', ')}` : '',
+    entry.isReflection ? 'reflection' : '',
+  ].filter(Boolean);
+
+  return [
+    `[${time}] ${author}${metadata.length ? ` (${metadata.join('; ')})` : ''}`,
+    content.slice(0, max) + (content.length > max ? '...' : ''),
+  ].join('\n');
+}
+
+function getEntryContributor(entry: JournalEntry): string {
+  return entry.handle ? `@${entry.handle}` : entry.pseudonym;
+}
+
+async function maybeSaveDailySummary(
+  storage: Storage,
+  date: string,
+  content: string,
+  entries: JournalEntry[],
+): Promise<void> {
+  const summaryStorage = storage as Storage & {
+    addDailySummary?: (summary: {
+      date: string;
+      content: string;
+      timestamp: number;
+      entryCount: number;
+      pseudonyms: string[];
+    }) => Promise<unknown>;
+  };
+
+  if (!summaryStorage.addDailySummary) return;
+
+  await summaryStorage.addDailySummary({
+    date,
+    content,
+    timestamp: Date.now(),
+    entryCount: entries.length,
+    pseudonyms: [...new Set(entries.map(getEntryContributor))],
+  });
+}
+
 /**
- * Generate and post a daily digest.
+ * Generate and post a global daily digest to Matrix #digest.
  * Called by the cron scheduler (typically 8am UTC).
  */
-export async function generateDailyDigest(storage: Storage): Promise<void> {
-  console.log('[Cron] Generating daily digest...');
+export async function generateDailyDigest(
+  storage: Storage,
+  opts?: { date?: string },
+): Promise<GlobalDigestResult> {
+  console.log('[Cron] Generating global daily digest...');
 
-  // Get yesterday's entries
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const startOfDay = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate()).getTime();
-  const endOfDay = startOfDay + 24 * 60 * 60 * 1000;
+  const date = opts?.date || getYesterdayUtcDate();
+  const { start: startOfDay, end: endOfDay } = getUtcDayRange(date);
 
-  const allEntries = await storage.getEntriesSince(startOfDay);
+  const matrix = getPlatform('matrix') as MatrixPlatform | undefined;
+  if (!matrix) {
+    console.log('[Cron] Skipping global digest: Matrix platform not connected');
+    return { posted: false, entryCount: 0, includedEntryCount: 0, date, skipped: 'matrix-not-connected' };
+  }
+
+  const allEntries = await storage.getEntriesSince(startOfDay, 1000);
   const yesterdayEntries = allEntries.filter(e =>
     e.timestamp >= startOfDay && e.timestamp < endOfDay && isPublicDigestEntry(e)
   );
 
   if (yesterdayEntries.length === 0) {
-    console.log('[Cron] No entries yesterday, skipping digest');
-    return;
+    console.log('[Cron] No public entries yesterday, skipping global digest');
+    return { posted: false, entryCount: 0, includedEntryCount: 0, date, skipped: 'no-public-entries' };
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.log('[Cron] No ANTHROPIC_API_KEY, skipping AI digest');
-    return;
+    console.log('[Cron] No ANTHROPIC_API_KEY, skipping global digest');
+    return { posted: false, entryCount: yesterdayEntries.length, includedEntryCount: 0, date, skipped: 'missing-api-key' };
   }
 
   const anthropic = new Anthropic({ apiKey });
+  const selectedEntries = selectEntriesForGlobalDigest(yesterdayEntries);
 
   // Format entries for the prompt
-  const entrySummaries = yesterdayEntries.map(e => {
-    const author = e.handle ? `@${e.handle}` : e.pseudonym;
-    const topics = e.topicHints?.join(', ') || '';
-    return `[${author}] ${e.content.substring(0, 300)}${e.content.length > 300 ? '...' : ''}${topics ? ` (topics: ${topics})` : ''}`;
-  }).join('\n\n');
+  const entrySummaries = selectedEntries
+    .map(e => formatEntryForGlobalDigestPrompt(e))
+    .join('\n\n---\n\n');
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250514',
-      max_tokens: 1500,
+      model: GLOBAL_DIGEST_MODEL,
+      max_tokens: 1600,
       system: DIGEST_PROMPT,
       messages: [
         {
           role: 'user',
-          content: `${yesterdayEntries.length} entries from ${yesterday.toISOString().split('T')[0]}:\n\n${entrySummaries}`,
+          content: [
+            `Date: ${date}`,
+            `Public entries: ${yesterdayEntries.length}`,
+            `Entries included below: ${selectedEntries.length}`,
+            selectedEntries.length < yesterdayEntries.length
+              ? `Note: high-volume day; this is the latest representative set of ${selectedEntries.length} entries. Still summarize the overall day from this evidence and mention that the day was high-volume.`
+              : '',
+            '',
+            '<entries>',
+            entrySummaries,
+            '</entries>',
+          ].filter(Boolean).join('\n'),
         },
       ],
     });
 
     const text = response.content.find(b => b.type === 'text');
-    if (!text) return;
-    const digestContent = (text as Anthropic.TextBlock).text;
-
-    // Post to Matrix #digest room
-    const matrix = getPlatform('matrix') as MatrixPlatform | undefined;
-    if (matrix) {
-      const digestRoomId = await matrix.ensureChannelRoom('digest', 'Daily Digest', 'Daily summary of notebook activity');
-
-      // Post digest as a message (with custom fields for Router Client rendering)
-      const dateStr2 = yesterday.toISOString().split('T')[0];
-      const digestText = `📰 Daily Digest — ${dateStr2}\n\n${digestContent}`;
-      await matrix.sendMessage(digestRoomId, digestText);
-      console.log(`[Cron] Digest posted to #digest room (${yesterdayEntries.length} entries)`);
+    if (!text) {
+      return { posted: false, entryCount: yesterdayEntries.length, includedEntryCount: selectedEntries.length, date, skipped: 'empty-model-response' };
+    }
+    const digestContent = (text as Anthropic.TextBlock).text.trim();
+    if (!digestContent) {
+      return { posted: false, entryCount: yesterdayEntries.length, includedEntryCount: selectedEntries.length, date, skipped: 'empty-digest' };
     }
 
-    // Also save as a Hermes daily summary
-    const dateStr = yesterday.toISOString().split('T')[0];
+    const digestRoomId = await matrix.ensureChannelRoom('digest', 'Daily Digest', 'Daily summary of notebook activity');
+
+    const digestText = `# Daily Digest — ${date}\n\n${digestContent}`;
+    await matrix.sendMessage(digestRoomId, digestText);
+    console.log(`[Cron] Global digest posted to #digest room (${yesterdayEntries.length} entries)`);
+
     try {
-      // Use the storage API if available
-      console.log(`[Cron] Digest generated for ${dateStr}: ${digestContent.substring(0, 100)}...`);
+      await maybeSaveDailySummary(storage, date, digestContent, yesterdayEntries);
     } catch (err) {
       console.error('[Cron] Failed to save digest:', err);
     }
+
+    return {
+      posted: true,
+      entryCount: yesterdayEntries.length,
+      includedEntryCount: selectedEntries.length,
+      date,
+      roomId: digestRoomId,
+    };
   } catch (err) {
     console.error('[Cron] Failed to generate digest:', err);
+    return {
+      posted: false,
+      entryCount: yesterdayEntries.length,
+      includedEntryCount: selectedEntries.length,
+      date,
+      failed: true,
+    };
   }
 }
 
@@ -136,12 +260,6 @@ function getVerifiedLinkedPlatformUserId(user: User, platform: string): string |
     && acc.verified !== false,
   );
   return account?.platformUserId || null;
-}
-
-function isPublicDigestEntry(entry: JournalEntry): boolean {
-  if (entry.aiOnly === true || entry.humanVisible === false) return false;
-  if (entry.visibility === 'private' || entry.visibility === 'ai-only') return false;
-  return true;
 }
 
 function formatEntryForPrompt(entry: JournalEntry, max = 300): string {
@@ -201,11 +319,8 @@ export async function sendPersonalizedDigests(
   }
   const anthropic = new Anthropic({ apiKey });
 
-  // Get yesterday's entries
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const startOfDay = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate()).getTime();
-  const endOfDay = startOfDay + 24 * 60 * 60 * 1000;
+  const yesterday = getYesterdayUtcDate();
+  const { start: startOfDay, end: endOfDay } = getUtcDayRange(yesterday);
   const allEntries = await storage.getEntriesSince(startOfDay, 500);
   const yesterdayEntries = allEntries.filter(e =>
     e.timestamp >= startOfDay && e.timestamp < endOfDay && isPublicDigestEntry(e)
@@ -273,13 +388,13 @@ export async function sendPersonalizedDigests(
       ].filter(Boolean).join('\n\n---\n\n') || 'No public notebook activity was available.';
 
       const response = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+        model: PERSONALIZED_DIGEST_MODEL,
         max_tokens: 800,
         system: PERSONALIZED_DIGEST_PROMPT,
         messages: [
           {
             role: 'user',
-            content: `${personContext}\n\n${yesterdayEntries.length} public entries yesterday (${yesterday.toISOString().slice(0, 10)}).\n\n${entrySummaries}`,
+            content: `${personContext}\n\n${yesterdayEntries.length} public entries yesterday (${yesterday}).\n\n${entrySummaries}`,
           },
         ],
       });
@@ -357,7 +472,9 @@ export function startCronJobs(storage: Storage): void {
     // Generate digest at 8am UTC if we haven't already today
     if (hour === 8 && todayStr !== lastDigestDate) {
       lastDigestDate = todayStr;
-      await generateDailyDigest(storage);
+      await generateDailyDigest(storage).catch(err => {
+        console.error('[Cron] Global digest failed:', err);
+      });
       // Send personalized digests to each user via Matrix DM
       await sendPersonalizedDigests(storage).catch(err => {
         console.error('[Cron] Personalized digests failed:', err);

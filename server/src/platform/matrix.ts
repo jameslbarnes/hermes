@@ -25,6 +25,7 @@ import {
   type MatrixEvent,
   MatrixEventEvent,
   EventType,
+  RelationType,
   MsgType,
   RoomMemberEvent,
   ClientEvent,
@@ -102,6 +103,8 @@ export const ROUTER_ENTRY_EVENT = 'com.router.entry';
 export const ROUTER_SPARK_EVENT = 'com.router.spark';
 export const ROUTER_DIGEST_EVENT = 'com.router.digest';
 export const ROUTER_CHANNEL_STATE = 'com.router.channel';
+
+const MATRIX_AGENT_TRIGGER_REACTION_EMOJI = process.env.MATRIX_AGENT_TRIGGER_REACTION_EMOJI || '🪩';
 
 const matrixMarkdown = new MarkdownIt({
   breaks: true,
@@ -930,6 +933,19 @@ export class MatrixPlatform implements Platform {
     return eventId;
   }
 
+  private async reactToEvent(roomId: string, eventId: string, emoji: string): Promise<string> {
+    if (!this.client) throw new Error('Matrix client not started');
+
+    const result = await this.client.sendEvent(roomId, EventType.Reaction, {
+      'm.relates_to': {
+        rel_type: RelationType.Annotation,
+        event_id: eventId,
+        key: emoji,
+      },
+    });
+    return result.event_id!;
+  }
+
   async postSparkContext(roomId: string, spark: {
     sourceHandle: string;
     targetHandle: string;
@@ -1437,6 +1453,12 @@ export class MatrixPlatform implements Platform {
       if (this.processedMessageEvents.size > 10000) {
         this.processedMessageEvents.clear();
       }
+    }
+
+    if (isMention && eventId) {
+      void this.reactToEvent(roomId, eventId, MATRIX_AGENT_TRIGGER_REACTION_EMOJI).catch(error => {
+        console.warn(`[Matrix] Failed to react to agent trigger ${eventId} in ${roomId}:`, error);
+      });
     }
 
     const eventData: Record<string, any> = {

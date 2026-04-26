@@ -1,4 +1,4 @@
-import { EventType, KnownMembership } from 'matrix-js-sdk';
+import { EventType, KnownMembership, RelationType } from 'matrix-js-sdk';
 import { describe, expect, it, vi } from 'vitest';
 import { MatrixPlatform, ROUTER_CHANNEL_STATE, ROUTER_SPARK_EVENT, isMatrixMention } from './matrix.js';
 
@@ -763,6 +763,88 @@ describe('MatrixPlatform history queries', () => {
       isDM: true,
       text: 'Encryption in my DM.',
     });
+  });
+});
+
+describe('MatrixPlatform agent trigger reactions', () => {
+  const createPlatform = (overrides: Partial<ConstructorParameters<typeof MatrixPlatform>[0]> = {}) => new MatrixPlatform({
+    serverUrl: 'https://mtrx.example.test',
+    serverName: 'mtrx.example.test',
+    botSecretKey: 'test-secret',
+    botHandle: 'router',
+    ...overrides,
+  });
+
+  const fakeIncomingEvent = (overrides: {
+    id: string;
+    text: string;
+    sender?: string;
+    roomId?: string;
+    content?: Record<string, any>;
+  }) => ({
+    getType: () => EventType.RoomMessage,
+    getSender: () => overrides.sender || '@alice:mtrx.example.test',
+    getRoomId: () => overrides.roomId || '!room:mtrx.example.test',
+    getId: () => overrides.id,
+    getContent: () => ({ body: overrides.text, ...(overrides.content || {}) }),
+    getTs: () => Date.now(),
+  });
+
+  const fakeRoom = (members = ['@router:mtrx.example.test', '@alice:mtrx.example.test', '@bob:mtrx.example.test']) => ({
+    roomId: '!room:mtrx.example.test',
+    getJoinedMemberCount: () => members.length,
+    getJoinedMembers: () => members.map(userId => ({ userId })),
+    getMember: (userId: string) => members.includes(userId)
+      ? { userId, membership: KnownMembership.Join }
+      : null,
+    currentState: {
+      getStateEvents: () => null,
+    },
+  });
+
+  it('reacts to Matrix messages that trigger the agent', async () => {
+    const sendEvent = vi.fn().mockResolvedValue({ event_id: '$reaction' });
+    const platform = createPlatform();
+    (platform as any).botUserId = '@router:mtrx.example.test';
+    (platform as any).client = {
+      getRoom: vi.fn().mockReturnValue(fakeRoom()),
+      getAccountData: vi.fn().mockReturnValue(undefined),
+      sendEvent,
+    };
+
+    (platform as any).handleIncomingMessageEvent(fakeIncomingEvent({
+      id: '$mention',
+      text: '@router can you check this?',
+    }));
+
+    await vi.waitFor(() => {
+      expect(sendEvent).toHaveBeenCalledWith('!room:mtrx.example.test', EventType.Reaction, {
+        'm.relates_to': {
+          rel_type: RelationType.Annotation,
+          event_id: '$mention',
+          key: '🪩',
+        },
+      });
+    });
+  });
+
+  it('does not react to ordinary Matrix messages that do not trigger the agent', async () => {
+    const sendEvent = vi.fn().mockResolvedValue({ event_id: '$reaction' });
+    const platform = createPlatform();
+    (platform as any).botUserId = '@router:mtrx.example.test';
+    (platform as any).client = {
+      getRoom: vi.fn().mockReturnValue(fakeRoom()),
+      getAccountData: vi.fn().mockReturnValue(undefined),
+      sendEvent,
+    };
+
+    (platform as any).handleIncomingMessageEvent(fakeIncomingEvent({
+      id: '$ordinary',
+      text: 'just noting this here',
+    }));
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(sendEvent).not.toHaveBeenCalled();
   });
 });
 

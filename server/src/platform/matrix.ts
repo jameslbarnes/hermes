@@ -965,6 +965,12 @@ export class MatrixPlatform implements Platform {
       botHandle: this.config.botHandle,
     });
 
+    if (isDM) {
+      void this.markRoomAsDirect(sender, roomId).catch(error => {
+        console.warn(`[Matrix] Failed to remember direct room ${roomId} for ${sender}:`, error);
+      });
+    }
+
     // Check if this is a reply to a notebook entry
     const replyToEventId = content['m.relates_to']?.['m.in_reply_to']?.event_id;
     const replyToEntryId = replyToEventId ? this.entryEventMap.get(replyToEventId) : undefined;
@@ -1144,42 +1150,81 @@ export class MatrixPlatform implements Platform {
 
     const directRoomMap = this.getDirectRoomMap();
     const existingRoomIds = directRoomMap[userId] || [];
-    if (existingRoomIds.includes(roomId)) return;
+    if (existingRoomIds[0] === roomId) return;
 
-    directRoomMap[userId] = [...existingRoomIds, roomId];
+    directRoomMap[userId] = [roomId, ...existingRoomIds.filter(id => id !== roomId)];
     await this.client.setAccountData(EventType.Direct, directRoomMap);
   }
 
-  private async ensureDirectRoomPresentation(userId: string, roomId: string): Promise<void> {
-    if (!this.client) throw new Error('Matrix client not started');
+  private getRoomExplicitName(room: Room): string | null {
+    const nameEvent = room.currentState?.getStateEvents(EventType.RoomName, '');
+    const name = Array.isArray(nameEvent) ? null : nameEvent?.getContent()?.name;
+    return typeof name === 'string' && name.trim() ? name.trim() : null;
+  }
 
-    try {
-      await this.client.setRoomName(roomId, this.config.botHandle);
-    } catch (error) {
-      console.warn(`[Matrix] Failed to name DM with ${userId}:`, error);
+  private isRouterChannelRoom(room: Room): boolean {
+    const channelEvent = room.currentState?.getStateEvents(ROUTER_CHANNEL_STATE as any, '');
+    return !Array.isArray(channelEvent) && channelEvent != null;
+  }
+
+  private isJoinedOneToOneRoomWith(room: Room, userId: string): boolean {
+    if (room.getMyMembership() !== KnownMembership.Join) return false;
+    if (this.isRouterChannelRoom(room)) return false;
+
+    const joinedMembers = room.getJoinedMembers();
+    if (joinedMembers.length > 0) {
+      const joinedIds = new Set(joinedMembers.map(member => member.userId));
+      return joinedIds.size === 2
+        && joinedIds.has(userId)
+        && (!this.botUserId || joinedIds.has(this.botUserId));
     }
 
-    await this.ensureSpaceMembership(roomId, `DM with ${userId}`);
+    return room.getJoinedMemberCount() === 2
+      && room.getMember(userId)?.membership === KnownMembership.Join
+      && (!this.botUserId || room.getMember(this.botUserId)?.membership === KnownMembership.Join);
+  }
+
+  private findExistingDirectRoom(userId: string, directRoomIds: string[]): Room | null {
+    if (!this.client) return null;
+
+    const rooms = this.client.getRooms?.() || [];
+    const candidates = rooms.filter(room => this.isJoinedOneToOneRoomWith(room, userId));
+    if (candidates.length === 0) return null;
+
+    const byRecentActivity = (a: Room, b: Room) => b.getLastActiveTimestamp() - a.getLastActiveTimestamp();
+    const directLikeRooms = candidates
+      .filter(room => !this.getRoomExplicitName(room))
+      .sort(byRecentActivity);
+
+    return directLikeRooms.find(room => !directRoomIds.includes(room.roomId))
+      || directRoomIds
+        .map(roomId => directLikeRooms.find(room => room.roomId === roomId) || null)
+        .find((room): room is Room => room != null)
+      || null;
   }
 
   private async findOrCreateDM(userId: string): Promise<string> {
     if (!this.client) throw new Error('Matrix client not started');
 
     const directRoomIds = this.getDirectRoomMap()[userId] || [];
+    const existingDirectRoom = this.findExistingDirectRoom(userId, directRoomIds);
+    if (existingDirectRoom) {
+      await this.markRoomAsDirect(userId, existingDirectRoom.roomId);
+      return existingDirectRoom.roomId;
+    }
+
     for (const roomId of directRoomIds) {
       const room = this.client.getRoom(roomId);
       if (room?.getMyMembership() === KnownMembership.Join) {
-        await this.ensureDirectRoomPresentation(userId, room.roomId);
         return room.roomId;
       }
     }
 
     // Create new DM
-    const room = await this.createRoom(this.config.botHandle, {
+    const room = await this.createRoom('', {
       type: 'dm',
       invite: [userId],
       encrypted: true,
-      attachToSpace: true,
     });
 
     await this.markRoomAsDirect(userId, room.id);

@@ -1,14 +1,13 @@
 /**
  * Cron Hook Handlers
  *
- * Scheduled tasks: daily digest, channel room initialization, profile sync.
+ * Scheduled tasks: daily digest and channel room initialization.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { Storage, JournalEntry } from '../storage.js';
-import type { Platform } from '../platform/types.js';
-import { MatrixPlatform, ROUTER_DIGEST_EVENT } from '../platform/matrix.js';
-import { getPlatform, getAllPlatforms } from '../platform/registry.js';
+import type { Storage, JournalEntry, User } from '../storage.js';
+import { MatrixPlatform } from '../platform/matrix.js';
+import { getPlatform } from '../platform/registry.js';
 
 // ── Digest ───────────────────────────────────────────────────
 
@@ -28,8 +27,7 @@ If there were fewer than 3 entries, write a brief note instead of a full digest.
 
 const PERSONALIZED_DIGEST_PROMPT = `You are the Router, writing a personalized daily digest for a specific person.
 
-You know this person well:
-{user_profile}
+Use the person's actual notebook corpus and follow graph as context. Do not rely on a precomputed profile or abstract labels.
 
 Write their digest with THEM in mind. Lead with what matters to THEM — entries from people they follow, work that overlaps with theirs, problems they could help solve (or that could help them).
 
@@ -57,7 +55,7 @@ export async function generateDailyDigest(storage: Storage): Promise<void> {
 
   const allEntries = await storage.getEntriesSince(startOfDay);
   const yesterdayEntries = allEntries.filter(e =>
-    e.timestamp >= startOfDay && e.timestamp < endOfDay && !e.aiOnly
+    e.timestamp >= startOfDay && e.timestamp < endOfDay && isPublicDigestEntry(e)
   );
 
   if (yesterdayEntries.length === 0) {
@@ -124,17 +122,83 @@ export async function generateDailyDigest(storage: Storage): Promise<void> {
 
 /**
  * Send personalized digests to individual users via Matrix DM.
- * Each user gets a digest curated for their interests using their profile.
+ * Each user gets a digest curated from their notebook corpus, follow graph,
+ * and the prior day's public notebook activity.
  */
+function normalizeHandle(handle: string): string {
+  return handle.replace(/^@/, '').trim().toLowerCase();
+}
+
+function getVerifiedLinkedPlatformUserId(user: User, platform: string): string | null {
+  const account = user.linkedAccounts?.find(acc =>
+    acc.platform === platform
+    && !!acc.platformUserId
+    && acc.verified !== false,
+  );
+  return account?.platformUserId || null;
+}
+
+function isPublicDigestEntry(entry: JournalEntry): boolean {
+  if (entry.aiOnly === true || entry.humanVisible === false) return false;
+  if (entry.visibility === 'private' || entry.visibility === 'ai-only') return false;
+  return true;
+}
+
+function formatEntryForPrompt(entry: JournalEntry, max = 300): string {
+  const date = new Date(entry.timestamp).toISOString().slice(0, 10);
+  const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
+  const content = entry.content.trim() || '[no text content]';
+  return `[${date}] ${author}: ${content.slice(0, max)}${content.length > max ? '...' : ''}`;
+}
+
+async function getMatrixDigestRecipients(storage: Storage, handles?: string[]): Promise<Array<{ user: User; matrixUserId: string }>> {
+  const users = handles?.length
+    ? (await Promise.all(handles.map(handle => storage.getUser(normalizeHandle(handle))))).filter((u): u is User => !!u)
+    : await storage.getAllUsers();
+
+  const seen = new Set<string>();
+  const recipients: Array<{ user: User; matrixUserId: string }> = [];
+  for (const user of users) {
+    if (seen.has(user.handle)) continue;
+    seen.add(user.handle);
+
+    const matrixUserId = getVerifiedLinkedPlatformUserId(user, 'matrix');
+    if (!matrixUserId) {
+      console.log(`[Cron] Skipping Matrix digest for @${user.handle}: no verified linked Matrix account`);
+      continue;
+    }
+
+    recipients.push({ user, matrixUserId });
+  }
+
+  return recipients;
+}
+
 export async function sendPersonalizedDigests(
   storage: Storage,
   opts?: { handles?: string[]; force?: boolean },
 ): Promise<{ sent: number; failed: number; skipped: number }> {
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
+
   const matrix = getPlatform('matrix') as MatrixPlatform | undefined;
-  if (!matrix) return { sent: 0, failed: 0, skipped: 0 };
+  if (!matrix) {
+    console.log('[Cron] Skipping Matrix personalized digests: Matrix platform not connected');
+    return { sent, failed, skipped };
+  }
+
+  const recipients = await getMatrixDigestRecipients(storage, opts?.handles);
+  if (recipients.length === 0) {
+    console.log('[Cron] Skipping Matrix personalized digests: no verified linked Matrix recipients');
+    return { sent, failed, skipped };
+  }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { sent: 0, failed: 0, skipped: 0 };
+  if (!apiKey) {
+    console.log('[Cron] Skipping Matrix personalized digests: ANTHROPIC_API_KEY is not configured');
+    return { sent, failed, skipped: skipped + recipients.length };
+  }
   const anthropic = new Anthropic({ apiKey });
 
   // Get yesterday's entries
@@ -142,115 +206,95 @@ export async function sendPersonalizedDigests(
   yesterday.setDate(yesterday.getDate() - 1);
   const startOfDay = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate()).getTime();
   const endOfDay = startOfDay + 24 * 60 * 60 * 1000;
-  const allEntries = await storage.getEntriesSince(startOfDay);
+  const allEntries = await storage.getEntriesSince(startOfDay, 500);
   const yesterdayEntries = allEntries.filter(e =>
-    e.timestamp >= startOfDay && e.timestamp < endOfDay && !e.aiOnly
+    e.timestamp >= startOfDay && e.timestamp < endOfDay && isPublicDigestEntry(e)
   );
 
-  if (yesterdayEntries.length < 2 && !opts?.force) return { sent: 0, failed: 0, skipped: 0 };
+  if (yesterdayEntries.length === 0 && !opts?.force) {
+    console.log(`[Cron] Skipping Matrix personalized digests for ${recipients.length} recipients: no public notebook activity yesterday`);
+    return { sent, failed, skipped: skipped + recipients.length };
+  }
 
-  // Get all users with interest profiles
-  // For now, get users who have entries (active users)
-  const activeHandles = opts?.handles?.length
-    ? opts.handles
-    : [...new Set(yesterdayEntries.map(e => e.handle).filter(Boolean))] as string[];
-
-  let sent = 0;
-  let failed = 0;
-  let skipped = 0;
-
-  for (const handle of activeHandles) {
+  for (const { user, matrixUserId } of recipients) {
+    const handle = user.handle;
     try {
-      const user = await storage.getUser(handle);
-      if (!user?.interestProfile) {
-        if (opts?.force) {
-          const userId = await matrix.resolvePlatformId(handle);
-          if (userId) {
-            await matrix.sendDM(
-              userId,
-              `📰 Your daily digest\n\nRouter test: Matrix daily digest delivery is working, but there is not enough profile context yet to generate a personalized update.`,
-            );
-            console.log(`[Cron] Sent forced digest placeholder to @${handle} (missing interest profile)`);
-            sent++;
-          } else {
-            skipped++;
-          }
-          continue;
-        }
-        skipped++;
-        continue;
-      }
-
-      const profile = user.interestProfile;
       const following = user.following || [];
+      const followingHandles = new Set(following.map(f => normalizeHandle(f.handle)));
+      const recentUserEntries = await storage.getEntriesByHandle(handle, 50);
+      const addressedEntries = await storage.getEntriesAddressedTo(handle, user.email, 20)
+        .catch(() => [] as JournalEntry[]);
 
-      // Categorize entries for this user
-      const ownEntries = yesterdayEntries.filter(e => e.handle === handle);
       const followedEntries = yesterdayEntries.filter(e =>
-        e.handle && e.handle !== handle && following.some(f => f.handle === e.handle)
+        e.handle && e.handle !== handle && followingHandles.has(normalizeHandle(e.handle))
       );
       const discoveryEntries = yesterdayEntries.filter(e =>
-        e.handle && e.handle !== handle && !following.some(f => f.handle === e.handle)
+        e.handle && e.handle !== handle && !followingHandles.has(normalizeHandle(e.handle))
       );
+      const ownYesterdayEntries = yesterdayEntries.filter(e => e.handle === handle);
 
-      if (followedEntries.length === 0 && discoveryEntries.length === 0) {
-        if (opts?.force) {
-          const userId = await matrix.resolvePlatformId(handle);
-          if (userId) {
-            await matrix.sendDM(
-              userId,
-              `📰 Your daily digest\n\nRouter test: Matrix daily digest delivery is working, but there was not enough recent relevant notebook activity to generate a full personalized update right now.`,
-            );
-            console.log(`[Cron] Sent forced digest placeholder to @${handle} (insufficient relevant activity)`);
-            sent++;
-          } else {
-            skipped++;
-          }
-          continue;
-        }
+      const hasDigestContext =
+        recentUserEntries.length > 0
+        || addressedEntries.length > 0
+        || ownYesterdayEntries.length > 0
+        || followedEntries.length > 0
+        || discoveryEntries.length > 0;
+
+      if (!hasDigestContext && !opts?.force) {
+        console.log(`[Cron] Skipping Matrix digest for @${handle}: no notebook context available`);
         skipped++;
         continue;
       }
 
-      const profileContext = `Summary: ${profile.summary}
-Working on: ${profile.currentWork.join(', ')}
-Expert in: ${profile.expertise.join(', ')}
-Curious about: ${profile.curious.join(', ')}
-Needs: ${profile.needs.join(', ') || 'nothing specific'}
-Follows: ${following.map(f => `@${f.handle}${f.note ? ` (${f.note})` : ''}`).join(', ') || 'nobody yet'}`;
+      const personContext = [
+        `Recipient: @${handle}${user.displayName ? ` (${user.displayName})` : ''}`,
+        user.bio ? `Bio: ${user.bio}` : '',
+        following.length > 0
+          ? `Follows:\n${following.map(f => `@${f.handle}${f.note ? ` - ${f.note}` : ''}`).join('\n')}`
+          : 'Follows: nobody yet',
+      ].filter(Boolean).join('\n\n');
 
       const entrySummaries = [
-        ...followedEntries.slice(0, 5).map(e => `[FOLLOWED] @${e.handle}: ${e.content.substring(0, 200)}`),
-        ...discoveryEntries.slice(0, 5).map(e => `[DISCOVERY] @${e.handle}: ${e.content.substring(0, 200)}`),
-      ].join('\n\n');
-
-      const systemPrompt = PERSONALIZED_DIGEST_PROMPT.replace('{user_profile}', profileContext);
+        recentUserEntries.length > 0
+          ? `Recipient's recent notebook corpus:\n${recentUserEntries.slice(0, 25).map(e => formatEntryForPrompt(e, 260)).join('\n\n')}`
+          : '',
+        ownYesterdayEntries.length > 0
+          ? `Recipient's public entries yesterday:\n${ownYesterdayEntries.slice(0, 5).map(e => formatEntryForPrompt(e, 260)).join('\n\n')}`
+          : '',
+        addressedEntries.length > 0
+          ? `Entries addressed to recipient:\n${addressedEntries.slice(0, 8).map(e => formatEntryForPrompt(e, 260)).join('\n\n')}`
+          : '',
+        followedEntries.length > 0
+          ? `From people they follow yesterday:\n${followedEntries.slice(0, 8).map(e => formatEntryForPrompt(e, 300)).join('\n\n')}`
+          : '',
+        discoveryEntries.length > 0
+          ? `Other public notebook activity yesterday:\n${discoveryEntries.slice(0, 8).map(e => formatEntryForPrompt(e, 260)).join('\n\n')}`
+          : '',
+      ].filter(Boolean).join('\n\n---\n\n') || 'No public notebook activity was available.';
 
       const response = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 800,
-        system: systemPrompt,
+        system: PERSONALIZED_DIGEST_PROMPT,
         messages: [
           {
             role: 'user',
-            content: `${yesterdayEntries.length} total entries yesterday. Here are the ones relevant to @${handle}:\n\n${entrySummaries}`,
+            content: `${personContext}\n\n${yesterdayEntries.length} public entries yesterday (${yesterday.toISOString().slice(0, 10)}).\n\n${entrySummaries}`,
           },
         ],
       });
 
       const text = response.content.find(b => b.type === 'text');
-      if (!text) continue;
+      if (!text) {
+        console.log(`[Cron] Skipping Matrix digest for @${handle}: Claude returned no text`);
+        skipped++;
+        continue;
+      }
       const digestContent = (text as Anthropic.TextBlock).text;
 
-      // Send as DM
-      const userId = await matrix.resolvePlatformId(handle);
-      if (userId) {
-        await matrix.sendDM(userId, `📰 Your daily digest\n\n${digestContent}`);
-        console.log(`[Cron] Sent personalized digest to @${handle}`);
-        sent++;
-      } else {
-        skipped++;
-      }
+      await matrix.sendDM(matrixUserId, `📰 Your daily digest\n\n${digestContent}`);
+      console.log(`[Cron] Sent personalized digest to @${handle}`);
+      sent++;
     } catch (err) {
       console.error(`[Cron] Failed personalized digest for @${handle}:`, err);
       failed++;

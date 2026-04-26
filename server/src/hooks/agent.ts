@@ -15,7 +15,6 @@ import type { JournalEntry, Storage, User } from '../storage.js';
 import { shouldRoute, evaluateEntry, type RecentPost } from '../intelligence/scoring.js';
 import { detectSparks, evaluateSpark, getConnectionInfo, executeSpark, type SparkAction } from '../intelligence/sparks.js';
 import { RoomBufferManager, type BufferedMessage } from '../intelligence/heat.js';
-import { updateInterestProfile, craftIntroduction } from '../intelligence/profiles.js';
 import { generateLinkToken } from '../intelligence/link-tokens.js';
 import { MatrixPlatform } from '../platform/matrix.js';
 
@@ -205,22 +204,6 @@ async function onEntryPublished(ctx: HookContext): Promise<void> {
       }
     } catch (err) {
       console.error(`[Agent] Failed to route to ${platform.name}:`, err);
-    }
-  }
-
-  // ── Update interest profile ──────────────────────────────
-  if (entry.handle && anthropic) {
-    try {
-      const user = await storage.getUser(entry.handle);
-      if (user) {
-        const updatedProfile = await updateInterestProfile(
-          entry.handle, entry, user.interestProfile, anthropic,
-        );
-        await storage.updateUser(entry.handle, { interestProfile: updatedProfile });
-        console.log(`[Agent] Updated profile for ${authorDisplay}: ${updatedProfile.summary.substring(0, 80)}...`);
-      }
-    } catch (err) {
-      console.error('[Agent] Profile update failed:', err);
     }
   }
 
@@ -431,7 +414,6 @@ async function executeSparkWithContext(
   if (action.action === 'skip') return;
 
   const matrixPlatform = platforms.find(p => p instanceof MatrixPlatform) as MatrixPlatform | undefined;
-  const anthropic = getAnthropic();
 
   if (matrixPlatform && storage) {
     const [sourceUser, targetUser] = await Promise.all([
@@ -450,27 +432,7 @@ async function executeSparkWithContext(
     }
   }
 
-  // Try to craft a warm introduction using interest profiles
   let warmMessage = action.message;
-  if (anthropic && storage && (action.action === 'introduce' || action.action === 'suggest')) {
-    try {
-      const sourceUser = await storage.getUser(action.sourceHandle);
-      const targetUser = await storage.getUser(action.targetHandle);
-      if (sourceUser?.interestProfile && targetUser?.interestProfile) {
-        const crafted = await craftIntroduction(
-          sourceUser.interestProfile, action.sourceHandle,
-          targetUser.interestProfile, action.targetHandle,
-          sourceEntry, anthropic,
-        );
-        if (crafted) {
-          warmMessage = crafted;
-          console.log(`[Agent] Warm introduction: ${crafted.substring(0, 100)}...`);
-        }
-      }
-    } catch (err) {
-      console.error('[Agent] Failed to craft warm introduction:', err);
-    }
-  }
 
   if (matrixPlatform && storage && (action.action === 'introduce' || action.action === 'nudge')) {
     const pairRoom = await ensureSparkPairRoom(

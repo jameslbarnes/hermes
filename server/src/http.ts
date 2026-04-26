@@ -6480,7 +6480,7 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // GET /api/profile/:handle - Get user profile with interest profile
+    // GET /api/profile/:handle - Get user profile
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname.match(/^\/api\/profile\/[^/]+$/)) {
       const profileHandle = decodeURIComponent(url.pathname.split('/')[3]);
@@ -6508,7 +6508,6 @@ const server = createServer(async (req, res) => {
           links: profileUser.links,
           pronouns: profileUser.pronouns,
           createdAt: profileUser.createdAt,
-          interestProfile: profileUser.interestProfile || null,
           // linkedAccounts are private — only visible to the profile owner
           ...(isOwnProfile ? { linkedAccounts: profileUser.linkedAccounts || [] } : {}),
         }));

@@ -26,6 +26,8 @@ describe('Skills System', () => {
       const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_search');
       expect(skill).toBeDefined();
       expect(skill!.handlerType).toBe('builtin');
+      expect(skill!.inputSchema?.properties?.room_id).toBeDefined();
+      expect(skill!.inputSchema?.properties?.include_matrix).toBeDefined();
     });
 
     it('should have hermes_send_dm as a system skill', () => {

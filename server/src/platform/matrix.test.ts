@@ -727,6 +727,82 @@ describe('MatrixPlatform history queries', () => {
     });
   });
 
+  it('allows Router bot scope to search joined non-DM rooms outside the configured space', async () => {
+    const platform = createPlatform();
+    const now = Date.now();
+    const joinedRoom = fakeHistoryRoom('!outside:mtrx.example.test', {
+      name: 'Outside',
+      members: ['@router:mtrx.example.test', '@alice:mtrx.example.test', '@bob:mtrx.example.test'],
+      events: [
+        fakeEvent({ id: '$outside', sender: '@alice:mtrx.example.test', text: 'Encryption outside the space.', timestamp: now - 1000 }),
+      ],
+    });
+    const dmRoom = fakeHistoryRoom('!dm-visible:mtrx.example.test', {
+      name: 'James DM',
+      members: ['@router:mtrx.example.test', '@james:matrix.org'],
+      events: [
+        fakeEvent({ id: '$dm', sender: '@james:matrix.org', text: 'Encryption in a DM.', timestamp: now - 1000 }),
+      ],
+    });
+
+    (platform as any).client = {
+      getRooms: vi.fn().mockReturnValue([joinedRoom, dmRoom]),
+      getRoom: vi.fn().mockReturnValue(null),
+      getAccountData: vi.fn().mockReturnValue(undefined),
+      scrollback: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const results = await platform.queryRecentMessages({
+      query: 'encryption',
+      since: now - 60_000,
+      botScope: true,
+      includeDMs: false,
+      spaceOnly: false,
+      limit: 10,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      roomId: '!outside:mtrx.example.test',
+      text: 'Encryption outside the space.',
+    });
+  });
+
+  it('allows Router bot scope to read a specific current DM room only when requested', async () => {
+    const platform = createPlatform();
+    const now = Date.now();
+    const dmRoom = fakeHistoryRoom('!dm-current:mtrx.example.test', {
+      name: 'James DM',
+      members: ['@router:mtrx.example.test', '@james:matrix.org'],
+      events: [
+        fakeEvent({ id: '$dm', sender: '@james:matrix.org', text: 'Summarize this DM context.', timestamp: now - 1000 }),
+      ],
+    });
+
+    (platform as any).client = {
+      getRooms: vi.fn().mockReturnValue([dmRoom]),
+      getRoom: vi.fn().mockReturnValue(null),
+      getAccountData: vi.fn().mockReturnValue(undefined),
+      scrollback: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const results = await platform.queryRecentMessages({
+      roomIds: ['!dm-current:mtrx.example.test'],
+      since: now - 60_000,
+      botScope: true,
+      includeDMs: true,
+      spaceOnly: false,
+      limit: 10,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      roomId: '!dm-current:mtrx.example.test',
+      isDM: true,
+      text: 'Summarize this DM context.',
+    });
+  });
+
   it('only includes DMs when the linked Matrix user is in the room', async () => {
     const platform = createPlatform();
     const now = Date.now();

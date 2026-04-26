@@ -311,7 +311,7 @@ export const SYSTEM_SKILLS: Skill[] = [
   {
     id: 'system_hermes_search',
     name: 'hermes_search',
-    description: 'Search the shared notebook for entries matching a query. If the caller has a verified linked Matrix account, this may also include matching recent Matrix room messages visible to that Matrix account.',
+    description: 'Search the shared notebook for entries matching a query. If the caller has a verified linked Matrix account, this may also include matching recent Matrix room messages visible to that Matrix account. Router can search all non-DM Matrix rooms it has joined, and can pass event.data.room_id to read the current room, including the current DM.',
     instructions: '',
     handlerType: 'builtin',
     inputSchema: {
@@ -319,7 +319,7 @@ export const SYSTEM_SKILLS: Skill[] = [
       properties: {
         query: {
           type: 'string',
-          description: 'Search query - keywords to find in notebook entries. Optional if handle is provided.',
+          description: 'Search query - keywords to find in notebook entries or Matrix messages. Optional if handle, since, or room_id is provided.',
         },
         handle: {
           type: 'string',
@@ -333,9 +333,13 @@ export const SYSTEM_SKILLS: Skill[] = [
           type: 'string',
           description: 'Only return entries after this date/time. Accepts ISO 8601 (e.g. "2026-02-14") or relative durations (e.g. "24h", "7d", "1w"). Useful for daily digests or catching up on recent activity.',
         },
+        room_id: {
+          type: 'string',
+          description: 'Matrix room ID to read recent room context from, typically event.data.room_id when Router is responding in Matrix. Can be used without query to summarize recent conversation in that room. DMs are only searched when this is the current DM room.',
+        },
         include_matrix: {
           type: 'boolean',
-          description: 'Also include matching recent Matrix room messages when the caller has a verified linked Matrix account. Defaults to true for keyword searches.',
+          description: 'Also include recent Matrix room messages when authorized. Defaults to true for keyword searches and room_id searches.',
         },
       },
       required: [],
@@ -1730,16 +1734,23 @@ function createMCPServer(secretKey: string) {
       if (results.length === 0) {
         const searchDesc = handleFilter
           ? (query ? `entries by @${handleFilter} matching "${query}"` : `entries by @${handleFilter}`)
-          : `entries matching "${query}"`;
+          : (query ? `entries matching "${query}"` : 'recent entries');
         return `No ${searchDesc} found.`;
       }
 
       const resultsText = results.map(r => `[id:${r.id}] ${r.text}`).join('\n\n');
-      return `Found ${results.length} results matching "${query}":\n\n${resultsText}\n\nUse hermes_get_entry with an ID to see full details.`;
+      const searchDesc = handleFilter
+        ? (query ? ` by @${handleFilter} matching "${query}"` : ` by @${handleFilter}`)
+        : (query ? ` matching "${query}"` : '');
+      return `Found ${results.length} notebook results${searchDesc}:\n\n${resultsText}\n\nUse hermes_get_entry with an ID to see full details.`;
     };
 
-    const getVerifiedMatrixUserId = async (): Promise<string | null> => {
-      const toolUser = await storage.getUserByKeyHash(keyHash).catch(() => null);
+    const getToolUser = async (): Promise<User | null> => {
+      return storage.getUserByKeyHash(keyHash).catch(() => null);
+    };
+
+    const getVerifiedMatrixUserId = async (toolUser?: User | null): Promise<string | null> => {
+      toolUser ??= await getToolUser();
       return toolUser?.linkedAccounts?.find(account =>
         account.platform === 'matrix'
         && !!account.platformUserId
@@ -1752,23 +1763,34 @@ function createMCPServer(secretKey: string) {
       limit,
       since,
       viewerMatrixId,
+      roomId,
+      botScope,
     }: {
-      query: string;
+      query?: string;
       limit: number;
       since?: number;
-      viewerMatrixId: string;
+      viewerMatrixId?: string;
+      roomId?: string;
+      botScope?: boolean;
     }): Promise<MatrixHistoryMessage[]> => {
       const matrix = getPlatform('matrix') as MatrixPlatform | undefined;
       const queryable = matrix as (MatrixPlatform & { queryRecentMessages?: MatrixPlatform['queryRecentMessages'] }) | undefined;
       if (!queryable || typeof queryable.queryRecentMessages !== 'function') return [];
 
+      const defaultSince = roomId && !query
+        ? Date.now() - 24 * 60 * 60 * 1000
+        : Date.now() - 7 * 24 * 60 * 60 * 1000;
+
       return queryable.queryRecentMessages({
         query,
-        since: since ?? Date.now() - 7 * 24 * 60 * 60 * 1000,
+        since: since ?? defaultSince,
         limit,
-        includeDMs: true,
-        viewerUserId: viewerMatrixId,
-        spaceOnly: true,
+        includeDMs: roomId ? true : !botScope,
+        viewerUserId: botScope ? undefined : viewerMatrixId,
+        spaceOnly: botScope ? false : true,
+        roomIds: roomId ? [roomId] : undefined,
+        perRoomLimit: roomId ? Math.max(limit * 2, 80) : undefined,
+        botScope,
       });
     };
 
@@ -2127,11 +2149,12 @@ function createMCPServer(secretKey: string) {
       const limit = (args as { limit?: number })?.limit || 10;
       const sinceRaw = (args as { since?: string })?.since?.trim();
       const since = parseToolSince(sinceRaw);
+      const roomId = (args as { room_id?: string })?.room_id?.trim();
       const includeMatrix = (args as { include_matrix?: boolean })?.include_matrix !== false;
 
-      if (!query && !handleFilter && !since) {
+      if (!query && !handleFilter && !since && !roomId) {
         return {
-          content: [{ type: 'text' as const, text: 'Provide a search query, a handle to filter by, or a since parameter.' }],
+          content: [{ type: 'text' as const, text: 'Provide a search query, a handle to filter by, a since parameter, or a Matrix room_id.' }],
           isError: true,
         };
       }
@@ -2144,27 +2167,45 @@ function createMCPServer(secretKey: string) {
       });
 
       let matrixMessages: MatrixHistoryMessage[] = [];
-      if (query && includeMatrix) {
-        const viewerMatrixId = await getVerifiedMatrixUserId();
-        if (viewerMatrixId) {
+      let matrixAccessLabel = 'Matrix results visible to your linked account';
+      if (includeMatrix && (query || roomId || since)) {
+        const toolUser = await getToolUser();
+        const viewerMatrixId = await getVerifiedMatrixUserId(toolUser);
+        const routerHandle = normalizeHandle(process.env.HERMES_AGENT_HANDLE || process.env.MATRIX_BOT_HANDLE || 'router');
+        const isRouterCaller = toolUser?.handle ? normalizeHandle(toolUser.handle) === routerHandle : false;
+        const canUseRouterMatrix = isRouterCaller;
+
+        if (viewerMatrixId || canUseRouterMatrix) {
           matrixMessages = await executeMatrixSearch({
             query,
             limit,
             since,
-            viewerMatrixId,
+            viewerMatrixId: canUseRouterMatrix ? undefined : (viewerMatrixId || undefined),
+            roomId,
+            botScope: canUseRouterMatrix,
           }).catch(() => []);
+          matrixAccessLabel = roomId
+            ? 'Recent Matrix messages from the requested room'
+            : (canUseRouterMatrix ? 'Matrix results from rooms Router has joined' : 'Matrix results visible to your linked account');
         }
       }
 
-      const notebookText = formatHermesSearchText({ query, handleFilter, results });
+      const shouldShowNotebookResults = !!query || !!handleFilter || !!since || results.length > 0;
+      const notebookText = shouldShowNotebookResults
+        ? formatHermesSearchText({ query, handleFilter, results })
+        : '';
       const matrixText = formatMatrixSearchText(matrixMessages);
+      const responseParts: string[] = [];
+      if (notebookText) responseParts.push(notebookText);
+      if (matrixText) responseParts.push(`${matrixAccessLabel}:\n\n${matrixText}`);
+      if (roomId && includeMatrix && !matrixText && !notebookText) {
+        responseParts.push('No recent Matrix messages were available for the requested room.');
+      }
 
       return {
         content: [{
           type: 'text' as const,
-          text: matrixText
-            ? `${notebookText}\n\nMatrix results visible to your linked account:\n\n${matrixText}`
-            : notebookText,
+          text: responseParts.join('\n\n') || 'No results found.',
         }],
       };
     }

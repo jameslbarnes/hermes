@@ -96,6 +96,7 @@ export interface MatrixHistoryQueryOptions {
   spaceOnly?: boolean;
   roomIds?: string[];
   perRoomLimit?: number;
+  botScope?: boolean;
 }
 
 // Custom Matrix event types for tight notebook integration
@@ -1287,6 +1288,7 @@ export class MatrixPlatform implements Platform {
     const includeDMs = opts.includeDMs === true || opts.onlyDMs === true;
     const onlyDMs = opts.onlyDMs === true;
     const spaceOnly = opts.spaceOnly !== false;
+    const botScope = opts.botScope === true;
     const roomFilter = opts.roomIds?.length ? new Set(opts.roomIds) : null;
     const messages: MatrixHistoryMessage[] = [];
     const senderHandleCache = new Map<string, string | null>();
@@ -1301,7 +1303,7 @@ export class MatrixPlatform implements Platform {
 
       const roomInSpace = this.roomIsInConfiguredSpace(room);
       const viewerInRoom = this.roomHasMember(room, opts.viewerUserId);
-      if (!roomFilter && spaceOnly && !roomInSpace && !(includeDMs && viewerInRoom)) {
+      if (!botScope && !roomFilter && spaceOnly && !roomInSpace && !(includeDMs && viewerInRoom)) {
         continue;
       }
 
@@ -1317,9 +1319,9 @@ export class MatrixPlatform implements Platform {
 
         const eventIsDM = this.isDirectMessageRoom(senderId, room.roomId, room);
         if (onlyDMs && !eventIsDM) continue;
-        if (eventIsDM && (!includeDMs || !viewerInRoom)) continue;
-        if (!eventIsDM && opts.viewerUserId && !viewerInRoom && !viewerInSpace) continue;
-        if (!eventIsDM && spaceOnly && !roomInSpace && !roomFilter) continue;
+        if (eventIsDM && (!includeDMs || (!viewerInRoom && !botScope))) continue;
+        if (!eventIsDM && !botScope && opts.viewerUserId && !viewerInRoom && !viewerInSpace) continue;
+        if (!eventIsDM && !botScope && spaceOnly && !roomInSpace && !roomFilter) continue;
 
         const timestamp = event.getTs?.() || 0;
         if (since !== undefined && timestamp < since) continue;

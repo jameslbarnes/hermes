@@ -87,6 +87,11 @@ Use Hermes notebook tools as needed. Your reply must be sent by calling hermes_p
 - room_id = event.data.room_id
 - reply_to = event.data.message_id
 
+Matrix context:
+- For "this room", "recently here", or "summarize this conversation" requests, call hermes_search with room_id = event.data.room_id, include_matrix = true, a since window like "24h" or "7d", and no query if a broad summary is needed.
+- For cross-room Matrix questions, call hermes_search with include_matrix = true and a query or since window. Router can search non-DM Matrix rooms it has joined.
+- Do not search DMs broadly. Only search a DM when event.data.is_dm is true and you pass event.data.room_id for that current DM.
+
 Hard rules:
 - Do not ask the user to manually invoke Hermes tools.
 - link/help commands are already handled upstream; do nothing for those.

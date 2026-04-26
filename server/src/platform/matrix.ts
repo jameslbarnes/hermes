@@ -15,6 +15,8 @@
 import { createHmac } from 'crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
+import MarkdownIt from 'markdown-it';
+import sanitizeHtml from 'sanitize-html';
 import {
   createClient,
   type MatrixClient,
@@ -75,6 +77,59 @@ export const ROUTER_SPARK_EVENT = 'com.router.spark';
 export const ROUTER_DIGEST_EVENT = 'com.router.digest';
 export const ROUTER_CHANNEL_STATE = 'com.router.channel';
 
+const matrixMarkdown = new MarkdownIt({
+  breaks: true,
+  html: false,
+  linkify: true,
+  typographer: false,
+});
+
+const MATRIX_ALLOWED_HTML_TAGS = [
+  'a',
+  'b',
+  'blockquote',
+  'br',
+  'code',
+  'del',
+  'div',
+  'em',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'hr',
+  'i',
+  'li',
+  'ol',
+  'p',
+  'pre',
+  's',
+  'span',
+  'strong',
+  'sub',
+  'sup',
+  'table',
+  'tbody',
+  'td',
+  'th',
+  'thead',
+  'tr',
+  'u',
+  'ul',
+];
+
+const MATRIX_ALLOWED_HTML_ATTRIBUTES = {
+  a: ['href', 'name', 'target', 'rel'],
+  code: ['class'],
+  ol: ['start'],
+  span: ['data-mx-bg-color', 'data-mx-color'],
+  '*': ['data-mx-bg-color', 'data-mx-color'],
+};
+
+const MATRIX_ALLOWED_URL_SCHEMES = ['http', 'https', 'mailto', 'matrix'];
+
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -116,6 +171,18 @@ export function isMatrixMention(params: {
 
   const plainMention = new RegExp(`(^|\\s|[<(])@${escapeRegExp(botHandle)}(?=$|\\s|[)>:.,!?])`, 'i');
   return plainMention.test(text);
+}
+
+function markdownToMatrixHtml(markdown: string): string {
+  const rendered = matrixMarkdown.render(markdown).trim();
+  return sanitizeHtml(rendered, {
+    allowedTags: MATRIX_ALLOWED_HTML_TAGS,
+    allowedAttributes: MATRIX_ALLOWED_HTML_ATTRIBUTES,
+    allowedSchemes: MATRIX_ALLOWED_URL_SCHEMES,
+    allowedSchemesAppliedToAttributes: ['href'],
+    allowProtocolRelative: false,
+    disallowedTagsMode: 'discard',
+  });
 }
 
 export class MatrixPlatform implements Platform {
@@ -522,19 +589,7 @@ export class MatrixPlatform implements Platform {
   async sendMessage(roomId: string, text: string, opts?: SendMessageOptions): Promise<string> {
     if (!this.client) throw new Error('Matrix client not started');
 
-    const content: any = {
-      msgtype: MsgType.Text,
-      body: text,
-    };
-
-    // Add formatted HTML
-    const html = this.markdownToHtml(text);
-    if (html !== text) {
-      content.format = 'org.matrix.custom.html';
-      content.formatted_body = html;
-    }
-
-    const result = await this.client.sendMessage(roomId, content);
+    const result = await this.client.sendMessage(roomId, this.createMessageContent(text, opts));
     return result.event_id!;
   }
 
@@ -589,10 +644,10 @@ export class MatrixPlatform implements Platform {
     // Send wake message in encrypted rooms (Element withholds keys until bot speaks)
     if (opts.encrypted !== false) {
       try {
-        await this.client.sendMessage(result.room_id, {
-          msgtype: MsgType.Text,
-          body: opts.type === 'dm' ? 'Connected.' : name ? `Room "${name}" created.` : 'Connected.',
-        });
+        await this.client.sendMessage(
+          result.room_id,
+          this.createMessageContent(opts.type === 'dm' ? 'Connected.' : name ? `Room "${name}" created.` : 'Connected.'),
+        );
       } catch {
         // Non-fatal
       }
@@ -734,13 +789,13 @@ export class MatrixPlatform implements Platform {
       ? await this.config.resolveLinkedPlatformId?.(this.name, entry.handle)
       : null;
     const author = linkedAuthorId || (entry.handle ? `@${entry.handle}` : entry.pseudonym);
-    const renderedBody = await this.renderLinkedHandlesForMatrix(entry.content.substring(0, 500));
+    const renderedBody = await this.renderLinkedMarkdownForMatrix(entry.content.substring(0, 500));
     const authorHtml = linkedAuthorId
       ? `<a href="https://matrix.to/#/${encodeURIComponent(linkedAuthorId)}">${escapeHtml(linkedAuthorId)}</a>`
       : escapeHtml(author);
     const permalinkHtml = `<a href="${escapeHtml(permalink)}">${escapeHtml(permalink)}</a>`;
     const formattedBody = editorialHook
-      ? `${escapeHtml(editorialHook)}<br><br>&mdash; ${authorHtml} &middot; ${permalinkHtml}`
+      ? `${markdownToMatrixHtml(editorialHook)}<br><br>&mdash; ${authorHtml} &middot; ${permalinkHtml}`
       : `${authorHtml}: ${renderedBody.html}${entry.content.length > 500 ? '...' : ''}<br><br>${permalinkHtml}`;
 
     const content: any = {
@@ -791,12 +846,10 @@ export class MatrixPlatform implements Platform {
     }, '');
 
     // Also send a visible message
-    const result = await this.client.sendMessage(roomId, {
-      msgtype: MsgType.Text,
-      body: `Connected: ${spark.reason}`,
-      format: 'org.matrix.custom.html',
-      formatted_body: `<strong>🔗 Connected:</strong> ${spark.reason}`,
-    });
+    const result = await this.client.sendMessage(
+      roomId,
+      this.createMessageContent(`**🔗 Connected:** ${spark.reason}`),
+    );
     return result.event_id!;
   }
 
@@ -845,10 +898,80 @@ export class MatrixPlatform implements Platform {
   // ── Formatting ─────────────────────────────────────────────
 
   formatContent(markdown: string): string {
-    return markdown;
+    return markdownToMatrixHtml(markdown);
   }
 
   // ── Private ────────────────────────────────────────────────
+
+  private createMessageContent(text: string, opts?: SendMessageOptions): any {
+    const content: Record<string, any> = {
+      msgtype: MsgType.Text,
+      body: text,
+    };
+
+    if (opts?.replyTo) {
+      content['m.relates_to'] = {
+        'm.in_reply_to': {
+          event_id: opts.replyTo,
+        },
+      };
+    }
+
+    if (opts?.format === 'plain') {
+      return content;
+    }
+
+    const formattedBody = markdownToMatrixHtml(text);
+    if (formattedBody) {
+      content.format = 'org.matrix.custom.html';
+      content.formatted_body = formattedBody;
+    }
+
+    return content;
+  }
+
+  private async renderLinkedMarkdownForMatrix(text: string): Promise<{ plain: string; html: string }> {
+    const renderedPlain = await this.renderLinkedHandlesForMatrix(text);
+    const renderedHtml = await this.linkMatrixHandlesInHtml(markdownToMatrixHtml(text));
+    return {
+      plain: renderedPlain.plain,
+      html: renderedHtml,
+    };
+  }
+
+  private async linkMatrixHandlesInHtml(html: string): Promise<string> {
+    const handlePattern = /(^|[\s([{"'`])@([a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?)(?=$|[\s)\]}:.,!?'"`])/g;
+    const linkedCache = new Map<string, string | null>();
+    const parts = html.split(/(<[^>]+>)/g);
+    const linkedParts = await Promise.all(parts.map(async part => {
+      if (!part || part.startsWith('<')) return part;
+
+      let linked = '';
+      let lastIndex = 0;
+      for (const match of part.matchAll(handlePattern)) {
+        const [, prefix, handle] = match;
+        const mentionStart = (match.index || 0) + prefix.length;
+
+        linked += part.slice(lastIndex, mentionStart);
+
+        let linkedUserId = linkedCache.get(handle);
+        if (linkedUserId === undefined) {
+          linkedUserId = await this.config.resolveLinkedPlatformId?.(this.name, handle) || null;
+          linkedCache.set(handle, linkedUserId);
+        }
+
+        linked += linkedUserId
+          ? `<a href="https://matrix.to/#/${encodeURIComponent(linkedUserId)}">${escapeHtml(linkedUserId)}</a>`
+          : `@${handle}`;
+
+        lastIndex = mentionStart + (`@${handle}`).length;
+      }
+
+      linked += part.slice(lastIndex);
+      return linked;
+    }));
+    return linkedParts.join('');
+  }
 
   private async renderLinkedHandlesForMatrix(text: string): Promise<{ plain: string; html: string }> {
     const handlePattern = /(^|[\s([{"'`])@([a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?)(?=$|[\s)\]}:.,!?'"`])/g;
@@ -920,10 +1043,10 @@ export class MatrixPlatform implements Platform {
         // with "Cannot encrypt event in unconfigured room".
         setTimeout(async () => {
           try {
-            await this.client!.sendMessage(roomId, {
-              msgtype: MsgType.Text,
-              body: 'Hi — I\'m the Router. Say `help` for what I can do, or `link` to connect your Hermes notebook account.',
-            });
+            await this.client!.sendMessage(
+              roomId,
+              this.createMessageContent('Hi — I\'m the Router. Say `help` for what I can do, or `link` to connect your Hermes notebook account.'),
+            );
           } catch (err) {
             console.error(`[Matrix] Welcome message failed in ${roomId}:`, err);
           }
@@ -1115,14 +1238,6 @@ export class MatrixPlatform implements Platform {
     } catch (err: any) {
       console.warn('[Matrix] Secret storage bootstrap failed:', err.message);
     }
-  }
-
-  private markdownToHtml(text: string): string {
-    return text
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\n/g, '<br/>');
   }
 
   private getDirectRoomMap(): Record<string, string[]> {

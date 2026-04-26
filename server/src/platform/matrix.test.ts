@@ -464,6 +464,74 @@ describe('MatrixPlatform DMs', () => {
   });
 });
 
+describe('MatrixPlatform message formatting', () => {
+  const createPlatform = (overrides: Partial<ConstructorParameters<typeof MatrixPlatform>[0]> = {}) => new MatrixPlatform({
+    serverUrl: 'https://mtrx.example.test',
+    serverName: 'mtrx.example.test',
+    botSecretKey: 'test-secret',
+    botHandle: 'router',
+    ...overrides,
+  });
+
+  it('renders Markdown as Matrix formatted HTML for regular sends', async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const platform = createPlatform();
+    (platform as any).client = { sendMessage };
+
+    await expect(platform.sendMessage(
+      '!room:mtrx.example.test',
+      '# For you\n\n- **Bold** [link](https://example.com)\n\n<script>alert(1)</script>',
+      { replyTo: '$parent' },
+    )).resolves.toBe('$event');
+
+    expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
+      body: expect.stringContaining('# For you'),
+      format: 'org.matrix.custom.html',
+      formatted_body: expect.stringContaining('<h1>For you</h1>'),
+      'm.relates_to': {
+        'm.in_reply_to': {
+          event_id: '$parent',
+        },
+      },
+    }));
+    expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
+      formatted_body: expect.stringContaining('<li><strong>Bold</strong> <a href="https://example.com">link</a></li>'),
+    }));
+    expect(sendMessage.mock.calls[0][1].formatted_body).not.toContain('<script>');
+  });
+
+  it('can send plain text without formatted HTML when requested', async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const platform = createPlatform();
+    (platform as any).client = { sendMessage };
+
+    await platform.sendMessage('!room:mtrx.example.test', '**literal**', { format: 'plain' });
+
+    expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', {
+      msgtype: 'm.text',
+      body: '**literal**',
+    });
+  });
+
+  it('uses the shared Markdown renderer for visible spark context messages', async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const sendStateEvent = vi.fn().mockResolvedValue({ event_id: '$state' });
+    const platform = createPlatform();
+    (platform as any).client = { sendMessage, sendStateEvent };
+
+    await expect(platform.postSparkContext('!room:mtrx.example.test', {
+      sourceHandle: 'alice',
+      targetHandle: 'james',
+      reason: 'because **this matters**',
+    })).resolves.toBe('$event');
+
+    expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
+      format: 'org.matrix.custom.html',
+      formatted_body: expect.stringContaining('<strong>🔗 Connected:</strong> because <strong>this matters</strong>'),
+    }));
+  });
+});
+
 describe('MatrixPlatform post rendering', () => {
   const createPlatform = (overrides: Partial<ConstructorParameters<typeof MatrixPlatform>[0]> = {}) => new MatrixPlatform({
     serverUrl: 'https://mtrx.example.test',
@@ -503,6 +571,31 @@ describe('MatrixPlatform post rendering', () => {
     }));
     expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
       formatted_body: expect.stringContaining('https://matrix.to/#/%40socrates1024%3Amatrix.org'),
+    }));
+  });
+
+  it('renders Markdown in Matrix entry posts while preserving linked handles', async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const platform = createPlatform({
+      resolveLinkedPlatformId: async (name, handle) =>
+        name === 'matrix' && handle === 'socrates1024' ? '@socrates1024:matrix.org' : null,
+    });
+
+    (platform as any).client = { sendMessage };
+
+    await platform.postEntry('!room:mtrx.example.test', {
+      id: 'entry-markdown',
+      handle: 'james',
+      pseudonym: 'Solitary Feather#123',
+      content: '# Heading\n\n- **item** for @socrates1024',
+      timestamp: Date.now(),
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
+      formatted_body: expect.stringContaining('<h1>Heading</h1>'),
+    }));
+    expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
+      formatted_body: expect.stringContaining('<li><strong>item</strong> for <a href="https://matrix.to/#/%40socrates1024%3Amatrix.org">@socrates1024:matrix.org</a></li>'),
     }));
   });
 

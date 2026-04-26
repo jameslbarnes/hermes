@@ -13,10 +13,10 @@ import type { HookContext } from './types.js';
 import type { HookDispatcher } from './dispatcher.js';
 import type { JournalEntry, Storage, User } from '../storage.js';
 import { shouldRoute, evaluateEntry, type RecentPost } from '../intelligence/scoring.js';
-import { detectSparks, evaluateSpark, getConnectionInfo, executeSpark, type SparkAction } from '../intelligence/sparks.js';
+import { detectSparks, evaluateSpark, getConnectionInfo, executeSpark, type SparkAction, type SparkCandidate } from '../intelligence/sparks.js';
 import { RoomBufferManager, type BufferedMessage } from '../intelligence/heat.js';
 import { generateLinkToken } from '../intelligence/link-tokens.js';
-import { MatrixPlatform } from '../platform/matrix.js';
+import { MatrixPlatform, type MatrixHistoryMessage } from '../platform/matrix.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -26,6 +26,20 @@ const MIN_PLATFORM_CONTENT_LENGTH = 50;
 const MATRIX_DEFAULT_FIREHOSE_CHANNEL_ID = 'bot-noise';
 const MATRIX_DEFAULT_FIREHOSE_CHANNEL_NAME = 'Bot Noise';
 const MATRIX_DEFAULT_FIREHOSE_DESCRIPTION = 'Router firehose for public notebook entries';
+const SPARK_MATRIX_DEBOUNCE_WINDOW_MS = process.env.SPARK_MATRIX_DEBOUNCE_WINDOW_MS
+  ? parseInt(process.env.SPARK_MATRIX_DEBOUNCE_WINDOW_MS)
+  : 72 * 60 * 60 * 1000;
+const SPARK_MATRIX_DEBOUNCE_LIMIT = process.env.SPARK_MATRIX_DEBOUNCE_LIMIT
+  ? parseInt(process.env.SPARK_MATRIX_DEBOUNCE_LIMIT)
+  : 160;
+
+const SPARK_DEBOUNCE_STOP_WORDS = new Set([
+  'about', 'after', 'again', 'already', 'also', 'around', 'because', 'between',
+  'could', 'different', 'directly', 'entry', 'exactly', 'having', 'might',
+  'notes', 'people', 'question', 'recent', 'recently', 'router', 'should',
+  'spark', 'subject', 'their', 'there', 'these', 'thing', 'think', 'those',
+  'through', 'together', 'would', 'worth',
+]);
 
 const roomBuffers = new RoomBufferManager();
 
@@ -66,6 +80,121 @@ export function getUnexpectedSparkHandles(
   }
 
   return [...unexpected];
+}
+
+function tokenizeSparkDebounceText(text: string | undefined): string[] {
+  return (text || '')
+    .toLowerCase()
+    .match(/[a-z0-9][a-z0-9-]{3,}/g)
+    ?.map(term => term.replace(/^-+|-+$/g, ''))
+    .filter(term => term.length >= 4 && !SPARK_DEBOUNCE_STOP_WORDS.has(term))
+    .slice(0, 80) || [];
+}
+
+export function getSparkDebounceTopicTerms(
+  action: Pick<SparkAction, 'reason'>,
+  candidate: Pick<SparkCandidate, 'overlapTopics' | 'matchingEntries'>,
+  sourceEntry: Pick<JournalEntry, 'content' | 'topicHints' | 'keywords'>,
+  maxTerms = 16,
+): string[] {
+  const scores = new Map<string, number>();
+  const add = (terms: string[], weight: number) => {
+    for (const term of terms) {
+      scores.set(term, (scores.get(term) || 0) + weight);
+    }
+  };
+
+  add(tokenizeSparkDebounceText(candidate.overlapTopics.join(' ')), 5);
+  add(tokenizeSparkDebounceText([...(sourceEntry.topicHints || []), ...(sourceEntry.keywords || [])].join(' ')), 4);
+  add(tokenizeSparkDebounceText(action.reason), 3);
+  add(tokenizeSparkDebounceText(sourceEntry.content), 2);
+  add(tokenizeSparkDebounceText(candidate.matchingEntries.map(e => e.content).join(' ')), 1);
+
+  return [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([term]) => term)
+    .slice(0, maxTerms);
+}
+
+function messageMatchesSparkTerms(message: MatrixHistoryMessage, terms: string[]): string[] {
+  const text = message.text.toLowerCase();
+  return terms.filter(term => text.includes(term));
+}
+
+export function findRecentMatrixSparkConversation(
+  messages: MatrixHistoryMessage[],
+  sourceHandle: string,
+  targetHandle: string,
+  terms: string[],
+): { roomId: string; roomName: string; matchedTerms: string[]; sourceCount: number; targetCount: number } | null {
+  if (terms.length === 0) return null;
+
+  const source = normalizeHandle(sourceHandle);
+  const target = normalizeHandle(targetHandle);
+  const byRoom = new Map<string, MatrixHistoryMessage[]>();
+  for (const message of messages) {
+    if (message.isDM) continue;
+    const sender = message.senderHandle ? normalizeHandle(message.senderHandle) : '';
+    if (sender !== source && sender !== target) continue;
+    const existing = byRoom.get(message.roomId) || [];
+    existing.push(message);
+    byRoom.set(message.roomId, existing);
+  }
+
+  for (const [roomId, roomMessages] of byRoom) {
+    const sourceMessages = roomMessages.filter(message => normalizeHandle(message.senderHandle || '') === source);
+    const targetMessages = roomMessages.filter(message => normalizeHandle(message.senderHandle || '') === target);
+    if (sourceMessages.length === 0 || targetMessages.length === 0) continue;
+
+    const matchedTerms = new Set<string>();
+    const matchedHandles = new Set<string>();
+    for (const message of roomMessages) {
+      const hits = messageMatchesSparkTerms(message, terms);
+      if (hits.length === 0) continue;
+      hits.forEach(term => matchedTerms.add(term));
+      matchedHandles.add(normalizeHandle(message.senderHandle || ''));
+    }
+
+    const pairIsActivelyTalking = roomMessages.length >= 4 && matchedTerms.size >= 2;
+    const bothUsedTopicTerms = matchedHandles.has(source) && matchedHandles.has(target);
+    if (bothUsedTopicTerms || pairIsActivelyTalking) {
+      return {
+        roomId,
+        roomName: roomMessages[0]?.roomAlias || roomMessages[0]?.roomName || roomId,
+        matchedTerms: [...matchedTerms],
+        sourceCount: sourceMessages.length,
+        targetCount: targetMessages.length,
+      };
+    }
+  }
+
+  return null;
+}
+
+async function findRecentMatrixSparkConversationForAction(
+  action: SparkAction,
+  candidate: SparkCandidate,
+  sourceEntry: JournalEntry,
+  matrixPlatform: MatrixPlatform,
+): Promise<ReturnType<typeof findRecentMatrixSparkConversation>> {
+  const queryable = matrixPlatform as MatrixPlatform & {
+    queryRecentMessages?: MatrixPlatform['queryRecentMessages'];
+  };
+  if (typeof queryable.queryRecentMessages !== 'function') return null;
+
+  const terms = getSparkDebounceTopicTerms(action, candidate, sourceEntry);
+  if (terms.length === 0) return null;
+
+  const messages = await queryable.queryRecentMessages({
+    since: Date.now() - SPARK_MATRIX_DEBOUNCE_WINDOW_MS,
+    limit: SPARK_MATRIX_DEBOUNCE_LIMIT,
+    perRoomLimit: 40,
+    includeDMs: false,
+    spaceOnly: false,
+    botScope: true,
+  }).catch(() => []);
+
+  return findRecentMatrixSparkConversation(messages, action.sourceHandle, action.targetHandle, terms);
 }
 
 function getAnthropic(): Anthropic | null {
@@ -434,10 +563,11 @@ async function findKeyHashForHandle(handle: string, storage: import('../storage.
  */
 async function executeSparkWithContext(
   action: SparkAction,
-  candidate: import('../intelligence/sparks.js').SparkCandidate,
+  candidate: SparkCandidate,
   sourceEntry: JournalEntry,
   platforms: import('../platform/types.js').Platform[],
   storage?: Storage,
+  options: { debounceMatrix?: boolean } = {},
 ): Promise<void> {
   if (action.action === 'skip') return;
 
@@ -473,6 +603,23 @@ async function executeSparkWithContext(
       `message mentioned unrelated handles (${unexpectedHandles.map(h => `@${h}`).join(', ')})`,
     );
     return;
+  }
+
+  if (matrixPlatform && options.debounceMatrix !== false) {
+    const existingConversation = await findRecentMatrixSparkConversationForAction(
+      action,
+      candidate,
+      sourceEntry,
+      matrixPlatform,
+    );
+    if (existingConversation) {
+      console.log(
+        `[Agent] Skipping spark @${action.sourceHandle} ↔ @${action.targetHandle}: ` +
+        `recent Matrix conversation already active in ${existingConversation.roomName} ` +
+        `(terms=${existingConversation.matchedTerms.slice(0, 5).join(', ') || 'none'})`,
+      );
+      return;
+    }
   }
 
   if (matrixPlatform && storage && (action.action === 'introduce' || action.action === 'nudge')) {
@@ -538,13 +685,13 @@ export async function triggerManualSpark(
     message,
   };
 
-  await executeSparkWithContext(action, candidate, sourceEntry, platforms, storage);
+  await executeSparkWithContext(action, candidate, sourceEntry, platforms, storage, { debounceMatrix: false });
 }
 
 async function ensureSparkPairRoom(
   action: SparkAction,
   sourceEntry: JournalEntry,
-  candidate: import('../intelligence/sparks.js').SparkCandidate,
+  candidate: SparkCandidate,
   matrixPlatform: MatrixPlatform,
   storage: Storage,
 ): Promise<{ id: string; created: boolean }> {

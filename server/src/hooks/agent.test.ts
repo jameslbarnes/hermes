@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryStorage, type JournalEntry } from '../storage.js';
-import { MatrixPlatform, ROUTER_SPARK_EVENT } from '../platform/matrix.js';
-import { getMatrixRoutingTargets, getPublishedEntryFromEvent, getUnexpectedSparkHandles, hasLinkedPlatformAccount, triggerManualSpark } from './agent.js';
+import { MatrixPlatform, ROUTER_SPARK_EVENT, type MatrixHistoryMessage } from '../platform/matrix.js';
+import {
+  findRecentMatrixSparkConversation,
+  getMatrixRoutingTargets,
+  getPublishedEntryFromEvent,
+  getSparkDebounceTopicTerms,
+  getUnexpectedSparkHandles,
+  hasLinkedPlatformAccount,
+  triggerManualSpark,
+} from './agent.js';
 
 function makeEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
   return {
@@ -115,6 +123,95 @@ describe('getUnexpectedSparkHandles', () => {
         'sxysun',
       ),
     ).toEqual(['ggg']);
+  });
+});
+
+describe('spark Matrix debounce guard', () => {
+  const matrixMessage = (overrides: Partial<MatrixHistoryMessage>): MatrixHistoryMessage => ({
+    roomId: '!general:mtrx.example.test',
+    roomName: 'General',
+    senderId: '@unknown:mtrx.example.test',
+    text: '',
+    timestamp: Date.now(),
+    isDM: false,
+    ...overrides,
+  });
+
+  it('extracts topic terms from the spark evidence', () => {
+    const terms = getSparkDebounceTopicTerms(
+      { reason: 'Both are talking about provenance and authority boundaries.' },
+      {
+        overlapTopics: ['provenance', 'trust'],
+        matchingEntries: [makeEntry({ content: 'Evidence should carry authority across contexts.' })],
+      },
+      makeEntry({
+        content: 'Context bridges need explicit provenance.',
+        topicHints: ['boundary design'],
+        keywords: ['identity'],
+      }),
+    );
+
+    expect(terms).toContain('provenance');
+    expect(terms).toContain('trust');
+    expect(terms).toContain('boundary');
+  });
+
+  it('detects when both spark participants are already discussing the topic in the same Matrix room', () => {
+    const conversation = findRecentMatrixSparkConversation([
+      matrixMessage({
+        senderHandle: 'james',
+        senderId: '@james:mtrx.example.test',
+        text: 'The boundary problem is really about provenance staying attached to data.',
+      }),
+      matrixMessage({
+        senderHandle: 'socrates1024',
+        senderId: '@socrates1024:mtrx.example.test',
+        text: 'Right, authority has to travel with the evidence or the trust model falls apart.',
+      }),
+    ], 'james', 'socrates1024', ['provenance', 'authority', 'boundary', 'trust']);
+
+    expect(conversation).toMatchObject({
+      roomId: '!general:mtrx.example.test',
+      sourceCount: 1,
+      targetCount: 1,
+    });
+    expect(conversation?.matchedTerms).toContain('provenance');
+  });
+
+  it('does not debounce when only one participant has used the spark topic terms', () => {
+    const conversation = findRecentMatrixSparkConversation([
+      matrixMessage({
+        senderHandle: 'james',
+        text: 'The boundary problem is really about provenance staying attached to data.',
+      }),
+      matrixMessage({
+        senderHandle: 'socrates1024',
+        text: 'Yeah, agreed.',
+      }),
+    ], 'james', 'socrates1024', ['provenance', 'authority', 'boundary', 'trust']);
+
+    expect(conversation).toBeNull();
+  });
+
+  it('does not use DMs as broad spark debounce evidence', () => {
+    const conversation = findRecentMatrixSparkConversation([
+      matrixMessage({
+        roomId: '!dm:mtrx.example.test',
+        roomName: 'James DM',
+        isDM: true,
+        senderHandle: 'james',
+        text: 'Provenance and boundary design.',
+      }),
+      matrixMessage({
+        roomId: '!dm:mtrx.example.test',
+        roomName: 'James DM',
+        isDM: true,
+        senderHandle: 'socrates1024',
+        text: 'Authority and trust.',
+      }),
+    ], 'james', 'socrates1024', ['provenance', 'authority', 'boundary', 'trust']);
+
+    expect(conversation).toBeNull();
   });
 });
 

@@ -692,7 +692,7 @@ describe('MatrixPlatform post rendering', () => {
     expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
       author_handle: 'james',
       author_platform_id: '@specularist:matrix.org',
-      body: expect.stringContaining('@specularist:matrix.org: Looping in @socrates1024:matrix.org on this one.'),
+      body: expect.stringContaining('@specularist:matrix.org:\n\nLooping in @socrates1024:matrix.org on this one.'),
       formatted_body: expect.stringContaining('https://matrix.to/#/%40specularist%3Amatrix.org'),
     }));
     expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
@@ -721,8 +721,40 @@ describe('MatrixPlatform post rendering', () => {
       formatted_body: expect.stringContaining('<h1>Heading</h1>'),
     }));
     expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
+      formatted_body: expect.stringContaining('<p>@james:</p><h1>Heading</h1>'),
+    }));
+    expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
       formatted_body: expect.stringContaining('<li><strong>item</strong> for <a href="https://matrix.to/#/%40socrates1024%3Amatrix.org">@socrates1024:matrix.org</a></li>'),
     }));
+  });
+
+  it('does not truncate Matrix entry posts at the old 500 character preview limit', async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const platform = createPlatform({
+      resolveLinkedPlatformId: async () => null,
+    });
+    const longContent = [
+      'This entry starts normally.',
+      'x'.repeat(700),
+      'The tail should still render with **bold tail text**.',
+    ].join('\n\n');
+
+    (platform as any).client = { sendMessage };
+
+    await platform.postEntry('!room:mtrx.example.test', {
+      id: 'entry-long',
+      handle: 'james',
+      pseudonym: 'Solitary Feather#123',
+      content: longContent,
+      timestamp: Date.now(),
+    });
+
+    const message = sendMessage.mock.calls[0][1];
+    expect(message.content_display_truncated).toBe(false);
+    expect(message.body).toContain('The tail should still render');
+    expect(message.body).not.toContain('[truncated - read full entry]');
+    expect(message.formatted_body).toContain('The tail should still render');
+    expect(message.formatted_body).toContain('<strong>bold tail text</strong>');
   });
 
   it('renders linked Matrix IDs in editorial hooks as well as regular entry bodies', async () => {
@@ -766,7 +798,7 @@ describe('MatrixPlatform post rendering', () => {
 
     expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
       author_platform_id: undefined,
-      body: expect.stringContaining('@james: Asking @someone-else to weigh in.'),
+      body: expect.stringContaining('@james:\n\nAsking @someone-else to weigh in.'),
       formatted_body: expect.stringContaining('@james'),
     }));
   });

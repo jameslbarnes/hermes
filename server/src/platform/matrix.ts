@@ -190,6 +190,24 @@ function markdownToMatrixHtml(markdown: string): string {
   });
 }
 
+function truncateMatrixEntryDisplay(text: string, maxChars: number): { text: string; truncated: boolean } {
+  if (text.length <= maxChars) {
+    return { text, truncated: false };
+  }
+
+  const hardSlice = text.slice(0, maxChars);
+  const paragraphBreak = hardSlice.lastIndexOf('\n\n');
+  const lineBreak = hardSlice.lastIndexOf('\n');
+  const wordBreak = hardSlice.lastIndexOf(' ');
+  const boundary = Math.max(paragraphBreak, lineBreak, wordBreak);
+  const end = boundary > maxChars * 0.8 ? boundary : maxChars;
+
+  return {
+    text: `${text.slice(0, end).trimEnd()}\n\n[truncated - read full entry]`,
+    truncated: true,
+  };
+}
+
 export class MatrixPlatform implements Platform {
   readonly name = 'matrix';
   readonly maxMessageLength = 65536;
@@ -843,15 +861,17 @@ export class MatrixPlatform implements Platform {
       ? await this.config.resolveLinkedPlatformId?.(this.name, entry.handle)
       : null;
     const author = linkedAuthorId || (entry.handle ? `@${entry.handle}` : entry.pseudonym);
-    const renderedBody = await this.renderLinkedMarkdownForMatrix(entry.content.substring(0, 500));
+    const displayBudget = Math.max(1000, this.maxMessageLength - author.length - permalink.length - 2048);
+    const display = truncateMatrixEntryDisplay(entry.content, displayBudget);
+    const renderedBody = await this.renderLinkedMarkdownForMatrix(display.text);
     const renderedHook = editorialHook ? await this.renderLinkedMarkdownForMatrix(editorialHook) : null;
     const authorHtml = linkedAuthorId
       ? `<a href="https://matrix.to/#/${encodeURIComponent(linkedAuthorId)}">${escapeHtml(linkedAuthorId)}</a>`
       : escapeHtml(author);
     const permalinkHtml = `<a href="${escapeHtml(permalink)}">${escapeHtml(permalink)}</a>`;
     const formattedBody = renderedHook
-      ? `${renderedHook.html}<br><br>&mdash; ${authorHtml} &middot; ${permalinkHtml}`
-      : `${authorHtml}: ${renderedBody.html}${entry.content.length > 500 ? '...' : ''}<br><br>${permalinkHtml}`;
+      ? `${renderedHook.html}<p>&mdash; ${authorHtml} &middot; ${permalinkHtml}</p>`
+      : `<p>${authorHtml}:</p>${renderedBody.html}<p>${permalinkHtml}</p>`;
 
     const content: any = {
       msgtype: MsgType.Text,
@@ -861,6 +881,7 @@ export class MatrixPlatform implements Platform {
       author_platform_id: linkedAuthorId || undefined,
       author_pseudonym: entry.pseudonym,
       content: entry.content,
+      content_display_truncated: display.truncated,
       editorial_hook: editorialHook,
       permalink,
       topic_hints: entry.topicHints,
@@ -870,7 +891,7 @@ export class MatrixPlatform implements Platform {
       // Fallback text for stock clients
       body: renderedHook
         ? `${renderedHook.plain}\n\n— ${author} · ${permalink}`
-        : `${author}: ${renderedBody.plain}${entry.content.length > 500 ? '...' : ''}\n\n${permalink}`,
+        : `${author}:\n\n${renderedBody.plain}\n\n${permalink}`,
     };
 
     // We use m.room.message with custom fields instead of a custom event type

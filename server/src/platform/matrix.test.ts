@@ -555,6 +555,217 @@ describe('MatrixPlatform DMs', () => {
   });
 });
 
+describe('MatrixPlatform history queries', () => {
+  const createPlatform = (overrides: Partial<ConstructorParameters<typeof MatrixPlatform>[0]> = {}) => new MatrixPlatform({
+    serverUrl: 'https://mtrx.example.test',
+    serverName: 'mtrx.example.test',
+    botSecretKey: 'test-secret',
+    botHandle: 'router',
+    spaceRoomId: '!space:mtrx.example.test',
+    ...overrides,
+  });
+
+  const fakeEvent = (overrides: {
+    id: string;
+    sender: string;
+    text: string;
+    timestamp: number;
+    type?: string;
+  }) => ({
+    getType: () => overrides.type || EventType.RoomMessage,
+    getSender: () => overrides.sender,
+    getContent: () => ({ body: overrides.text }),
+    getTs: () => overrides.timestamp,
+    getId: () => overrides.id,
+  });
+
+  const fakeHistoryRoom = (roomId: string, opts: {
+    name?: string;
+    alias?: string;
+    members?: string[];
+    inSpace?: boolean;
+    events?: Array<ReturnType<typeof fakeEvent>>;
+  } = {}) => {
+    const members = opts.members || ['@router:mtrx.example.test', '@james:matrix.org', '@alice:mtrx.example.test'];
+    return {
+      roomId,
+      name: opts.name,
+      getCanonicalAlias: () => opts.alias || null,
+      getMyMembership: () => KnownMembership.Join,
+      getJoinedMembers: () => members.map(userId => ({ userId })),
+      getJoinedMemberCount: () => members.length,
+      getMember: (userId: string) => members.includes(userId)
+        ? { userId, membership: KnownMembership.Join }
+        : null,
+      getLiveTimeline: () => ({
+        getEvents: () => opts.events || [],
+      }),
+      currentState: {
+        getStateEvents: (type: string, stateKey: string) => {
+          if (type === EventType.SpaceParent && stateKey === '!space:mtrx.example.test' && opts.inSpace) {
+            return { getContent: () => ({ canonical: true }) };
+          }
+          if (type === 'm.room.canonical_alias' && opts.alias) {
+            return { getContent: () => ({ alias: opts.alias }) };
+          }
+          return null;
+        },
+      },
+    };
+  };
+
+  it('searches joined Shape Rotator space rooms and excludes unrelated rooms', async () => {
+    const platform = createPlatform({
+      resolveLinkedHermesHandle: async (_platform, userId) =>
+        userId === '@alice:mtrx.example.test' ? 'alice' : null,
+    });
+    const now = Date.now();
+    const inSpaceRoom = fakeHistoryRoom('!books:mtrx.example.test', {
+      name: 'Books',
+      alias: '#books:mtrx.example.test',
+      inSpace: true,
+      events: [
+        fakeEvent({ id: '$1', sender: '@alice:mtrx.example.test', text: 'Matrix encryption came up here.', timestamp: now - 1000 }),
+      ],
+    });
+    const unrelatedRoom = fakeHistoryRoom('!elsewhere:mtrx.example.test', {
+      name: 'Elsewhere',
+      inSpace: false,
+      events: [
+        fakeEvent({ id: '$2', sender: '@alice:mtrx.example.test', text: 'Matrix encryption elsewhere.', timestamp: now - 1000 }),
+      ],
+    });
+
+    (platform as any).client = {
+      getRooms: vi.fn().mockReturnValue([inSpaceRoom, unrelatedRoom]),
+      getRoom: vi.fn().mockReturnValue(null),
+      getAccountData: vi.fn().mockReturnValue(undefined),
+      scrollback: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const results = await platform.queryRecentMessages({
+      query: 'encryption',
+      since: now - 60_000,
+      viewerUserId: '@james:matrix.org',
+      limit: 10,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      roomId: '!books:mtrx.example.test',
+      roomAlias: '#books:mtrx.example.test',
+      senderHandle: 'alice',
+      text: 'Matrix encryption came up here.',
+    });
+  });
+
+  it('does not expose Shape Rotator space rooms to linked accounts outside the space', async () => {
+    const platform = createPlatform();
+    const now = Date.now();
+    const inSpaceRoom = fakeHistoryRoom('!books:mtrx.example.test', {
+      name: 'Books',
+      inSpace: true,
+      members: ['@router:mtrx.example.test', '@alice:mtrx.example.test'],
+      events: [
+        fakeEvent({ id: '$1', sender: '@alice:mtrx.example.test', text: 'Matrix encryption came up here.', timestamp: now - 1000 }),
+      ],
+    });
+    const spaceRoom = fakeHistoryRoom('!space:mtrx.example.test', {
+      members: ['@router:mtrx.example.test', '@member:mtrx.example.test'],
+    });
+
+    (platform as any).client = {
+      getRooms: vi.fn().mockReturnValue([inSpaceRoom, spaceRoom]),
+      getRoom: vi.fn((roomId: string) => roomId === '!space:mtrx.example.test' ? spaceRoom : null),
+      getAccountData: vi.fn().mockReturnValue(undefined),
+      scrollback: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const results = await platform.queryRecentMessages({
+      query: 'encryption',
+      since: now - 60_000,
+      viewerUserId: '@outsider:mtrx.example.test',
+      limit: 10,
+    });
+
+    expect(results).toHaveLength(0);
+  });
+
+  it('allows linked accounts in the Shape Rotator space to search child rooms they can join', async () => {
+    const platform = createPlatform();
+    const now = Date.now();
+    const inSpaceRoom = fakeHistoryRoom('!books:mtrx.example.test', {
+      name: 'Books',
+      inSpace: true,
+      members: ['@router:mtrx.example.test', '@alice:mtrx.example.test'],
+      events: [
+        fakeEvent({ id: '$1', sender: '@alice:mtrx.example.test', text: 'Matrix encryption came up here.', timestamp: now - 1000 }),
+      ],
+    });
+    const spaceRoom = fakeHistoryRoom('!space:mtrx.example.test', {
+      members: ['@router:mtrx.example.test', '@james:matrix.org'],
+    });
+
+    (platform as any).client = {
+      getRooms: vi.fn().mockReturnValue([inSpaceRoom, spaceRoom]),
+      getRoom: vi.fn((roomId: string) => roomId === '!space:mtrx.example.test' ? spaceRoom : null),
+      getAccountData: vi.fn().mockReturnValue(undefined),
+      scrollback: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const results = await platform.queryRecentMessages({
+      query: 'encryption',
+      since: now - 60_000,
+      viewerUserId: '@james:matrix.org',
+      limit: 10,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      roomId: '!books:mtrx.example.test',
+      text: 'Matrix encryption came up here.',
+    });
+  });
+
+  it('only includes DMs when the linked Matrix user is in the room', async () => {
+    const platform = createPlatform();
+    const now = Date.now();
+    const visibleDm = fakeHistoryRoom('!dm-visible:mtrx.example.test', {
+      members: ['@router:mtrx.example.test', '@james:matrix.org'],
+      events: [
+        fakeEvent({ id: '$visible', sender: '@james:matrix.org', text: 'Encryption in my DM.', timestamp: now - 1000 }),
+      ],
+    });
+    const hiddenDm = fakeHistoryRoom('!dm-hidden:mtrx.example.test', {
+      members: ['@router:mtrx.example.test', '@alice:mtrx.example.test'],
+      events: [
+        fakeEvent({ id: '$hidden', sender: '@alice:mtrx.example.test', text: 'Encryption in another DM.', timestamp: now - 1000 }),
+      ],
+    });
+
+    (platform as any).client = {
+      getRooms: vi.fn().mockReturnValue([visibleDm, hiddenDm]),
+      getRoom: vi.fn().mockReturnValue(null),
+      getAccountData: vi.fn().mockReturnValue(undefined),
+      scrollback: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const results = await platform.queryRecentMessages({
+      query: 'encryption',
+      includeDMs: true,
+      viewerUserId: '@james:matrix.org',
+      limit: 10,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      roomId: '!dm-visible:mtrx.example.test',
+      isDM: true,
+      text: 'Encryption in my DM.',
+    });
+  });
+});
+
 describe('MatrixPlatform spark rooms', () => {
   const createPlatform = (overrides: Partial<ConstructorParameters<typeof MatrixPlatform>[0]> = {}) => new MatrixPlatform({
     serverUrl: 'https://mtrx.example.test',

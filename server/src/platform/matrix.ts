@@ -71,6 +71,32 @@ export interface MatrixPlatformConfig {
   resolveLinkedHermesHandle?: (platform: string, platformUserId: string) => Promise<string | null>;
 }
 
+export interface MatrixHistoryMessage {
+  roomId: string;
+  roomName: string;
+  roomAlias?: string | null;
+  eventId?: string;
+  senderId: string;
+  senderHandle?: string | null;
+  text: string;
+  timestamp: number;
+  isDM: boolean;
+  permalink?: string;
+}
+
+export interface MatrixHistoryQueryOptions {
+  query?: string;
+  since?: number;
+  until?: number;
+  limit?: number;
+  includeDMs?: boolean;
+  onlyDMs?: boolean;
+  viewerUserId?: string;
+  spaceOnly?: boolean;
+  roomIds?: string[];
+  perRoomLimit?: number;
+}
+
 // Custom Matrix event types for tight notebook integration
 export const ROUTER_ENTRY_EVENT = 'com.router.entry';
 export const ROUTER_SPARK_EVENT = 'com.router.spark';
@@ -1134,7 +1160,184 @@ export class MatrixPlatform implements Platform {
       return false;
     }
 
+    if (this.roomIsInConfiguredSpace(room)) {
+      return false;
+    }
+
     return room ? room.getJoinedMemberCount() === 2 : false;
+  }
+
+  private roomHasMember(room: Room | null, userId: string | null | undefined): boolean {
+    if (!room || !userId) return false;
+    const member = room.getMember?.(userId);
+    if (member?.membership === KnownMembership.Join || member?.membership === KnownMembership.Invite) {
+      return true;
+    }
+
+    return (room.getJoinedMembers?.() || []).some(member => member.userId === userId);
+  }
+
+  private getRoomStateEvent(room: Room | null, eventType: EventType | string, stateKey: string): MatrixEvent | null {
+    const event = room?.currentState?.getStateEvents?.(eventType as any, stateKey);
+    if (!event || Array.isArray(event)) return null;
+    return event as MatrixEvent;
+  }
+
+  private roomIsInConfiguredSpace(room: Room | null): boolean {
+    if (!room || !this.config.spaceRoomId) return false;
+    if (room.roomId === this.config.spaceRoomId) return false;
+    if ([...this.channelRooms.values()].includes(room.roomId)) return true;
+
+    const parent = this.getRoomStateEvent(room, EventType.SpaceParent, this.config.spaceRoomId);
+    if (parent) return true;
+
+    const spaceRoom = this.client?.getRoom(this.config.spaceRoomId) || null;
+    const child = this.getRoomStateEvent(spaceRoom, EventType.SpaceChild, room.roomId);
+    return !!child;
+  }
+
+  private getRoomAlias(room: Room): string | null {
+    const canonicalAlias = (room as any).getCanonicalAlias?.();
+    if (typeof canonicalAlias === 'string' && canonicalAlias) return canonicalAlias;
+
+    const aliasEvent = this.getRoomStateEvent(room, 'm.room.canonical_alias', '');
+    const alias = aliasEvent?.getContent?.()?.alias;
+    return typeof alias === 'string' && alias ? alias : null;
+  }
+
+  private getRoomDisplayName(room: Room): string {
+    const name = (room as any).name;
+    if (typeof name === 'string' && name.trim()) return name.trim();
+    return this.getRoomAlias(room) || room.roomId;
+  }
+
+  private getMatrixPermalink(roomId: string, eventId?: string): string | undefined {
+    if (!eventId) return undefined;
+    const via = this.config.serverName ? `?via=${encodeURIComponent(this.config.serverName)}` : '';
+    return `https://matrix.to/#/${encodeURIComponent(roomId)}/${encodeURIComponent(eventId)}${via}`;
+  }
+
+  private matrixHistoryQueryMatches(text: string, query?: string): boolean {
+    const normalizedQuery = query?.trim().toLowerCase();
+    if (!normalizedQuery) return true;
+
+    const normalizedText = text.toLowerCase();
+    if (normalizedText.includes(normalizedQuery)) return true;
+
+    const terms = normalizedQuery
+      .split(/\s+/)
+      .map(term => term.replace(/[^\p{L}\p{N}_-]/gu, ''))
+      .filter(term => term.length > 2);
+
+    return terms.length > 0 && terms.some(term => normalizedText.includes(term));
+  }
+
+  private async ensureRecentRoomHistoryLoaded(room: Room, since: number | undefined, perRoomLimit: number): Promise<void> {
+    if (!this.client?.scrollback) return;
+
+    let attempts = 0;
+    while (attempts < 3) {
+      const events = room.getLiveTimeline?.().getEvents?.() || [];
+      const eventTimestamps = events
+        .map(event => event.getTs?.() || 0)
+        .filter(timestamp => timestamp > 0);
+      const oldestTimestamp = eventTimestamps.length > 0 ? Math.min(...eventTimestamps) : undefined;
+      const enoughEvents = events.length >= perRoomLimit;
+      const loadedSince = since === undefined || (oldestTimestamp !== undefined && oldestTimestamp <= since);
+
+      if (events.length > 0 && (enoughEvents || loadedSince)) return;
+
+      const before = events.length;
+      try {
+        await this.client.scrollback(room, Math.min(100, perRoomLimit));
+      } catch (error) {
+        console.warn(`[Matrix] Failed to load history for ${room.roomId}:`, error);
+        return;
+      }
+
+      const after = room.getLiveTimeline?.().getEvents?.().length || 0;
+      if (after <= before) return;
+      attempts++;
+    }
+  }
+
+  async queryRecentMessages(opts: MatrixHistoryQueryOptions = {}): Promise<MatrixHistoryMessage[]> {
+    if (!this.client) return [];
+
+    const limit = Math.max(1, Math.min(opts.limit || 50, 200));
+    const perRoomLimit = Math.max(20, Math.min(opts.perRoomLimit || 100, 500));
+    const since = opts.since;
+    const until = opts.until ?? Date.now();
+    const includeDMs = opts.includeDMs === true || opts.onlyDMs === true;
+    const onlyDMs = opts.onlyDMs === true;
+    const spaceOnly = opts.spaceOnly !== false;
+    const roomFilter = opts.roomIds?.length ? new Set(opts.roomIds) : null;
+    const messages: MatrixHistoryMessage[] = [];
+    const senderHandleCache = new Map<string, string | null>();
+    const spaceRoom = this.config.spaceRoomId ? this.client.getRoom(this.config.spaceRoomId) : null;
+    const viewerInSpace = this.roomHasMember(spaceRoom, opts.viewerUserId);
+
+    const rooms = this.client.getRooms?.() || [];
+    for (const room of rooms) {
+      if (room.getMyMembership?.() !== KnownMembership.Join) continue;
+      if (room.roomId === this.config.spaceRoomId) continue;
+      if (roomFilter && !roomFilter.has(room.roomId)) continue;
+
+      const roomInSpace = this.roomIsInConfiguredSpace(room);
+      const viewerInRoom = this.roomHasMember(room, opts.viewerUserId);
+      if (!roomFilter && spaceOnly && !roomInSpace && !(includeDMs && viewerInRoom)) {
+        continue;
+      }
+
+      await this.ensureRecentRoomHistoryLoaded(room, since, perRoomLimit);
+
+      const roomAlias = this.getRoomAlias(room);
+      const roomName = this.getRoomDisplayName(room);
+      const events = room.getLiveTimeline?.().getEvents?.() || [];
+      for (const event of events) {
+        if (event.getType?.() !== EventType.RoomMessage) continue;
+        const senderId = event.getSender?.();
+        if (!senderId || senderId === this.botUserId) continue;
+
+        const eventIsDM = this.isDirectMessageRoom(senderId, room.roomId, room);
+        if (onlyDMs && !eventIsDM) continue;
+        if (eventIsDM && (!includeDMs || !viewerInRoom)) continue;
+        if (!eventIsDM && opts.viewerUserId && !viewerInRoom && !viewerInSpace) continue;
+        if (!eventIsDM && spaceOnly && !roomInSpace && !roomFilter) continue;
+
+        const timestamp = event.getTs?.() || 0;
+        if (since !== undefined && timestamp < since) continue;
+        if (timestamp >= until) continue;
+
+        const content = event.getContent?.() || {};
+        const text = typeof content.body === 'string' ? content.body.trim() : '';
+        if (!text || !this.matrixHistoryQueryMatches(text, opts.query)) continue;
+
+        let senderHandle = senderHandleCache.get(senderId);
+        if (senderHandle === undefined) {
+          senderHandle = await this.resolveHermesHandle(senderId).catch(() => null);
+          senderHandleCache.set(senderId, senderHandle);
+        }
+
+        const eventId = event.getId?.();
+        messages.push({
+          roomId: room.roomId,
+          roomName,
+          roomAlias,
+          eventId,
+          senderId,
+          senderHandle,
+          text,
+          timestamp,
+          isDM: eventIsDM,
+          permalink: this.getMatrixPermalink(room.roomId, eventId),
+        });
+      }
+    }
+
+    return messages
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
   }
 
   private setupEventListeners(): void {

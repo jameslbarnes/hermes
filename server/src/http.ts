@@ -30,7 +30,7 @@ import { deliverEntry, getDefaultVisibility, canViewEntry, canView, normalizeEnt
 import { startTelegramBot, postToTelegram } from './telegram.js';
 import { pushEvent, getEventsSince, getLatestCursor, setDispatcher, type EventType } from './events.js';
 import { registerPlatform, getPlatform, getAllPlatforms, startAllPlatforms, stopAllPlatforms } from './platform/registry.js';
-import { MatrixPlatform } from './platform/matrix.js';
+import { MatrixPlatform, type MatrixHistoryMessage } from './platform/matrix.js';
 import { getDispatcher } from './hooks/dispatcher.js';
 import { registerAgentHooks } from './hooks/agent.js';
 import { generateDailyDigest, sendPersonalizedDigests, startCronJobs, stopCronJobs } from './hooks/cron.js';
@@ -311,7 +311,7 @@ export const SYSTEM_SKILLS: Skill[] = [
   {
     id: 'system_hermes_search',
     name: 'hermes_search',
-    description: 'Search the shared notebook for entries matching a query. Use this when something from the daily summaries seems relevant, or when the user asks about what others have written.',
+    description: 'Search the shared notebook for entries matching a query. If the caller has a verified linked Matrix account, this may also include matching recent Matrix room messages visible to that Matrix account.',
     instructions: '',
     handlerType: 'builtin',
     inputSchema: {
@@ -332,6 +332,10 @@ export const SYSTEM_SKILLS: Skill[] = [
         since: {
           type: 'string',
           description: 'Only return entries after this date/time. Accepts ISO 8601 (e.g. "2026-02-14") or relative durations (e.g. "24h", "7d", "1w"). Useful for daily digests or catching up on recent activity.',
+        },
+        include_matrix: {
+          type: 'boolean',
+          description: 'Also include matching recent Matrix room messages when the caller has a verified linked Matrix account. Defaults to true for keyword searches.',
         },
       },
       required: [],
@@ -1609,6 +1613,22 @@ function createMCPServer(secretKey: string) {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+    const parseToolSince = (sinceRaw?: string): number | undefined => {
+      const raw = sinceRaw?.trim();
+      if (!raw) return undefined;
+
+      const relativeMatch = raw.match(/^(\d+)\s*(h|d|w)$/i);
+      if (relativeMatch) {
+        const amount = parseInt(relativeMatch[1]);
+        const unit = relativeMatch[2].toLowerCase();
+        const ms = unit === 'h' ? amount * 3600000 : unit === 'd' ? amount * 86400000 : amount * 604800000;
+        return Date.now() - ms;
+      }
+
+      const parsed = Date.parse(raw);
+      return Number.isNaN(parsed) ? undefined : parsed;
+    };
+
     const executeHermesSearch = async ({
       query,
       handleFilter,
@@ -1716,6 +1736,52 @@ function createMCPServer(secretKey: string) {
 
       const resultsText = results.map(r => `[id:${r.id}] ${r.text}`).join('\n\n');
       return `Found ${results.length} results matching "${query}":\n\n${resultsText}\n\nUse hermes_get_entry with an ID to see full details.`;
+    };
+
+    const getVerifiedMatrixUserId = async (): Promise<string | null> => {
+      const toolUser = await storage.getUserByKeyHash(keyHash).catch(() => null);
+      return toolUser?.linkedAccounts?.find(account =>
+        account.platform === 'matrix'
+        && !!account.platformUserId
+        && account.verified !== false,
+      )?.platformUserId || null;
+    };
+
+    const executeMatrixSearch = async ({
+      query,
+      limit,
+      since,
+      viewerMatrixId,
+    }: {
+      query: string;
+      limit: number;
+      since?: number;
+      viewerMatrixId: string;
+    }): Promise<MatrixHistoryMessage[]> => {
+      const matrix = getPlatform('matrix') as MatrixPlatform | undefined;
+      const queryable = matrix as (MatrixPlatform & { queryRecentMessages?: MatrixPlatform['queryRecentMessages'] }) | undefined;
+      if (!queryable || typeof queryable.queryRecentMessages !== 'function') return [];
+
+      return queryable.queryRecentMessages({
+        query,
+        since: since ?? Date.now() - 7 * 24 * 60 * 60 * 1000,
+        limit,
+        includeDMs: true,
+        viewerUserId: viewerMatrixId,
+        spaceOnly: true,
+      });
+    };
+
+    const formatMatrixSearchText = (messages: MatrixHistoryMessage[]): string => {
+      if (messages.length === 0) return '';
+
+      return messages.map(message => {
+        const date = new Date(message.timestamp).toISOString();
+        const room = message.isDM ? `DM ${message.roomName}` : (message.roomAlias || message.roomName);
+        const sender = message.senderHandle ? `@${message.senderHandle}` : message.senderId;
+        const link = message.permalink ? `\n${message.permalink}` : '';
+        return `[${date}] ${room} ${sender}: ${message.text}${link}`;
+      }).join('\n\n');
     };
 
     const buildRelatedResults = async ({
@@ -2060,23 +2126,8 @@ function createMCPServer(secretKey: string) {
       const handleFilter = (args as { handle?: string })?.handle?.replace(/^@/, '').toLowerCase();
       const limit = (args as { limit?: number })?.limit || 10;
       const sinceRaw = (args as { since?: string })?.since?.trim();
-
-      // Parse since: supports ISO dates ("2026-02-14") and relative durations ("24h", "7d", "1w")
-      let since: number | undefined;
-      if (sinceRaw) {
-        const relativeMatch = sinceRaw.match(/^(\d+)\s*(h|d|w)$/i);
-        if (relativeMatch) {
-          const amount = parseInt(relativeMatch[1]);
-          const unit = relativeMatch[2].toLowerCase();
-          const ms = unit === 'h' ? amount * 3600000 : unit === 'd' ? amount * 86400000 : amount * 604800000;
-          since = Date.now() - ms;
-        } else {
-          const parsed = Date.parse(sinceRaw);
-          if (!isNaN(parsed)) {
-            since = parsed;
-          }
-        }
-      }
+      const since = parseToolSince(sinceRaw);
+      const includeMatrix = (args as { include_matrix?: boolean })?.include_matrix !== false;
 
       if (!query && !handleFilter && !since) {
         return {
@@ -2092,10 +2143,28 @@ function createMCPServer(secretKey: string) {
         since,
       });
 
+      let matrixMessages: MatrixHistoryMessage[] = [];
+      if (query && includeMatrix) {
+        const viewerMatrixId = await getVerifiedMatrixUserId();
+        if (viewerMatrixId) {
+          matrixMessages = await executeMatrixSearch({
+            query,
+            limit,
+            since,
+            viewerMatrixId,
+          }).catch(() => []);
+        }
+      }
+
+      const notebookText = formatHermesSearchText({ query, handleFilter, results });
+      const matrixText = formatMatrixSearchText(matrixMessages);
+
       return {
         content: [{
           type: 'text' as const,
-          text: formatHermesSearchText({ query, handleFilter, results }),
+          text: matrixText
+            ? `${notebookText}\n\nMatrix results visible to your linked account:\n\n${matrixText}`
+            : notebookText,
         }],
       };
     }

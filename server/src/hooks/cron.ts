@@ -6,7 +6,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { Storage, JournalEntry, User } from '../storage.js';
-import { MatrixPlatform } from '../platform/matrix.js';
+import { MatrixPlatform, type MatrixHistoryMessage } from '../platform/matrix.js';
 import { getPlatform } from '../platform/registry.js';
 
 // ── Digest ───────────────────────────────────────────────────
@@ -19,6 +19,8 @@ const DIGEST_PROMPT = `You are the Router, writing the global daily digest for t
 This is not a personal digest and not a raw feed recap. It is the shared "state of the notebook" for the whole community.
 
 Write like the editor of a small, smart newspaper. Group entries by theme, highlight surprising connections, note who's writing about what, and explain why the day mattered.
+
+Some context may come from Matrix room discussion snippets. Treat those as live conversation context, not notebook entries. Do not quote private DMs in the global digest.
 
 Structure:
 - Lead with the strongest pattern or surprise
@@ -36,6 +38,8 @@ Use the person's actual notebook corpus and follow graph as context. Do not rely
 
 Write their digest with THEM in mind. Lead with what matters to THEM — entries from people they follow, work that overlaps with theirs, problems they could help solve (or that could help them).
 
+Some context may come from Matrix room discussion snippets. Public room snippets are community context; private DM snippets are only included when the recipient is in that DM.
+
 Structure:
 - "For you" section: entries directly relevant to their current work or interests
 - "From your network" section: what people they follow wrote about
@@ -49,6 +53,7 @@ export interface GlobalDigestResult {
   posted: boolean;
   entryCount: number;
   includedEntryCount: number;
+  matrixMessageCount?: number;
   date: string;
   roomId?: string;
   skipped?: string;
@@ -106,6 +111,56 @@ function formatEntryForGlobalDigestPrompt(entry: JournalEntry, max = 420): strin
   ].join('\n');
 }
 
+function formatMatrixMessageForDigestPrompt(message: MatrixHistoryMessage, max = 320): string {
+  const time = new Date(message.timestamp).toISOString().slice(11, 16);
+  const sender = message.senderHandle ? `@${message.senderHandle}` : message.senderId;
+  const room = message.isDM
+    ? `DM ${message.roomName}`
+    : (message.roomAlias || message.roomName || message.roomId);
+  const content = message.text.replace(/\s+/g, ' ').trim();
+  return `[${time}] ${room} ${sender}: ${content.slice(0, max)}${content.length > max ? '...' : ''}`;
+}
+
+function formatMatrixMessagesForDigestPrompt(messages: MatrixHistoryMessage[], maxMessages = 80): string {
+  return messages
+    .slice(0, maxMessages)
+    .map(message => formatMatrixMessageForDigestPrompt(message))
+    .join('\n');
+}
+
+async function queryMatrixDigestMessages(
+  matrix: MatrixPlatform,
+  opts: {
+    since: number;
+    until: number;
+    limit: number;
+    includeDMs?: boolean;
+    onlyDMs?: boolean;
+    viewerUserId?: string;
+  },
+): Promise<MatrixHistoryMessage[]> {
+  const queryable = matrix as MatrixPlatform & {
+    queryRecentMessages?: MatrixPlatform['queryRecentMessages'];
+  };
+
+  if (typeof queryable.queryRecentMessages !== 'function') return [];
+
+  try {
+    return await queryable.queryRecentMessages({
+      since: opts.since,
+      until: opts.until,
+      limit: opts.limit,
+      includeDMs: opts.includeDMs,
+      onlyDMs: opts.onlyDMs,
+      viewerUserId: opts.viewerUserId,
+      spaceOnly: !opts.onlyDMs,
+    });
+  } catch (error) {
+    console.warn('[Cron] Failed to query Matrix history for digest:', error);
+    return [];
+  }
+}
+
 function getEntryContributor(entry: JournalEntry): string {
   return entry.handle ? `@${entry.handle}` : entry.pseudonym;
 }
@@ -160,16 +215,21 @@ export async function generateDailyDigest(
   const yesterdayEntries = allEntries.filter(e =>
     e.timestamp >= startOfDay && e.timestamp < endOfDay && isPublicDigestEntry(e)
   );
+  const matrixMessages = await queryMatrixDigestMessages(matrix, {
+    since: startOfDay,
+    until: endOfDay,
+    limit: 80,
+  });
 
-  if (yesterdayEntries.length === 0) {
-    console.log('[Cron] No public entries yesterday, skipping global digest');
-    return { posted: false, entryCount: 0, includedEntryCount: 0, date, skipped: 'no-public-entries' };
+  if (yesterdayEntries.length === 0 && matrixMessages.length === 0) {
+    console.log('[Cron] No public notebook or Matrix activity yesterday, skipping global digest');
+    return { posted: false, entryCount: 0, includedEntryCount: 0, matrixMessageCount: 0, date, skipped: 'no-public-activity' };
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     console.log('[Cron] No ANTHROPIC_API_KEY, skipping global digest');
-    return { posted: false, entryCount: yesterdayEntries.length, includedEntryCount: 0, date, skipped: 'missing-api-key' };
+    return { posted: false, entryCount: yesterdayEntries.length, includedEntryCount: 0, matrixMessageCount: matrixMessages.length, date, skipped: 'missing-api-key' };
   }
 
   const anthropic = new Anthropic({ apiKey });
@@ -179,6 +239,7 @@ export async function generateDailyDigest(
   const entrySummaries = selectedEntries
     .map(e => formatEntryForGlobalDigestPrompt(e))
     .join('\n\n---\n\n');
+  const matrixSummaries = formatMatrixMessagesForDigestPrompt(matrixMessages);
 
   try {
     const response = await anthropic.messages.create({
@@ -192,13 +253,18 @@ export async function generateDailyDigest(
             `Date: ${date}`,
             `Public entries: ${yesterdayEntries.length}`,
             `Entries included below: ${selectedEntries.length}`,
+            `Matrix room messages: ${matrixMessages.length}`,
             selectedEntries.length < yesterdayEntries.length
               ? `Note: high-volume day; this is the latest representative set of ${selectedEntries.length} entries. Still summarize the overall day from this evidence and mention that the day was high-volume.`
               : '',
             '',
             '<entries>',
-            entrySummaries,
+            entrySummaries || '[no public notebook entries]',
             '</entries>',
+            '',
+            '<matrix_activity>',
+            matrixSummaries || '[no Matrix room messages]',
+            '</matrix_activity>',
           ].filter(Boolean).join('\n'),
         },
       ],
@@ -206,29 +272,34 @@ export async function generateDailyDigest(
 
     const text = response.content.find(b => b.type === 'text');
     if (!text) {
-      return { posted: false, entryCount: yesterdayEntries.length, includedEntryCount: selectedEntries.length, date, skipped: 'empty-model-response' };
+      return { posted: false, entryCount: yesterdayEntries.length, includedEntryCount: selectedEntries.length, matrixMessageCount: matrixMessages.length, date, skipped: 'empty-model-response' };
     }
     const digestContent = (text as Anthropic.TextBlock).text.trim();
     if (!digestContent) {
-      return { posted: false, entryCount: yesterdayEntries.length, includedEntryCount: selectedEntries.length, date, skipped: 'empty-digest' };
+      return { posted: false, entryCount: yesterdayEntries.length, includedEntryCount: selectedEntries.length, matrixMessageCount: matrixMessages.length, date, skipped: 'empty-digest' };
     }
 
     const digestRoomId = await matrix.ensureChannelRoom('digest', 'Daily Digest', 'Daily summary of notebook activity');
 
     const digestText = `# Daily Digest — ${date}\n\n${digestContent}`;
     await matrix.sendMessage(digestRoomId, digestText);
-    console.log(`[Cron] Global digest posted to #digest room (${yesterdayEntries.length} entries)`);
+    console.log(`[Cron] Global digest posted to #digest room (${yesterdayEntries.length} entries, ${matrixMessages.length} Matrix messages)`);
 
-    try {
-      await maybeSaveDailySummary(storage, date, digestContent, yesterdayEntries);
-    } catch (err) {
-      console.error('[Cron] Failed to save digest:', err);
+    if (matrixMessages.length === 0) {
+      try {
+        await maybeSaveDailySummary(storage, date, digestContent, yesterdayEntries);
+      } catch (err) {
+        console.error('[Cron] Failed to save digest:', err);
+      }
+    } else {
+      console.log('[Cron] Skipping public daily-summary save because digest used Matrix context');
     }
 
     return {
       posted: true,
       entryCount: yesterdayEntries.length,
       includedEntryCount: selectedEntries.length,
+      matrixMessageCount: matrixMessages.length,
       date,
       roomId: digestRoomId,
     };
@@ -238,6 +309,7 @@ export async function generateDailyDigest(
       posted: false,
       entryCount: yesterdayEntries.length,
       includedEntryCount: selectedEntries.length,
+      matrixMessageCount: matrixMessages.length,
       date,
       failed: true,
     };
@@ -326,11 +398,6 @@ export async function sendPersonalizedDigests(
     e.timestamp >= startOfDay && e.timestamp < endOfDay && isPublicDigestEntry(e)
   );
 
-  if (yesterdayEntries.length === 0 && !opts?.force) {
-    console.log(`[Cron] Skipping Matrix personalized digests for ${recipients.length} recipients: no public notebook activity yesterday`);
-    return { sent, failed, skipped: skipped + recipients.length };
-  }
-
   for (const { user, matrixUserId } of recipients) {
     const handle = user.handle;
     try {
@@ -339,6 +406,24 @@ export async function sendPersonalizedDigests(
       const recentUserEntries = await storage.getEntriesByHandle(handle, 50);
       const addressedEntries = await storage.getEntriesAddressedTo(handle, user.email, 20)
         .catch(() => [] as JournalEntry[]);
+      const publicMatrixMessages = await queryMatrixDigestMessages(matrix, {
+        since: startOfDay,
+        until: endOfDay,
+        limit: 80,
+        viewerUserId: matrixUserId,
+      });
+      const recipientDmMessages = await queryMatrixDigestMessages(matrix, {
+        since: startOfDay,
+        until: endOfDay,
+        limit: 25,
+        includeDMs: true,
+        onlyDMs: true,
+        viewerUserId: matrixUserId,
+      });
+      const matrixMessages = [
+        ...publicMatrixMessages,
+        ...recipientDmMessages,
+      ].sort((a, b) => b.timestamp - a.timestamp).slice(0, 100);
 
       const followedEntries = yesterdayEntries.filter(e =>
         e.handle && e.handle !== handle && followingHandles.has(normalizeHandle(e.handle))
@@ -353,7 +438,8 @@ export async function sendPersonalizedDigests(
         || addressedEntries.length > 0
         || ownYesterdayEntries.length > 0
         || followedEntries.length > 0
-        || discoveryEntries.length > 0;
+        || discoveryEntries.length > 0
+        || matrixMessages.length > 0;
 
       if (!hasDigestContext && !opts?.force) {
         console.log(`[Cron] Skipping Matrix digest for @${handle}: no notebook context available`);
@@ -385,7 +471,10 @@ export async function sendPersonalizedDigests(
         discoveryEntries.length > 0
           ? `Other public notebook activity yesterday:\n${discoveryEntries.slice(0, 8).map(e => formatEntryForPrompt(e, 260)).join('\n\n')}`
           : '',
-      ].filter(Boolean).join('\n\n---\n\n') || 'No public notebook activity was available.';
+        matrixMessages.length > 0
+          ? `Matrix conversations yesterday:\n${formatMatrixMessagesForDigestPrompt(matrixMessages, 40)}`
+          : '',
+      ].filter(Boolean).join('\n\n---\n\n') || 'No public notebook or Matrix activity was available.';
 
       const response = await anthropic.messages.create({
         model: PERSONALIZED_DIGEST_MODEL,
@@ -394,7 +483,7 @@ export async function sendPersonalizedDigests(
         messages: [
           {
             role: 'user',
-            content: `${personContext}\n\n${yesterdayEntries.length} public entries yesterday (${yesterday}).\n\n${entrySummaries}`,
+            content: `${personContext}\n\n${yesterdayEntries.length} public entries and ${matrixMessages.length} Matrix messages yesterday (${yesterday}).\n\n${entrySummaries}`,
           },
         ],
       });

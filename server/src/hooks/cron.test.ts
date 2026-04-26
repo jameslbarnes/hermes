@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JournalEntry, Storage, User } from '../storage.js';
 import type { Platform } from '../platform/types.js';
+import type { MatrixHistoryMessage } from '../platform/matrix.js';
 
 const { messagesCreate } = vi.hoisted(() => ({
   messagesCreate: vi.fn(),
@@ -60,6 +61,7 @@ function registerMatrixPlatform() {
   const sendMessage = vi.fn(async () => '$msg');
   const sendDM = vi.fn(async () => '$dm');
   const ensureChannelRoom = vi.fn(async () => '!digest:matrix.test');
+  const queryRecentMessages = vi.fn(async (): Promise<MatrixHistoryMessage[]> => []);
   const platform: Platform = {
     name: 'matrix',
     maxMessageLength: 65536,
@@ -77,10 +79,11 @@ function registerMatrixPlatform() {
     resolvePlatformId: vi.fn(async handle => `@${handle}:matrix.test`),
     formatContent: text => text,
     ensureChannelRoom,
-  } as Platform & { ensureChannelRoom: typeof ensureChannelRoom };
+    queryRecentMessages,
+  } as Platform & { ensureChannelRoom: typeof ensureChannelRoom; queryRecentMessages: typeof queryRecentMessages };
 
   registerPlatform(platform);
-  return { platform, sendDM, sendMessage, ensureChannelRoom };
+  return { platform, sendDM, sendMessage, ensureChannelRoom, queryRecentMessages };
 }
 
 describe('generateDailyDigest', () => {
@@ -155,6 +158,64 @@ describe('generateDailyDigest', () => {
     expect(prompt).not.toContain('Private email entry should not leak.');
     expect(prompt).not.toContain('AI only entry should not leak.');
   });
+
+  it('can generate a global digest from Matrix room activity when there are no notebook entries', async () => {
+    const { sendMessage, queryRecentMessages } = registerMatrixPlatform();
+    queryRecentMessages.mockResolvedValue([
+      {
+        roomId: '!books:matrix.test',
+        roomName: 'Books',
+        roomAlias: '#books:matrix.test',
+        eventId: '$event',
+        senderId: '@alice:matrix.test',
+        senderHandle: 'alice',
+        text: 'We discussed Matrix encryption and room discovery.',
+        timestamp: yesterdayAtNoon(),
+        isDM: false,
+      },
+    ]);
+    const storage = makeStorage({
+      getEntriesSince: vi.fn(async () => []),
+    });
+
+    await expect(generateDailyDigest(storage)).resolves.toMatchObject({
+      posted: true,
+      entryCount: 0,
+      includedEntryCount: 0,
+      matrixMessageCount: 1,
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith('!digest:matrix.test', expect.stringContaining('Global digest body.'));
+    const prompt = messagesCreate.mock.calls[0][0].messages[0].content;
+    expect(prompt).toContain('<matrix_activity>');
+    expect(prompt).toContain('Matrix encryption and room discovery');
+  });
+
+  it('does not save Matrix-influenced global digests into public daily summaries', async () => {
+    const { queryRecentMessages } = registerMatrixPlatform();
+    queryRecentMessages.mockResolvedValue([
+      {
+        roomId: '!books:matrix.test',
+        roomName: 'Books',
+        senderId: '@alice:matrix.test',
+        senderHandle: 'alice',
+        text: 'Private space context should not become a public summary.',
+        timestamp: yesterdayAtNoon(),
+        isDM: false,
+      },
+    ]);
+    const addDailySummary = vi.fn(async summary => ({ id: `daily-${summary.date}`, ...summary }));
+    const storage = makeStorage({
+      getEntriesSince: vi.fn(async () => [
+        makeEntry({ id: 'public', handle: 'alice', content: 'Public notebook entry.' }),
+      ]),
+      addDailySummary,
+    });
+
+    await generateDailyDigest(storage);
+
+    expect(addDailySummary).not.toHaveBeenCalled();
+  });
 });
 
 describe('sendPersonalizedDigests', () => {
@@ -213,6 +274,40 @@ describe('sendPersonalizedDigests', () => {
 
     await expect(sendPersonalizedDigests(storage)).resolves.toEqual({ sent: 1, failed: 0, skipped: 0 });
     expect(sendDM).toHaveBeenCalledTimes(1);
+  });
+
+  it('can send a personalized digest from Matrix activity when there are no notebook entries', async () => {
+    const { sendDM, queryRecentMessages } = registerMatrixPlatform();
+    queryRecentMessages.mockResolvedValueOnce([
+      {
+        roomId: '!general:matrix.test',
+        roomName: 'General',
+        senderId: '@bob:matrix.test',
+        senderHandle: 'bob',
+        text: 'Bob shared context on Matrix server encryption.',
+        timestamp: yesterdayAtNoon(),
+        isDM: false,
+      },
+    ]).mockResolvedValueOnce([]);
+    const alice = makeUser({
+      handle: 'alice',
+      linkedAccounts: [
+        { platform: 'matrix', platformUserId: '@alice:matrix.test', linkedAt: Date.now(), verified: true },
+      ],
+    });
+
+    const storage = makeStorage({
+      getAllUsers: vi.fn(async () => [alice]),
+      getEntriesSince: vi.fn(async () => []),
+      getEntriesByHandle: vi.fn(async () => []),
+      getEntriesAddressedTo: vi.fn(async () => []),
+    });
+
+    await expect(sendPersonalizedDigests(storage)).resolves.toEqual({ sent: 1, failed: 0, skipped: 0 });
+    expect(sendDM).toHaveBeenCalledWith('@alice:matrix.test', expect.stringContaining('Personalized digest body.'));
+    const prompt = messagesCreate.mock.calls[0][0].messages[0].content;
+    expect(prompt).toContain('Matrix conversations yesterday');
+    expect(prompt).toContain('Bob shared context on Matrix server encryption');
   });
 
   it('skips users without a verified linked Matrix account', async () => {

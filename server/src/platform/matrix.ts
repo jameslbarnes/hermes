@@ -13,6 +13,7 @@
  */
 
 import { createHmac } from 'crypto';
+import { deflateSync } from 'zlib';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import MarkdownIt from 'markdown-it';
@@ -106,6 +107,160 @@ export const ROUTER_DIGEST_EVENT = 'com.router.digest';
 export const ROUTER_CHANNEL_STATE = 'com.router.channel';
 
 const MATRIX_AGENT_TRIGGER_REACTION_EMOJI = process.env.MATRIX_AGENT_TRIGGER_REACTION_EMOJI || '🪩';
+
+const ROUTER_DISCO_AVATAR_FILENAME = 'matrix-router-disco-avatar-mxc.txt';
+
+const pngCrcTable = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) {
+      c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function pngCrc32(buf: Buffer): number {
+  let c = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    c = pngCrcTable[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const typeBuf = Buffer.from(type, 'ascii');
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length, 0);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(pngCrc32(Buffer.concat([typeBuf, data])), 0);
+  return Buffer.concat([len, typeBuf, data, crc]);
+}
+
+function encodePng(width: number, height: number, rgba: Buffer): Buffer {
+  const raw = Buffer.alloc((width * 4 + 1) * height);
+  for (let y = 0; y < height; y++) {
+    const rawOffset = y * (width * 4 + 1);
+    raw[rawOffset] = 0;
+    rgba.copy(raw, rawOffset + 1, y * width * 4, (y + 1) * width * 4);
+  }
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // RGBA
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
+
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', deflateSync(raw, { level: 9 })),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+function blendPixel(rgba: Buffer, width: number, x: number, y: number, color: [number, number, number, number]): void {
+  if (x < 0 || y < 0 || x >= width || y >= width) return;
+  const idx = (y * width + x) * 4;
+  const alpha = color[3] / 255;
+  const inv = 1 - alpha;
+  rgba[idx] = Math.round(color[0] * alpha + rgba[idx] * inv);
+  rgba[idx + 1] = Math.round(color[1] * alpha + rgba[idx + 1] * inv);
+  rgba[idx + 2] = Math.round(color[2] * alpha + rgba[idx + 2] * inv);
+  rgba[idx + 3] = Math.min(255, Math.round(color[3] + rgba[idx + 3] * inv));
+}
+
+function drawSparkle(rgba: Buffer, width: number, cx: number, cy: number, radius: number): void {
+  for (let y = cy - radius; y <= cy + radius; y++) {
+    for (let x = cx - radius; x <= cx + radius; x++) {
+      const dx = Math.abs(x - cx);
+      const dy = Math.abs(y - cy);
+      const dist = dx + dy;
+      if (dist > radius) continue;
+      const a = Math.round(230 * (1 - dist / (radius + 1)));
+      if (dx <= 1 || dy <= 1 || dx === dy) {
+        blendPixel(rgba, width, x, y, [255, 250, 210, a]);
+      }
+    }
+  }
+}
+
+export function buildRouterDiscoBallAvatarPng(size = 256): Buffer {
+  const rgba = Buffer.alloc(size * size * 4);
+  const center = size / 2;
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = x - center;
+      const dy = y - center;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const idx = (y * size + x) * 4;
+      const shade = Math.max(0, 1 - d / (size * 0.72));
+      rgba[idx] = Math.round(20 + shade * 34);
+      rgba[idx + 1] = Math.round(22 + shade * 30);
+      rgba[idx + 2] = Math.round(40 + shade * 60);
+      rgba[idx + 3] = 255;
+    }
+  }
+
+  const ballCx = center;
+  const ballCy = Math.round(size * 0.48);
+  const radius = size * 0.31;
+  for (let y = Math.floor(ballCy - radius); y <= Math.ceil(ballCy + radius); y++) {
+    for (let x = Math.floor(ballCx - radius); x <= Math.ceil(ballCx + radius); x++) {
+      const nx = (x - ballCx) / radius;
+      const ny = (y - ballCy) / radius;
+      const r2 = nx * nx + ny * ny;
+      if (r2 > 1) continue;
+
+      const nz = Math.sqrt(1 - r2);
+      const tileX = Math.floor((nx + 1) * 7.5);
+      const tileY = Math.floor((ny + 1) * 7.5);
+      const seamX = Math.abs(((nx + 1) * 7.5) % 1 - 0.5) > 0.43;
+      const seamY = Math.abs(((ny + 1) * 7.5) % 1 - 0.5) > 0.43;
+      const checker = (tileX + tileY) % 3;
+      const light = Math.max(0, -0.55 * nx - 0.75 * ny + 0.65 * nz);
+      const rim = Math.max(0, 1 - nz);
+      const highlight = Math.pow(light, 5);
+
+      let r = 126 + 95 * light + (checker === 0 ? 24 : 0) + 48 * highlight;
+      let g = 162 + 72 * light + (checker === 1 ? 30 : 0) + 48 * highlight;
+      let b = 188 + 56 * light + (checker === 2 ? 44 : 0) + 45 * highlight;
+
+      if (seamX || seamY) {
+        r *= 0.42;
+        g *= 0.48;
+        b *= 0.58;
+      }
+
+      r = r * (1 - rim * 0.22) + 160 * rim * 0.22;
+      g = g * (1 - rim * 0.22) + 115 * rim * 0.22;
+      b = b * (1 - rim * 0.22) + 220 * rim * 0.22;
+
+      const idx = (y * size + x) * 4;
+      rgba[idx] = Math.max(0, Math.min(255, Math.round(r)));
+      rgba[idx + 1] = Math.max(0, Math.min(255, Math.round(g)));
+      rgba[idx + 2] = Math.max(0, Math.min(255, Math.round(b)));
+      rgba[idx + 3] = 255;
+    }
+  }
+
+  const stringX = Math.round(center);
+  for (let y = 0; y < ballCy - radius + 7; y++) {
+    blendPixel(rgba, size, stringX, y, [205, 214, 255, 180]);
+  }
+
+  drawSparkle(rgba, size, Math.round(size * 0.29), Math.round(size * 0.25), 13);
+  drawSparkle(rgba, size, Math.round(size * 0.75), Math.round(size * 0.33), 10);
+  drawSparkle(rgba, size, Math.round(size * 0.69), Math.round(size * 0.71), 8);
+
+  return encodePng(size, size, rgba);
+}
 
 const matrixMarkdown = new MarkdownIt({
   breaks: true,
@@ -362,6 +517,7 @@ export class MatrixPlatform implements Platform {
     };
 
     this.client = createClient(clientOpts);
+    await this.syncBotAccountProfile(`${dirname(credsPath)}/${ROUTER_DISCO_AVATAR_FILENAME}`);
 
     // Initialize Rust crypto
     try {
@@ -1005,6 +1161,52 @@ export class MatrixPlatform implements Platform {
         }
       } catch { /* Non-fatal */ }
     }
+  }
+
+  private async syncBotAccountProfile(avatarCachePath: string): Promise<void> {
+    if (!this.client || !this.botUserId) return;
+
+    try {
+      await this.client.setDisplayName(this.config.botHandle);
+    } catch (err: any) {
+      console.warn('[Matrix] Failed to set bot display name:', err.message);
+    }
+
+    try {
+      const avatarUrl = await this.getOrUploadRouterAvatar(avatarCachePath);
+      await this.client.setAvatarUrl(avatarUrl);
+      console.log('[Matrix] Router profile avatar set to disco ball');
+    } catch (err: any) {
+      console.warn('[Matrix] Failed to set bot avatar:', err.message);
+    }
+  }
+
+  private async getOrUploadRouterAvatar(avatarCachePath: string): Promise<string> {
+    const configuredAvatar = process.env.MATRIX_BOT_AVATAR_MXC?.trim();
+    if (configuredAvatar) return configuredAvatar;
+
+    if (existsSync(avatarCachePath)) {
+      const cached = readFileSync(avatarCachePath, 'utf8').trim();
+      if (cached.startsWith('mxc://')) return cached;
+    }
+
+    if (!this.client) throw new Error('Matrix client is not initialized');
+    const upload = await this.client.uploadContent(
+      buildRouterDiscoBallAvatarPng() as any,
+      {
+        name: 'router-disco-ball.png',
+        type: 'image/png',
+        includeFilename: true,
+      },
+    );
+
+    const avatarUrl = upload.content_uri;
+    if (!avatarUrl) throw new Error('Matrix media upload did not return a content_uri');
+
+    const dir = dirname(avatarCachePath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(avatarCachePath, avatarUrl, 'utf8');
+    return avatarUrl;
   }
 
   async joinUserToChannel(handle: string, channelId: string, channelName: string): Promise<void> {

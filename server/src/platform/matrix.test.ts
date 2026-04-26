@@ -1,6 +1,6 @@
 import { EventType, KnownMembership, RelationType } from 'matrix-js-sdk';
 import { describe, expect, it, vi } from 'vitest';
-import { MatrixPlatform, ROUTER_CHANNEL_STATE, ROUTER_SPARK_EVENT, isMatrixMention } from './matrix.js';
+import { MatrixPlatform, ROUTER_CHANNEL_STATE, ROUTER_SPARK_EVENT, buildRouterDiscoBallAvatarPng, isMatrixMention } from './matrix.js';
 
 describe('isMatrixMention', () => {
   const botUserId = '@router:mtrx.shaperotator.xyz';
@@ -70,6 +70,14 @@ describe('isMatrixMention', () => {
         botHandle,
       }),
     ).toBe(false);
+  });
+});
+
+describe('Router disco ball avatar', () => {
+  it('builds a PNG avatar for the Matrix bot profile', () => {
+    const png = buildRouterDiscoBallAvatarPng();
+    expect(png.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    expect(png.length).toBeGreaterThan(1024);
   });
 });
 

@@ -147,6 +147,11 @@ function isMatrixUserId(value: string): boolean {
   return /^@[^:\s]+:[^:\s]+$/.test(value);
 }
 
+function normalizeHermesHandle(value: string | undefined | null): string | null {
+  const normalized = value?.replace(/^@/, '').trim().toLowerCase();
+  return normalized || null;
+}
+
 export function isMatrixMention(params: {
   isDM: boolean;
   text: string;
@@ -589,7 +594,7 @@ export class MatrixPlatform implements Platform {
   async sendMessage(roomId: string, text: string, opts?: SendMessageOptions): Promise<string> {
     if (!this.client) throw new Error('Matrix client not started');
 
-    const result = await this.client.sendMessage(roomId, this.createMessageContent(text, opts));
+    const result = await this.client.sendMessage(roomId, await this.createMessageContent(text, opts));
     return result.event_id!;
   }
 
@@ -646,7 +651,7 @@ export class MatrixPlatform implements Platform {
       try {
         await this.client.sendMessage(
           result.room_id,
-          this.createMessageContent(opts.type === 'dm' ? 'Connected.' : name ? `Room "${name}" created.` : 'Connected.'),
+          await this.createMessageContent(opts.type === 'dm' ? 'Connected.' : name ? `Room "${name}" created.` : 'Connected.'),
         );
       } catch {
         // Non-fatal
@@ -790,12 +795,13 @@ export class MatrixPlatform implements Platform {
       : null;
     const author = linkedAuthorId || (entry.handle ? `@${entry.handle}` : entry.pseudonym);
     const renderedBody = await this.renderLinkedMarkdownForMatrix(entry.content.substring(0, 500));
+    const renderedHook = editorialHook ? await this.renderLinkedMarkdownForMatrix(editorialHook) : null;
     const authorHtml = linkedAuthorId
       ? `<a href="https://matrix.to/#/${encodeURIComponent(linkedAuthorId)}">${escapeHtml(linkedAuthorId)}</a>`
       : escapeHtml(author);
     const permalinkHtml = `<a href="${escapeHtml(permalink)}">${escapeHtml(permalink)}</a>`;
-    const formattedBody = editorialHook
-      ? `${markdownToMatrixHtml(editorialHook)}<br><br>&mdash; ${authorHtml} &middot; ${permalinkHtml}`
+    const formattedBody = renderedHook
+      ? `${renderedHook.html}<br><br>&mdash; ${authorHtml} &middot; ${permalinkHtml}`
       : `${authorHtml}: ${renderedBody.html}${entry.content.length > 500 ? '...' : ''}<br><br>${permalinkHtml}`;
 
     const content: any = {
@@ -813,8 +819,8 @@ export class MatrixPlatform implements Platform {
       format: 'org.matrix.custom.html',
       formatted_body: formattedBody,
       // Fallback text for stock clients
-      body: editorialHook
-        ? `${editorialHook}\n\n— ${author} · ${permalink}`
+      body: renderedHook
+        ? `${renderedHook.plain}\n\n— ${author} · ${permalink}`
         : `${author}: ${renderedBody.plain}${entry.content.length > 500 ? '...' : ''}\n\n${permalink}`,
     };
 
@@ -848,9 +854,31 @@ export class MatrixPlatform implements Platform {
     // Also send a visible message
     const result = await this.client.sendMessage(
       roomId,
-      this.createMessageContent(`**🔗 Connected:** ${spark.reason}`),
+      await this.createMessageContent(`**🔗 Connected:** ${spark.reason}`),
     );
     return result.event_id!;
+  }
+
+  async getSparkRoomPair(roomId: string): Promise<{ sourceHandle: string; targetHandle: string } | null> {
+    if (!this.client) throw new Error('Matrix client not started');
+
+    const room = this.client.getRoom(roomId);
+    const event = room?.currentState?.getStateEvents(ROUTER_SPARK_EVENT as any, '');
+    const content = event && !Array.isArray(event) ? event.getContent?.() : null;
+    const sourceHandle = normalizeHermesHandle(content?.source_handle);
+    const targetHandle = normalizeHermesHandle(content?.target_handle);
+
+    if (!sourceHandle || !targetHandle) return null;
+    return { sourceHandle, targetHandle };
+  }
+
+  async isSparkRoomForPair(roomId: string, handleA: string, handleB: string): Promise<boolean> {
+    const pair = await this.getSparkRoomPair(roomId);
+    if (!pair) return false;
+
+    const expected = [normalizeHermesHandle(handleA), normalizeHermesHandle(handleB)].sort().join(':');
+    const actual = [pair.sourceHandle, pair.targetHandle].sort().join(':');
+    return expected === actual;
   }
 
   async syncProfile(handle: string, profile: { displayName?: string; bio?: string }): Promise<void> {
@@ -903,7 +931,7 @@ export class MatrixPlatform implements Platform {
 
   // ── Private ────────────────────────────────────────────────
 
-  private createMessageContent(text: string, opts?: SendMessageOptions): any {
+  private async createMessageContent(text: string, opts?: SendMessageOptions): Promise<any> {
     const content: Record<string, any> = {
       msgtype: MsgType.Text,
       body: text,
@@ -921,7 +949,9 @@ export class MatrixPlatform implements Platform {
       return content;
     }
 
-    const formattedBody = markdownToMatrixHtml(text);
+    const rendered = await this.renderLinkedMarkdownForMatrix(text);
+    content.body = rendered.plain;
+    const formattedBody = rendered.html;
     if (formattedBody) {
       content.format = 'org.matrix.custom.html';
       content.formatted_body = formattedBody;
@@ -1011,6 +1041,32 @@ export class MatrixPlatform implements Platform {
     return { plain, html };
   }
 
+  private roomHasRouterManagedState(room: Room | null): boolean {
+    const currentState = room?.currentState;
+    if (!currentState?.getStateEvents) return false;
+
+    const routerStateEvents = [
+      currentState.getStateEvents(ROUTER_SPARK_EVENT as any, ''),
+      currentState.getStateEvents(ROUTER_CHANNEL_STATE as any, ''),
+    ];
+
+    return routerStateEvents.some(event => !!event && !Array.isArray(event));
+  }
+
+  private isDirectMessageRoom(senderId: string, roomId: string, room: Room | null): boolean {
+    if (this.getDirectRoomMap()[senderId]?.includes(roomId)) {
+      return true;
+    }
+
+    // Spark rooms can temporarily have only Router + one human joined while
+    // another invite is pending. Do not treat those rooms as DMs.
+    if (this.roomHasRouterManagedState(room)) {
+      return false;
+    }
+
+    return room ? room.getJoinedMemberCount() === 2 : false;
+  }
+
   private setupEventListeners(): void {
     if (!this.client) return;
 
@@ -1045,7 +1101,7 @@ export class MatrixPlatform implements Platform {
           try {
             await this.client!.sendMessage(
               roomId,
-              this.createMessageContent('Hi — I\'m the Router. Say `help` for what I can do, or `link` to connect your Hermes notebook account.'),
+              await this.createMessageContent('Hi — I\'m the Router. Say `help` for what I can do, or `link` to connect your Hermes notebook account.'),
             );
           } catch (err) {
             console.error(`[Matrix] Welcome message failed in ${roomId}:`, err);
@@ -1075,9 +1131,8 @@ export class MatrixPlatform implements Platform {
     const handleMatch = sender.match(/^@([^:]+):/);
     const handle = handleMatch ? handleMatch[1] : null;
 
-    // Detect if this is a DM to the bot (2-member room, bot is a member)
     const room = this.client.getRoom(roomId);
-    const isDM = room ? room.getJoinedMemberCount() === 2 : false;
+    const isDM = this.isDirectMessageRoom(sender, roomId, room);
 
     // Treat direct DMs and explicit mentions as agent-directed messages.
     const isMention = isMatrixMention({

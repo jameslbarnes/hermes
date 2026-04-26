@@ -40,6 +40,34 @@ export function hasLinkedPlatformAccount(
   );
 }
 
+function normalizeHandle(handle: string): string {
+  return handle.replace(/^@/, '').trim().toLowerCase();
+}
+
+export function getUnexpectedSparkHandles(
+  text: string | undefined,
+  sourceHandle: string,
+  targetHandle: string,
+): string[] {
+  if (!text) return [];
+
+  const allowed = new Set([
+    normalizeHandle(sourceHandle),
+    normalizeHandle(targetHandle),
+  ]);
+  const unexpected = new Set<string>();
+  const handlePattern = /(^|[\s([{"'`])@([a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?)(?=$|[\s)\]}:.,!?'"`])/g;
+
+  for (const match of text.matchAll(handlePattern)) {
+    const handle = normalizeHandle(match[2]);
+    if (!allowed.has(handle)) {
+      unexpected.add(handle);
+    }
+  }
+
+  return [...unexpected];
+}
+
 function getAnthropic(): Anthropic | null {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return null;
@@ -434,6 +462,19 @@ async function executeSparkWithContext(
 
   let warmMessage = action.message;
 
+  const unexpectedHandles = getUnexpectedSparkHandles(
+    [action.reason, warmMessage].filter(Boolean).join('\n'),
+    action.sourceHandle,
+    action.targetHandle,
+  );
+  if (unexpectedHandles.length > 0) {
+    console.warn(
+      `[Agent] Skipping spark @${action.sourceHandle} ↔ @${action.targetHandle}: ` +
+      `message mentioned unrelated handles (${unexpectedHandles.map(h => `@${h}`).join(', ')})`,
+    );
+    return;
+  }
+
   if (matrixPlatform && storage && (action.action === 'introduce' || action.action === 'nudge')) {
     const pairRoom = await ensureSparkPairRoom(
       action,
@@ -510,8 +551,19 @@ async function ensureSparkPairRoom(
   const existingRoomId = action.existingRoomId
     || await storage.getSparkPairRoom(action.sourceHandle, action.targetHandle);
   if (existingRoomId) {
-    await matrixPlatform.attachRoomToSpace(existingRoomId, `@${action.sourceHandle} ↔ @${action.targetHandle}`);
-    return { id: existingRoomId, created: false };
+    const matchesPair = await matrixPlatform.isSparkRoomForPair(
+      existingRoomId,
+      action.sourceHandle,
+      action.targetHandle,
+    );
+    if (matchesPair) {
+      await matrixPlatform.attachRoomToSpace(existingRoomId, `@${action.sourceHandle} ↔ @${action.targetHandle}`);
+      return { id: existingRoomId, created: false };
+    }
+    console.warn(
+      `[Agent] Ignoring stale spark room ${existingRoomId} for ` +
+      `@${action.sourceHandle} ↔ @${action.targetHandle}: Matrix room state does not match pair`,
+    );
   }
 
   const room = await matrixPlatform.createRoom(

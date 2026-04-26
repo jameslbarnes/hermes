@@ -1,5 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { detectSparks, formatEntryForSparkEvaluation, getConnectionInfo } from './sparks.js';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import {
+  detectSparks,
+  evaluateSpark,
+  formatEntryForSparkEvaluation,
+  getConnectionInfo,
+  SPARK_COPY_MODEL,
+  SPARK_EVALUATION_MODEL,
+} from './sparks.js';
 import { MemoryStorage } from '../storage.js';
 import type { JournalEntry } from '../storage.js';
 
@@ -224,5 +231,89 @@ describe('getConnectionInfo', () => {
 
     const info = await getConnectionInfo('alice', 'bob', [], storage);
     expect(info.isConnected).toBe(true);
+  });
+});
+
+describe('evaluateSpark', () => {
+  const sourceEntry: JournalEntry = {
+    id: 'source-1',
+    handle: 'alice',
+    pseudonym: 'Alice#002',
+    client: 'desktop',
+    content: 'I am debugging TEE-backed routing verification so silent model mismatches are caught before users rely on the answer.',
+    timestamp: Date.now(),
+  };
+
+  const candidate = {
+    handle: 'bob',
+    matchingEntries: [
+      {
+        id: 'target-1',
+        handle: 'bob',
+        pseudonym: 'Bob#001',
+        client: 'desktop' as const,
+        content: 'Built an attestation chain that caught a live model-routing mismatch in production.',
+        timestamp: Date.now() - 1000,
+      },
+    ],
+    overlapTopics: ['tee', 'model routing'],
+  };
+
+  it('uses Haiku to evaluate and Opus to write surfaced spark copy', async () => {
+    const create = vi.fn()
+      .mockResolvedValueOnce({
+        content: [
+          { type: 'text', text: '{"confidence":"high","reason":"Alice and Bob are both working on TEE-backed model routing verification."}' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        content: [
+          { type: 'text', text: '{"topic":"TEE-backed model routing verification overlap","message":"Hey @alice and @bob, you are both working on catching model-routing mismatches with attestation. Worth comparing notes."}' },
+        ],
+      });
+    const anthropic = { messages: { create } };
+
+    const action = await evaluateSpark(
+      sourceEntry,
+      candidate,
+      { handle: 'bob', sharedRoomIds: [], recentInteractions: 0, isConnected: false },
+      anthropic as any,
+    );
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[0][0].model).toBe(SPARK_EVALUATION_MODEL);
+    expect(create.mock.calls[1][0].model).toBe(SPARK_COPY_MODEL);
+    expect(action).toMatchObject({
+      action: 'introduce',
+      confidence: 'high',
+      sourceHandle: 'alice',
+      targetHandle: 'bob',
+      reason: 'TEE-backed model routing verification overlap',
+      message: 'Hey @alice and @bob, you are both working on catching model-routing mismatches with attestation. Worth comparing notes.',
+    });
+  });
+
+  it('does not call Opus when Haiku skips the spark', async () => {
+    const create = vi.fn().mockResolvedValueOnce({
+      content: [
+        { type: 'text', text: '{"confidence":"skip","reason":"The overlap is only keyword-level."}' },
+      ],
+    });
+    const anthropic = { messages: { create } };
+
+    const action = await evaluateSpark(
+      sourceEntry,
+      candidate,
+      { handle: 'bob', sharedRoomIds: [], recentInteractions: 0, isConnected: false },
+      anthropic as any,
+    );
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0][0].model).toBe(SPARK_EVALUATION_MODEL);
+    expect(action).toMatchObject({
+      action: 'skip',
+      confidence: 'skip',
+      reason: 'The overlap is only keyword-level.',
+    });
   });
 });

@@ -16,7 +16,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Storage, JournalEntry, User } from '../storage.js';
 import type { Platform } from '../platform/types.js';
-import { SPARK_EVALUATION_PROMPT } from './prompts.js';
+import { SPARK_COPY_PROMPT, SPARK_EVALUATION_PROMPT } from './prompts.js';
 import { extractJson } from './scoring.js';
 
 // ── Types ────────────────────────────────────────────────────
@@ -46,6 +46,9 @@ export interface ConnectionInfo {
   recentInteractions: number;
   isConnected: boolean;
 }
+
+export const SPARK_EVALUATION_MODEL = 'claude-haiku-4-5-20251001';
+export const SPARK_COPY_MODEL = 'claude-opus-4-6';
 
 export function formatEntryForSparkEvaluation(entry: JournalEntry): string {
   const date = new Date(entry.timestamp).toISOString().split('T')[0];
@@ -154,7 +157,7 @@ export async function evaluateSpark(
       : 'These two are NOT currently connected.';
 
     const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: SPARK_EVALUATION_MODEL,
       max_tokens: 300,
       system: SPARK_EVALUATION_PROMPT,
       messages: [
@@ -171,53 +174,143 @@ export async function evaluateSpark(
     const parsed = JSON.parse(extractJson((text as Anthropic.TextBlock).text));
 
     const confidence = parsed.confidence as SparkConfidence;
+    const evaluationReason = typeof parsed.reason === 'string' && parsed.reason.trim()
+      ? parsed.reason.trim()
+      : 'No rationale provided';
+
     if (confidence === 'skip') {
-      return { action: 'skip', confidence, sourceHandle, targetHandle: candidate.handle, reason: parsed.reason || 'Not worth pursuing' };
+      return { action: 'skip', confidence, sourceHandle, targetHandle: candidate.handle, reason: evaluationReason };
     }
+
+    let action: SparkAction;
 
     // Decide action based on confidence and connection status
     if (connectionInfo.isConnected) {
       if (confidence === 'high' || confidence === 'moderate') {
-        return {
+        action = {
           action: 'nudge',
           confidence,
           sourceHandle,
           targetHandle: candidate.handle,
-          reason: parsed.reason,
-          message: parsed.already_connected_nudge || parsed.message,
+          reason: evaluationReason,
           existingRoomId: connectionInfo.sharedRoomIds[0],
         };
+        return await withSparkCopy(sourceEntry, candidate, connectionInfo, action, anthropic);
       }
       return { action: 'skip', confidence, sourceHandle, targetHandle: candidate.handle, reason: 'Already connected, low confidence' };
     }
 
     // Not connected
     if (confidence === 'high') {
-      return {
+      action = {
         action: 'introduce',
         confidence,
         sourceHandle,
         targetHandle: candidate.handle,
-        reason: parsed.reason,
-        message: parsed.message,
+        reason: evaluationReason,
       };
+      return await withSparkCopy(sourceEntry, candidate, connectionInfo, action, anthropic);
     }
 
     if (confidence === 'moderate') {
-      return {
+      action = {
         action: 'suggest',
         confidence,
         sourceHandle,
         targetHandle: candidate.handle,
-        reason: parsed.reason,
-        message: parsed.message,
+        reason: evaluationReason,
       };
+      return await withSparkCopy(sourceEntry, candidate, connectionInfo, action, anthropic);
     }
 
-    return { action: 'skip', confidence, sourceHandle, targetHandle: candidate.handle, reason: parsed.reason || 'Low confidence' };
+    return { action: 'skip', confidence, sourceHandle, targetHandle: candidate.handle, reason: evaluationReason || 'Low confidence' };
   } catch (err) {
     console.error('[Intelligence/Sparks] Evaluation failed:', err);
     return { action: 'skip', confidence: 'skip', sourceHandle, targetHandle: candidate.handle, reason: 'Evaluation error' };
+  }
+}
+
+async function withSparkCopy(
+  sourceEntry: JournalEntry,
+  candidate: SparkCandidate,
+  connectionInfo: ConnectionInfo,
+  action: SparkAction,
+  anthropic: Anthropic,
+): Promise<SparkAction> {
+  const copy = await writeSparkCopy(sourceEntry, candidate, connectionInfo, action, anthropic);
+  if (!copy) {
+    return {
+      action: 'skip',
+      confidence: 'skip',
+      sourceHandle: action.sourceHandle,
+      targetHandle: action.targetHandle,
+      reason: 'Spark copywriting error',
+    };
+  }
+
+  return {
+    ...action,
+    reason: copy.topic,
+    message: copy.message,
+  };
+}
+
+async function writeSparkCopy(
+  sourceEntry: JournalEntry,
+  candidate: SparkCandidate,
+  connectionInfo: ConnectionInfo,
+  action: SparkAction,
+  anthropic: Anthropic,
+): Promise<{ topic: string; message: string } | null> {
+  try {
+    const targetContent = candidate.matchingEntries
+      .map(formatEntryForSparkEvaluation)
+      .join('\n\n');
+
+    const connectionContext = connectionInfo.isConnected
+      ? `These two are already connected (${connectionInfo.sharedRoomIds.length} shared rooms, ${connectionInfo.recentInteractions} recent interactions).`
+      : 'These two are not currently connected.';
+
+    const response = await anthropic.messages.create({
+      model: SPARK_COPY_MODEL,
+      max_tokens: 500,
+      system: SPARK_COPY_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            `Action: ${action.action}`,
+            `Source user: @${action.sourceHandle}`,
+            `Target user: @${action.targetHandle}`,
+            `Evaluator confidence: ${action.confidence}`,
+            `Evaluator rationale: ${action.reason}`,
+            `Connection status: ${connectionContext}`,
+            `Overlapping topics: ${candidate.overlapTopics.join(', ') || '(none)'}`,
+            '',
+            `@${action.sourceHandle}'s new entry:`,
+            sourceEntry.content.slice(0, 700),
+            '',
+            `@${action.targetHandle}'s related entries:`,
+            targetContent || '(none)',
+          ].join('\n'),
+        },
+      ],
+    });
+
+    const text = response.content.find(b => b.type === 'text');
+    if (!text) return null;
+
+    const parsed = JSON.parse(extractJson((text as Anthropic.TextBlock).text));
+    const topic = typeof parsed.topic === 'string' && parsed.topic.trim()
+      ? parsed.topic.trim()
+      : action.reason;
+    const message = typeof parsed.message === 'string' ? parsed.message.trim() : '';
+    if (!message) return null;
+
+    return { topic, message };
+  } catch (err) {
+    console.error('[Intelligence/Sparks] Copywriting failed:', err);
+    return null;
   }
 }
 

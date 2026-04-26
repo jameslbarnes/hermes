@@ -1,6 +1,6 @@
 import { EventType, KnownMembership } from 'matrix-js-sdk';
 import { describe, expect, it, vi } from 'vitest';
-import { MatrixPlatform, ROUTER_CHANNEL_STATE, isMatrixMention } from './matrix.js';
+import { MatrixPlatform, ROUTER_CHANNEL_STATE, ROUTER_SPARK_EVENT, isMatrixMention } from './matrix.js';
 
 describe('isMatrixMention', () => {
   const botUserId = '@router:mtrx.shaperotator.xyz';
@@ -273,6 +273,7 @@ describe('MatrixPlatform DMs', () => {
     explicitName?: string;
     lastActive?: number;
     routerChannel?: boolean;
+    routerSpark?: { sourceHandle: string; targetHandle: string };
   } = {}) => {
     const members = opts.members || ['@router:mtrx.example.test', '@james:matrix.org'];
     return {
@@ -291,6 +292,12 @@ describe('MatrixPlatform DMs', () => {
           }
           if (type === ROUTER_CHANNEL_STATE && opts.routerChannel) {
             return { getContent: () => ({ channel_id: 'fun-facts' }) };
+          }
+          if (type === ROUTER_SPARK_EVENT && opts.routerSpark) {
+            return { getContent: () => ({
+              source_handle: opts.routerSpark?.sourceHandle,
+              target_handle: opts.routerSpark?.targetHandle,
+            }) };
           }
           return null;
         },
@@ -462,6 +469,52 @@ describe('MatrixPlatform DMs', () => {
       body: 'digest check',
     }));
   });
+
+  it('does not treat Router-managed spark rooms as DMs while an invite is pending', () => {
+    const platform = createPlatform();
+    const room = fakeRoom('!spark:mtrx.example.test', {
+      members: ['@router:mtrx.example.test', '@socrates1024:matrix.org'],
+      routerSpark: { sourceHandle: 'socrates1024', targetHandle: 'ggg' },
+    });
+
+    (platform as any).client = {
+      getAccountData: vi.fn().mockReturnValue(undefined),
+    };
+
+    expect((platform as any).isDirectMessageRoom('@socrates1024:matrix.org', '!spark:mtrx.example.test', room)).toBe(false);
+  });
+});
+
+describe('MatrixPlatform spark rooms', () => {
+  const createPlatform = (overrides: Partial<ConstructorParameters<typeof MatrixPlatform>[0]> = {}) => new MatrixPlatform({
+    serverUrl: 'https://mtrx.example.test',
+    serverName: 'mtrx.example.test',
+    botSecretKey: 'test-secret',
+    botHandle: 'router',
+    ...overrides,
+  });
+
+  it('reads and validates the pair stored in Router spark room state', async () => {
+    const platform = createPlatform();
+    (platform as any).client = {
+      getRoom: vi.fn().mockReturnValue({
+        currentState: {
+          getStateEvents: vi.fn((eventType: string, _stateKey: string) =>
+            eventType === ROUTER_SPARK_EVENT
+              ? { getContent: () => ({ source_handle: '@Alice', target_handle: 'BOB' }) }
+              : null,
+          ),
+        },
+      }),
+    };
+
+    await expect(platform.getSparkRoomPair('!spark:mtrx.example.test')).resolves.toEqual({
+      sourceHandle: 'alice',
+      targetHandle: 'bob',
+    });
+    await expect(platform.isSparkRoomForPair('!spark:mtrx.example.test', 'bob', 'alice')).resolves.toBe(true);
+    await expect(platform.isSparkRoomForPair('!spark:mtrx.example.test', 'bob', 'charlie')).resolves.toBe(false);
+  });
 });
 
 describe('MatrixPlatform message formatting', () => {
@@ -475,17 +528,20 @@ describe('MatrixPlatform message formatting', () => {
 
   it('renders Markdown as Matrix formatted HTML for regular sends', async () => {
     const sendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
-    const platform = createPlatform();
+    const platform = createPlatform({
+      resolveLinkedPlatformId: async (name, handle) =>
+        name === 'matrix' && handle === 'socrates1024' ? '@socrates1024:matrix.org' : null,
+    });
     (platform as any).client = { sendMessage };
 
     await expect(platform.sendMessage(
       '!room:mtrx.example.test',
-      '# For you\n\n- **Bold** [link](https://example.com)\n\n<script>alert(1)</script>',
+      '# For you\n\n- **Bold** [link](https://example.com) for @socrates1024\n\n<script>alert(1)</script>',
       { replyTo: '$parent' },
     )).resolves.toBe('$event');
 
     expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
-      body: expect.stringContaining('# For you'),
+      body: expect.stringContaining('@socrates1024:matrix.org'),
       format: 'org.matrix.custom.html',
       formatted_body: expect.stringContaining('<h1>For you</h1>'),
       'm.relates_to': {
@@ -495,7 +551,7 @@ describe('MatrixPlatform message formatting', () => {
       },
     }));
     expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
-      formatted_body: expect.stringContaining('<li><strong>Bold</strong> <a href="https://example.com">link</a></li>'),
+      formatted_body: expect.stringContaining('<li><strong>Bold</strong> <a href="https://example.com">link</a> for <a href="https://matrix.to/#/%40socrates1024%3Amatrix.org">@socrates1024:matrix.org</a></li>'),
     }));
     expect(sendMessage.mock.calls[0][1].formatted_body).not.toContain('<script>');
   });
@@ -596,6 +652,29 @@ describe('MatrixPlatform post rendering', () => {
     }));
     expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
       formatted_body: expect.stringContaining('<li><strong>item</strong> for <a href="https://matrix.to/#/%40socrates1024%3Amatrix.org">@socrates1024:matrix.org</a></li>'),
+    }));
+  });
+
+  it('renders linked Matrix IDs in editorial hooks as well as regular entry bodies', async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const platform = createPlatform({
+      resolveLinkedPlatformId: async (name, handle) =>
+        name === 'matrix' && handle === 'socrates1024' ? '@socrates1024:matrix.org' : null,
+    });
+
+    (platform as any).client = { sendMessage };
+
+    await platform.postEntry('!room:mtrx.example.test', {
+      id: 'entry-hook',
+      handle: 'james',
+      pseudonym: 'Solitary Feather#123',
+      content: 'body text',
+      timestamp: Date.now(),
+    }, 'Ask @socrates1024 to review this.');
+
+    expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
+      body: expect.stringContaining('@socrates1024:matrix.org'),
+      formatted_body: expect.stringContaining('<a href="https://matrix.to/#/%40socrates1024%3Amatrix.org">@socrates1024:matrix.org</a>'),
     }));
   });
 

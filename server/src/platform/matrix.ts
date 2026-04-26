@@ -591,7 +591,7 @@ export class MatrixPlatform implements Platform {
       try {
         await this.client.sendMessage(result.room_id, {
           msgtype: MsgType.Text,
-          body: name ? `Room "${name}" created.` : 'Connected.',
+          body: opts.type === 'dm' ? 'Connected.' : name ? `Room "${name}" created.` : 'Connected.',
         });
       } catch {
         // Non-fatal
@@ -1150,6 +1150,18 @@ export class MatrixPlatform implements Platform {
     await this.client.setAccountData(EventType.Direct, directRoomMap);
   }
 
+  private async ensureDirectRoomPresentation(userId: string, roomId: string): Promise<void> {
+    if (!this.client) throw new Error('Matrix client not started');
+
+    try {
+      await this.client.setRoomName(roomId, this.config.botHandle);
+    } catch (error) {
+      console.warn(`[Matrix] Failed to name DM with ${userId}:`, error);
+    }
+
+    await this.ensureSpaceMembership(roomId, `DM with ${userId}`);
+  }
+
   private async findOrCreateDM(userId: string): Promise<string> {
     if (!this.client) throw new Error('Matrix client not started');
 
@@ -1157,13 +1169,13 @@ export class MatrixPlatform implements Platform {
     for (const roomId of directRoomIds) {
       const room = this.client.getRoom(roomId);
       if (room?.getMyMembership() === KnownMembership.Join) {
-        await this.ensureSpaceMembership(room.roomId, `DM with ${userId}`);
+        await this.ensureDirectRoomPresentation(userId, room.roomId);
         return room.roomId;
       }
     }
 
     // Create new DM
-    const room = await this.createRoom('', {
+    const room = await this.createRoom(this.config.botHandle, {
       type: 'dm',
       invite: [userId],
       encrypted: true,

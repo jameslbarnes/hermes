@@ -1,9 +1,9 @@
 {
-"git_sha": "8cbe29527d3309c5e8eea2beee5e50e5ea513989",
-"git_sha_short": "8cbe295",
-"image_digest": "sha256:5d27576ee3dc7fa53657a537873ea24cacadeffbb6e2c23a57999c9e14ff7643",
-"agent_image_digest": "sha256:042fd03051144b7082a64b7ddf03fb5996a3d0bfd2527759bbd422a156b09a26",
+"git_sha": "2de3bb70e090ae00293024b01d71d045873c6af7",
+"git_sha_short": "2de3bb7",
+"image_digest": "sha256:218ccb6e9b6e6584f093c0106e5e0a47980776b814149af81cc232f652c4aacc",
+"agent_image_digest": "sha256:0348530a35e37d3049401852d33669e53c169bb5e4799a7cd8261d6479ac2686",
 "app_id": "db82f581256a3c9244c4d7129a67336990d08cdf",
-"deployed_at": "2026-04-26T19:29:07Z",
-"workflow_run": "https://github.com/jameslbarnes/hermes/actions/runs/24965070083"
+"deployed_at": "2026-04-26T19:40:32Z",
+"workflow_run": "https://github.com/jameslbarnes/hermes/actions/runs/24965302179"
 }

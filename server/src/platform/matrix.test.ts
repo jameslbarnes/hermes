@@ -267,8 +267,35 @@ describe('MatrixPlatform DMs', () => {
     ...overrides,
   });
 
+  it('passes Matrix user IDs through when creating direct rooms', async () => {
+    const createRoom = vi.fn().mockResolvedValue({ room_id: '!direct-created:mtrx.example.test' });
+    const sendMessage = vi.fn().mockResolvedValue({ event_id: '$wake' });
+    const platform = createPlatform();
+
+    (platform as any).client = {
+      createRoom,
+      sendMessage,
+    };
+
+    await expect(platform.createRoom('', {
+      type: 'dm',
+      invite: ['@james:matrix.org'],
+      encrypted: true,
+    })).resolves.toEqual(expect.objectContaining({
+      id: '!direct-created:mtrx.example.test',
+    }));
+
+    expect(createRoom).toHaveBeenCalledWith(expect.objectContaining({
+      invite: ['@james:matrix.org'],
+      is_direct: true,
+      preset: 'trusted_private_chat',
+    }));
+  });
+
   it('reuses rooms explicitly tracked in m.direct', async () => {
     const clientSendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const joinRoom = vi.fn().mockResolvedValue({});
+    const sendStateEvent = vi.fn().mockResolvedValue({ event_id: '$space' });
     const getAccountData = vi.fn().mockReturnValue({
       getContent: () => ({
         '@james:matrix.org': ['!direct-room:mtrx.example.test'],
@@ -278,16 +305,33 @@ describe('MatrixPlatform DMs', () => {
       roomId: '!direct-room:mtrx.example.test',
       getMyMembership: () => KnownMembership.Join,
     });
-    const platform = createPlatform();
+    const platform = createPlatform({ spaceRoomId: '!space:mtrx.example.test' });
 
     (platform as any).client = {
       getAccountData,
       getRoom,
+      joinRoom,
+      sendStateEvent,
       sendMessage: clientSendMessage,
     };
 
     await expect(platform.sendDM('@james:matrix.org', 'digest check')).resolves.toBe('$event');
     expect(getRoom).toHaveBeenCalledWith('!direct-room:mtrx.example.test');
+    expect(joinRoom).toHaveBeenCalledWith('!space:mtrx.example.test');
+    expect(sendStateEvent).toHaveBeenNthCalledWith(
+      1,
+      '!space:mtrx.example.test',
+      'm.space.child',
+      { via: ['mtrx.example.test'], suggested: true },
+      '!direct-room:mtrx.example.test',
+    );
+    expect(sendStateEvent).toHaveBeenNthCalledWith(
+      2,
+      '!direct-room:mtrx.example.test',
+      'm.space.parent',
+      { via: ['mtrx.example.test'], canonical: true },
+      '!space:mtrx.example.test',
+    );
     expect(clientSendMessage).toHaveBeenCalledWith('!direct-room:mtrx.example.test', expect.objectContaining({
       body: 'digest check',
     }));
@@ -322,9 +366,11 @@ describe('MatrixPlatform DMs', () => {
     await expect(platform.sendDM('@james:matrix.org', 'digest check')).resolves.toBe('$event');
     expect(platform.createRoom).toHaveBeenCalledWith('', expect.objectContaining({
       type: 'dm',
+      invite: ['@james:matrix.org'],
       encrypted: true,
+      attachToSpace: true,
     }));
-    expect(platform.inviteToRoom).toHaveBeenCalledWith('!fresh-dm:mtrx.example.test', '@james:matrix.org');
+    expect(platform.inviteToRoom).not.toHaveBeenCalled();
     expect(setAccountData).toHaveBeenCalledWith(EventType.Direct, {
       '@james:matrix.org': ['!fresh-dm:mtrx.example.test'],
     });
@@ -361,6 +407,13 @@ describe('MatrixPlatform DMs', () => {
 
     await expect(platform.sendDM('@james:matrix.org', 'digest check')).resolves.toBe('$event');
     expect(platform.createRoom).toHaveBeenCalledTimes(1);
+    expect(platform.createRoom).toHaveBeenCalledWith('', expect.objectContaining({
+      type: 'dm',
+      invite: ['@james:matrix.org'],
+      encrypted: true,
+      attachToSpace: true,
+    }));
+    expect(platform.inviteToRoom).not.toHaveBeenCalled();
     expect(setAccountData).toHaveBeenCalledWith(EventType.Direct, {
       '@james:matrix.org': ['!stale-dm:mtrx.example.test', '!replacement-dm:mtrx.example.test'],
     });

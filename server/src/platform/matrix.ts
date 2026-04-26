@@ -88,6 +88,10 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;');
 }
 
+function isMatrixUserId(value: string): boolean {
+  return /^@[^:\s]+:[^:\s]+$/.test(value);
+}
+
 export function isMatrixMention(params: {
   isDM: boolean;
   text: string;
@@ -546,8 +550,10 @@ export class MatrixPlatform implements Platform {
 
     const invite: string[] = [];
     if (opts.invite) {
-      for (const handle of opts.invite) {
-        const platformId = await this.resolvePlatformId(handle);
+      for (const recipient of opts.invite) {
+        const platformId = isMatrixUserId(recipient)
+          ? recipient
+          : await this.resolvePlatformId(recipient);
         if (platformId) invite.push(platformId);
       }
     }
@@ -1151,6 +1157,7 @@ export class MatrixPlatform implements Platform {
     for (const roomId of directRoomIds) {
       const room = this.client.getRoom(roomId);
       if (room?.getMyMembership() === KnownMembership.Join) {
+        await this.ensureSpaceMembership(room.roomId, `DM with ${userId}`);
         return room.roomId;
       }
     }
@@ -1158,11 +1165,11 @@ export class MatrixPlatform implements Platform {
     // Create new DM
     const room = await this.createRoom('', {
       type: 'dm',
-      invite: [],
+      invite: [userId],
       encrypted: true,
+      attachToSpace: true,
     });
 
-    await this.inviteToRoom(room.id, userId);
     await this.markRoomAsDirect(userId, room.id);
     return room.id;
   }

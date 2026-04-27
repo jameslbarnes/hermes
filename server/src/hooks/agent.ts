@@ -17,6 +17,7 @@ import { detectSparks, evaluateSpark, getConnectionInfo, executeSpark, type Spar
 import { RoomBufferManager, type BufferedMessage } from '../intelligence/heat.js';
 import { generateLinkToken } from '../intelligence/link-tokens.js';
 import { MatrixPlatform, type MatrixHistoryMessage } from '../platform/matrix.js';
+import type { Platform } from '../platform/types.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -245,6 +246,192 @@ export function getMatrixRoutingTargets(entry: JournalEntry): { postToFeed: bool
   };
 }
 
+type PendingEntryStorage = Storage & {
+  getAllPendingEntries(): JournalEntry[];
+  isPending(id: string): boolean;
+  publishEntry(id: string): Promise<JournalEntry | null>;
+};
+
+function hasPendingEntryApi(storage: Storage): storage is PendingEntryStorage {
+  const candidate = storage as Partial<PendingEntryStorage>;
+  return typeof candidate.getAllPendingEntries === 'function'
+    && typeof candidate.isPending === 'function'
+    && typeof candidate.publishEntry === 'function';
+}
+
+function getVerifiedLinkedAccount(user: User | null | undefined, platformName: string): string | null {
+  return user?.linkedAccounts?.find(account =>
+    account.platform === platformName
+    && !!account.platformUserId
+    && account.verified !== false,
+  )?.platformUserId || null;
+}
+
+function entryBelongsToUser(entry: JournalEntry, user: User): boolean {
+  if (entry.handle && normalizeHandle(entry.handle) === normalizeHandle(user.handle)) return true;
+  return !!user.legacyPseudonym && entry.pseudonym === user.legacyPseudonym;
+}
+
+async function findUserByLinkedAccount(storage: Storage, platformName: string, platformUserId: string): Promise<User | null> {
+  const users = await storage.getAllUsers();
+  return users.find(user =>
+    user.linkedAccounts?.some(account =>
+      account.platform === platformName
+      && account.platformUserId === platformUserId
+      && account.verified !== false,
+    ),
+  ) || null;
+}
+
+async function findEntryAuthorUser(storage: Storage, entry: JournalEntry): Promise<User | null> {
+  if (entry.handle) {
+    return storage.getUser(entry.handle).catch(() => null);
+  }
+
+  const users = await storage.getAllUsers().catch(() => []);
+  return users.find(user => user.legacyPseudonym === entry.pseudonym) || null;
+}
+
+function formatRelativePublishTime(publishAt: number | undefined): string {
+  if (!publishAt) return 'soon';
+
+  const ms = publishAt - Date.now();
+  if (ms <= 0) return 'now';
+
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return `in ${minutes} minute${minutes === 1 ? '' : 's'}`;
+
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `in ${hours} hour${hours === 1 ? '' : 's'}`;
+
+  const days = Math.round(hours / 24);
+  return `in ${days} day${days === 1 ? '' : 's'}`;
+}
+
+function truncateForMatrix(text: string, maxChars: number): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `${trimmed.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+function getPublishCommandTarget(query: string): string | 'latest' | null {
+  const tokens = query.split(/\s+/).filter(Boolean);
+  const command = tokens[0];
+  if (command !== 'publish' && command !== '/publish') return null;
+
+  const explicitId = tokens
+    .slice(1)
+    .find(token => /^[a-z0-9]+-[a-z0-9]+$/.test(token));
+  if (explicitId) return explicitId;
+
+  const args = tokens.slice(1);
+  if (args.length === 0 || args.some(token => token === 'latest' || token === 'now')) {
+    return 'latest';
+  }
+
+  return null;
+}
+
+export async function notifyLinkedMatrixPendingEntry(ctx: HookContext, entry: JournalEntry): Promise<void> {
+  if (!entry.publishAt || entry.publishAt <= Date.now()) return;
+
+  const matrix = ctx.platforms.find(platform => platform.name === 'matrix');
+  if (!matrix) return;
+
+  const author = await findEntryAuthorUser(ctx.storage, entry);
+  const matrixUserId = getVerifiedLinkedAccount(author, 'matrix');
+  if (!matrixUserId) return;
+
+  const destinationLine = entry.to && entry.to.length > 0
+    ? `\nDestinations: ${entry.to.join(', ')}`
+    : '';
+  const visibilityLine = entry.aiOnly || entry.humanVisible === false
+    ? '\nVisibility: AI-only'
+    : '';
+  const preview = truncateForMatrix(entry.content, 1800);
+  const message = [
+    `A Hermes post is pending.`,
+    ``,
+    `Entry: \`${entry.id}\``,
+    `Publishes: ${formatRelativePublishTime(entry.publishAt)}${destinationLine}${visibilityLine}`,
+    ``,
+    preview,
+    ``,
+    `Reply \`publish ${entry.id}\` to publish it now, or \`publish latest\` for your newest pending post.`,
+  ].join('\n');
+
+  await matrix.sendDM(matrixUserId, message);
+}
+
+export async function handlePendingPublishCommand(params: {
+  storage: Storage;
+  platform: Platform;
+  platformName: string;
+  roomId: string;
+  messageId?: string;
+  senderId?: string;
+  query: string;
+}): Promise<boolean> {
+  const command = params.query.split(/\s+/).filter(Boolean)[0];
+  if (command !== 'publish' && command !== '/publish') return false;
+
+  const target = getPublishCommandTarget(params.query);
+  const reply = (text: string) => params.platform.sendMessage(params.roomId, text, { replyTo: params.messageId });
+  if (!target) {
+    await reply('Use `publish <entry id>` or `publish latest`.');
+    return true;
+  }
+
+  if (!params.senderId) {
+    await reply('I could not identify your Matrix account for this command.');
+    return true;
+  }
+
+  const user = await findUserByLinkedAccount(params.storage, params.platformName, params.senderId);
+  if (!user) {
+    await reply('Link this Matrix account first by sending `link`, then run the Hermes linking tool with the code.');
+    return true;
+  }
+
+  if (!hasPendingEntryApi(params.storage)) {
+    await reply('This Hermes deployment does not have a pending-post buffer enabled.');
+    return true;
+  }
+
+  let entry: JournalEntry | null = null;
+  if (target === 'latest') {
+    const pending = params.storage.getAllPendingEntries()
+      .filter(candidate => entryBelongsToUser(candidate, user))
+      .sort((a, b) => b.timestamp - a.timestamp);
+    entry = pending[0] || null;
+    if (!entry) {
+      await reply('You do not have any pending Hermes posts.');
+      return true;
+    }
+  } else {
+    entry = await params.storage.getEntry(target);
+    if (!entry || !params.storage.isPending(target)) {
+      await reply(`Entry ${target} is not pending. It may already be published or deleted.`);
+      return true;
+    }
+    if (!entryBelongsToUser(entry, user)) {
+      await reply('You can only publish your own pending posts.');
+      return true;
+    }
+  }
+
+  const published = await params.storage.publishEntry(entry.id);
+  if (!published) {
+    await reply(`Entry ${entry.id} could not be published. It may already be gone from the buffer.`);
+    return true;
+  }
+
+  const url = `${process.env.BASE_URL || 'https://hermes.teleport.computer'}/entry.html?id=${encodeURIComponent(published.id)}`;
+  const publishedLabel = published.id === entry.id ? published.id : `${entry.id} as ${published.id}`;
+  await reply(`Published entry ${publishedLabel}.\n\n${url}`);
+  return true;
+}
+
 // ── Registration ─────────────────────────────────────────────
 
 /**
@@ -392,9 +579,20 @@ async function onEntryPublished(ctx: HookContext): Promise<void> {
  * Entry staged → log for now, future: content moderation.
  */
 async function onEntryStaged(ctx: HookContext): Promise<void> {
-  const { event } = ctx;
+  const { event, storage } = ctx;
   const author = event.data.author_handle || event.data.author_pseudonym;
   console.log(`[Agent] Entry staged by ${author}: ${event.data.entry_id}`);
+
+  const entryId = event.data.entry_id;
+  if (!entryId) return;
+
+  try {
+    const entry = await storage.getEntry(entryId);
+    if (!entry) return;
+    await notifyLinkedMatrixPendingEntry(ctx, entry);
+  } catch (err) {
+    console.error('[Agent] Failed to notify linked Matrix account for staged entry:', err);
+  }
 }
 
 /**
@@ -498,12 +696,26 @@ async function onPlatformMention(ctx: HookContext): Promise<void> {
       ``,
       `Commands:`,
       `• **link** — get a code to connect this ${platformName} account to your Hermes identity`,
+      `• **publish <entry id>** — publish one of your pending Hermes posts`,
       `• **help** — show this message`,
       ``,
       `Or just ask me a question about the notebook and I'll search it.`,
     ].join('\n');
     await platform.sendMessage(room_id, helpText, { replyTo: message_id });
     return;
+  }
+
+  if (platformName === 'matrix' && is_dm) {
+    const handled = await handlePendingPublishCommand({
+      storage,
+      platform,
+      platformName,
+      roomId: room_id,
+      messageId: message_id,
+      senderId: sender_id,
+      query,
+    });
+    if (handled) return;
   }
 
   // Matrix DMs/@mentions should be handled by the external Hermes agent

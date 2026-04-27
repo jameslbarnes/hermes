@@ -1078,8 +1078,17 @@ async function checkAndGenerateSummary(publishedEntry: JournalEntry) {
   }
 }
 
-// Register the publish callback if using staged storage
+// Register staging/publish callbacks if using staged storage
 if (storage instanceof StagedStorage) {
+  storage.onStage((entry) => {
+    pushEvent('entry_staged', {
+      entry_id: entry.id,
+      author_handle: entry.handle || null,
+      author_pseudonym: entry.pseudonym,
+      publish_at: entry.publishAt,
+    });
+  });
+
   storage.onPublish(async (entry) => {
     // Deliver addressed entries (unified addressing)
     if (entry.to && entry.to.length > 0) {
@@ -1922,13 +1931,15 @@ function createMCPServer(secretKey: string) {
         visibility: visibility !== 'public' ? visibility : undefined, // legacy compat
       }, userStagingDelay);
 
-      // Push entry_staged event for the agent (no content)
-      pushEvent('entry_staged', {
-        entry_id: saved.id,
-        author_handle: currentHandle || null,
-        author_pseudonym: pseudonym,
-        publish_at: saved.publishAt,
-      });
+      // Non-staged storage has no staging callback; preserve the event for dev/test.
+      if (!(storage instanceof StagedStorage)) {
+        pushEvent('entry_staged', {
+          entry_id: saved.id,
+          author_handle: currentHandle || null,
+          author_pseudonym: pseudonym,
+          publish_at: saved.publishAt,
+        });
+      }
 
       // Server-side content moderation via TEE-attested moderator service.
       // The moderation logic runs in a separate TEE (D-Shield/Auditor) with egress
@@ -5132,17 +5143,16 @@ const server = createServer(async (req, res) => {
 
       const entry = await storage.addEntry(entryData);
 
-      // Push events for the agent — entry_staged on creation, entry_published
-      // for non-staged storage (immediate publish)
-      pushEvent('entry_staged', {
-        entry_id: entry.id,
-        author_handle: entry.handle || null,
-        author_pseudonym: entry.pseudonym,
-        publish_at: entry.publishAt,
-      });
-
-      // If storage doesn't stage, fire entry_published immediately
+      // Staged storage emits entry_staged through its callback. Non-staged
+      // storage has no buffer, so preserve the historical dev/test events here.
       if (!(storage instanceof StagedStorage)) {
+        pushEvent('entry_staged', {
+          entry_id: entry.id,
+          author_handle: entry.handle || null,
+          author_pseudonym: entry.pseudonym,
+          publish_at: entry.publishAt,
+        });
+
         pushEvent('entry_published', {
           entry_id: entry.id,
           entry,

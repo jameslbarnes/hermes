@@ -1,15 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryStorage, type JournalEntry } from '../storage.js';
 import { MatrixPlatform, ROUTER_SPARK_EVENT, type MatrixHistoryMessage } from '../platform/matrix.js';
+import type { Platform } from '../platform/types.js';
 import {
   findRecentMatrixSparkConversation,
   getMatrixRoutingTargets,
   getPublishedEntryFromEvent,
   getSparkDebounceTopicTerms,
   getUnexpectedSparkHandles,
+  handlePendingPublishCommand,
   hasLinkedPlatformAccount,
+  notifyLinkedMatrixPendingEntry,
   triggerManualSpark,
 } from './agent.js';
+import type { HookContext } from './types.js';
 
 function makeEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
   return {
@@ -20,6 +24,63 @@ function makeEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
     timestamp: Date.now(),
     ...overrides,
   };
+}
+
+class PendingMemoryStorage extends MemoryStorage {
+  private pending = new Map<string, JournalEntry>();
+  private nextPendingId = 1;
+
+  async addEntry(entry: Omit<JournalEntry, 'id'>): Promise<JournalEntry> {
+    const saved: JournalEntry = {
+      ...entry,
+      id: `pending-${this.nextPendingId++}`,
+      publishAt: entry.publishAt ?? Date.now() + 60 * 60 * 1000,
+    };
+    this.pending.set(saved.id, saved);
+    return saved;
+  }
+
+  async getEntry(id: string): Promise<JournalEntry | null> {
+    return this.pending.get(id) || super.getEntry(id);
+  }
+
+  getAllPendingEntries(): JournalEntry[] {
+    return Array.from(this.pending.values());
+  }
+
+  isPending(id: string): boolean {
+    return this.pending.has(id);
+  }
+
+  async publishEntry(id: string): Promise<JournalEntry | null> {
+    const entry = this.pending.get(id);
+    if (!entry) return null;
+
+    this.pending.delete(id);
+    const { publishAt, moderationHeld, moderationHoldReason, ...publishedEntry } = entry;
+    return super.addEntry(publishedEntry);
+  }
+}
+
+function makePlatform(overrides: Partial<Platform> = {}): Platform {
+  return {
+    name: 'matrix',
+    maxMessageLength: 65536,
+    start: vi.fn(),
+    stop: vi.fn(),
+    sendMessage: vi.fn().mockResolvedValue('$message'),
+    sendDM: vi.fn().mockResolvedValue('$dm'),
+    createRoom: vi.fn(),
+    inviteToRoom: vi.fn(),
+    removeFromRoom: vi.fn(),
+    setRoomTopic: vi.fn(),
+    setUserRole: vi.fn(),
+    deleteMessage: vi.fn(),
+    resolveHermesHandle: vi.fn(),
+    resolvePlatformId: vi.fn(),
+    formatContent: (markdown: string) => markdown,
+    ...overrides,
+  } as Platform;
 }
 
 describe('getMatrixRoutingTargets', () => {
@@ -101,6 +162,111 @@ describe('hasLinkedPlatformAccount', () => {
         { platform: 'matrix', platformUserId: '@alice:matrix.org', linkedAt: Date.now(), verified: false },
       ],
     }, 'matrix')).toBe(false);
+  });
+});
+
+describe('pending Matrix review flow', () => {
+  it('DMs the linked Matrix account when a post is pending', async () => {
+    const storage = new PendingMemoryStorage();
+    await storage.createUser({
+      handle: 'alice',
+      secretKeyHash: 'hash-alice',
+      linkedAccounts: [{ platform: 'matrix', platformUserId: '@alice:matrix.org', linkedAt: Date.now(), verified: true }],
+    });
+    const entry = await storage.addEntry({
+      pseudonym: 'Alice#abc',
+      handle: 'alice',
+      client: 'code',
+      content: 'Pending post content for review.',
+      timestamp: Date.now(),
+    });
+    const matrix = makePlatform();
+    const ctx = {
+      trigger: 'entry_staged',
+      event: { id: 1, type: 'entry_staged', timestamp: Date.now(), data: { entry_id: entry.id } },
+      storage,
+      platforms: [matrix],
+    } as HookContext;
+
+    await notifyLinkedMatrixPendingEntry(ctx, entry);
+
+    expect(matrix.sendDM).toHaveBeenCalledWith(
+      '@alice:matrix.org',
+      expect.stringContaining(`publish ${entry.id}`),
+    );
+  });
+
+  it('publishes a pending entry from a linked Matrix DM command', async () => {
+    const storage = new PendingMemoryStorage();
+    await storage.createUser({
+      handle: 'alice',
+      secretKeyHash: 'hash-alice',
+      linkedAccounts: [{ platform: 'matrix', platformUserId: '@alice:matrix.org', linkedAt: Date.now(), verified: true }],
+    });
+    const entry = await storage.addEntry({
+      pseudonym: 'Alice#abc',
+      handle: 'alice',
+      client: 'code',
+      content: 'Ready to publish from Matrix.',
+      timestamp: Date.now(),
+    });
+    const matrix = makePlatform();
+
+    const handled = await handlePendingPublishCommand({
+      storage,
+      platform: matrix,
+      platformName: 'matrix',
+      roomId: '!dm:matrix.org',
+      messageId: '$request',
+      senderId: '@alice:matrix.org',
+      query: `publish ${entry.id}`,
+    });
+
+    expect(handled).toBe(true);
+    expect(storage.isPending(entry.id)).toBe(false);
+    expect(matrix.sendMessage).toHaveBeenCalledWith(
+      '!dm:matrix.org',
+      expect.stringContaining(`Published entry ${entry.id}`),
+      { replyTo: '$request' },
+    );
+  });
+
+  it('rejects publish commands from Matrix accounts that are not linked to the author', async () => {
+    const storage = new PendingMemoryStorage();
+    await storage.createUser({
+      handle: 'alice',
+      secretKeyHash: 'hash-alice',
+      linkedAccounts: [{ platform: 'matrix', platformUserId: '@alice:matrix.org', linkedAt: Date.now(), verified: true }],
+    });
+    await storage.createUser({
+      handle: 'bob',
+      secretKeyHash: 'hash-bob',
+      linkedAccounts: [{ platform: 'matrix', platformUserId: '@bob:matrix.org', linkedAt: Date.now(), verified: true }],
+    });
+    const entry = await storage.addEntry({
+      pseudonym: 'Alice#abc',
+      handle: 'alice',
+      client: 'code',
+      content: 'Alice owns this pending post.',
+      timestamp: Date.now(),
+    });
+    const matrix = makePlatform();
+
+    await handlePendingPublishCommand({
+      storage,
+      platform: matrix,
+      platformName: 'matrix',
+      roomId: '!dm:matrix.org',
+      senderId: '@bob:matrix.org',
+      query: `publish ${entry.id}`,
+    });
+
+    expect(storage.isPending(entry.id)).toBe(true);
+    expect(matrix.sendMessage).toHaveBeenCalledWith(
+      '!dm:matrix.org',
+      'You can only publish your own pending posts.',
+      { replyTo: undefined },
+    );
   });
 });
 

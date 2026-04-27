@@ -1676,12 +1676,20 @@ export class StagedStorage implements Storage {
   private published: FirestoreStorage;
   private publishDelayMs: number;
   private publishInterval: NodeJS.Timeout | null = null;
+  private onStageCallback: ((entry: JournalEntry) => void) | null = null;
   private onPublishCallback: ((entry: JournalEntry) => void) | null = null;
 
   constructor(publishDelayMs = 60 * 60 * 1000) { // Default 1 hour
     this.published = new FirestoreStorage();
     this.publishDelayMs = publishDelayMs;
     this.startPublishLoop();
+  }
+
+  /**
+   * Register callback to be called when an entry enters the staging buffer
+   */
+  onStage(callback: (entry: JournalEntry) => void) {
+    this.onStageCallback = callback;
   }
 
   /**
@@ -1738,6 +1746,16 @@ export class StagedStorage implements Storage {
       publishAt: Date.now() + delay,
     };
     this.pending.set(id, newEntry);
+
+    // Call the onStage callback if registered
+    if (this.onStageCallback) {
+      try {
+        this.onStageCallback(newEntry);
+      } catch (err) {
+        console.error('[Storage] onStage callback error:', err);
+      }
+    }
+
     return newEntry;
   }
 

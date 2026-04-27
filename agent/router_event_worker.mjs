@@ -73,6 +73,13 @@ function matrixRoomKey(event) {
   return typeof data.room_id === 'string' && data.room_id ? data.room_id : null;
 }
 
+function matrixMessageId(event) {
+  const data = event?.data || {};
+  if (event?.type !== 'platform_mention') return null;
+  if (data.platform !== 'matrix') return null;
+  return typeof data.message_id === 'string' && data.message_id ? data.message_id : null;
+}
+
 function latestMatrixMentionIdsByRoom(events) {
   const latest = new Map();
   for (const event of events) {
@@ -82,6 +89,31 @@ function latestMatrixMentionIdsByRoom(events) {
     latest.set(roomKey, Math.max(latest.get(roomKey) || 0, eventId));
   }
   return latest;
+}
+
+function handledMatrixMessageIds(state) {
+  if (!Array.isArray(state.handled_matrix_message_ids)) {
+    state.handled_matrix_message_ids = [];
+  }
+  return state.handled_matrix_message_ids;
+}
+
+function hasHandledMatrixMessage(state, messageId) {
+  return !!messageId && handledMatrixMessageIds(state).includes(messageId);
+}
+
+function rememberHandledMatrixMessage(state, messageId, limit) {
+  if (!messageId) return;
+
+  const ids = handledMatrixMessageIds(state);
+  const existing = ids.indexOf(messageId);
+  if (existing >= 0) ids.splice(existing, 1);
+  ids.push(messageId);
+
+  const max = Number.isFinite(limit) && limit > 0 ? limit : 2000;
+  if (ids.length > max) {
+    ids.splice(0, ids.length - max);
+  }
 }
 
 async function connectClient(mcpUrl) {
@@ -161,6 +193,7 @@ async function main() {
   const pollIntervalMs = Number.parseInt(process.env.HERMES_EVENT_POLL_INTERVAL_MS || '2000', 10);
   const pollLimit = Number.parseInt(process.env.HERMES_EVENT_LIMIT || '20', 10);
   const maxEventAgeMs = Number.parseInt(process.env.HERMES_EVENT_MAX_AGE_MS || '300000', 10);
+  const handledMatrixMessageLimit = Number.parseInt(process.env.HERMES_HANDLED_MATRIX_MESSAGE_IDS_LIMIT || '2000', 10);
   const statePath = join(hermesHome, 'router-event-worker-state.json');
 
   if (!secretKey) {
@@ -272,6 +305,15 @@ async function main() {
         continue;
       }
 
+      const messageId = matrixMessageId(event);
+      if (hasHandledMatrixMessage(state, messageId)) {
+        log(`Skipping already-handled Matrix mention ${eventId} for message ${messageId}`);
+        cursor = Math.max(cursor, eventId);
+        state.cursor = cursor;
+        await saveState(statePath, state);
+        continue;
+      }
+
       const latestInRoom = latestMentionByRoom.get(data.room_id);
       if (latestInRoom && eventId < latestInRoom) {
         log(`Skipping superseded Matrix mention ${eventId} in ${data.room_id}; newer mention ${latestInRoom} is queued`);
@@ -300,6 +342,8 @@ async function main() {
 
       try {
         await runAgentChat(event);
+        rememberHandledMatrixMessage(state, messageId, handledMatrixMessageLimit);
+        await saveState(statePath, state);
       } catch (error) {
         log(`Event ${eventId} handler error: ${formatError(error)}`);
         await sleep(Math.max(pollIntervalMs, 2000));

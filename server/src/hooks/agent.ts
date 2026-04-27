@@ -33,6 +33,8 @@ const SPARK_MATRIX_DEBOUNCE_WINDOW_MS = process.env.SPARK_MATRIX_DEBOUNCE_WINDOW
 const SPARK_MATRIX_DEBOUNCE_LIMIT = process.env.SPARK_MATRIX_DEBOUNCE_LIMIT
   ? parseInt(process.env.SPARK_MATRIX_DEBOUNCE_LIMIT)
   : 160;
+const PENDING_ENTRY_PUBLISH_REACTIONS = new Set(['✅']);
+const PENDING_ENTRY_DELETE_REACTIONS = new Set(['🗑️', '🗑']);
 
 const SPARK_DEBOUNCE_STOP_WORDS = new Set([
   'about', 'after', 'again', 'already', 'also', 'around', 'because', 'between',
@@ -332,10 +334,19 @@ function getPublishCommandTarget(query: string): string | 'latest' | null {
   return null;
 }
 
+function getPendingEntryReactionAction(reactionKey: string | undefined): 'publish' | 'delete' | null {
+  if (!reactionKey) return null;
+  if (PENDING_ENTRY_PUBLISH_REACTIONS.has(reactionKey)) return 'publish';
+  if (PENDING_ENTRY_DELETE_REACTIONS.has(reactionKey)) return 'delete';
+  return null;
+}
+
 export async function notifyLinkedMatrixPendingEntry(ctx: HookContext, entry: JournalEntry): Promise<void> {
   if (!entry.publishAt || entry.publishAt <= Date.now()) return;
 
-  const matrix = ctx.platforms.find(platform => platform.name === 'matrix');
+  const matrix = ctx.platforms.find(platform => platform.name === 'matrix') as (Platform & {
+    sendPendingEntryReviewDM?: (userId: string, text: string, entryId: string) => Promise<string>;
+  }) | undefined;
   if (!matrix) return;
 
   const author = await findEntryAuthorUser(ctx.storage, entry);
@@ -357,30 +368,28 @@ export async function notifyLinkedMatrixPendingEntry(ctx: HookContext, entry: Jo
     ``,
     preview,
     ``,
-    `Reply \`publish ${entry.id}\` to publish it now, or \`publish latest\` for your newest pending post.`,
+    `React ✅ to publish, or 🗑️ to delete.`,
+    `You can also reply \`publish ${entry.id}\` or \`delete ${entry.id}\`.`,
   ].join('\n');
 
-  await matrix.sendDM(matrixUserId, message);
+  if (typeof matrix.sendPendingEntryReviewDM === 'function') {
+    await matrix.sendPendingEntryReviewDM(matrixUserId, message, entry.id);
+  } else {
+    await matrix.sendDM(matrixUserId, message);
+  }
 }
 
-export async function handlePendingPublishCommand(params: {
+async function executePendingEntryAction(params: {
   storage: Storage;
   platform: Platform;
   platformName: string;
   roomId: string;
   messageId?: string;
   senderId?: string;
-  query: string;
+  action: 'publish' | 'delete';
+  target: string | 'latest';
 }): Promise<boolean> {
-  const command = params.query.split(/\s+/).filter(Boolean)[0];
-  if (command !== 'publish' && command !== '/publish') return false;
-
-  const target = getPublishCommandTarget(params.query);
   const reply = (text: string) => params.platform.sendMessage(params.roomId, text, { replyTo: params.messageId });
-  if (!target) {
-    await reply('Use `publish <entry id>` or `publish latest`.');
-    return true;
-  }
 
   if (!params.senderId) {
     await reply('I could not identify your Matrix account for this command.');
@@ -399,7 +408,7 @@ export async function handlePendingPublishCommand(params: {
   }
 
   let entry: JournalEntry | null = null;
-  if (target === 'latest') {
+  if (params.target === 'latest') {
     const pending = params.storage.getAllPendingEntries()
       .filter(candidate => entryBelongsToUser(candidate, user))
       .sort((a, b) => b.timestamp - a.timestamp);
@@ -409,15 +418,21 @@ export async function handlePendingPublishCommand(params: {
       return true;
     }
   } else {
-    entry = await params.storage.getEntry(target);
-    if (!entry || !params.storage.isPending(target)) {
-      await reply(`Entry ${target} is not pending. It may already be published or deleted.`);
+    entry = await params.storage.getEntry(params.target);
+    if (!entry || !params.storage.isPending(params.target)) {
+      await reply(`Entry ${params.target} is not pending. It may already be published or deleted.`);
       return true;
     }
     if (!entryBelongsToUser(entry, user)) {
       await reply('You can only publish your own pending posts.');
       return true;
     }
+  }
+
+  if (params.action === 'delete') {
+    await params.storage.deleteEntry(entry.id);
+    await reply(`Deleted entry ${entry.id}. It will not publish.`);
+    return true;
   }
 
   const published = await params.storage.publishEntry(entry.id);
@@ -430,6 +445,68 @@ export async function handlePendingPublishCommand(params: {
   const publishedLabel = published.id === entry.id ? published.id : `${entry.id} as ${published.id}`;
   await reply(`Published entry ${publishedLabel}.\n\n${url}`);
   return true;
+}
+
+export async function handlePendingPublishCommand(params: {
+  storage: Storage;
+  platform: Platform;
+  platformName: string;
+  roomId: string;
+  messageId?: string;
+  senderId?: string;
+  query: string;
+}): Promise<boolean> {
+  const tokens = params.query.split(/\s+/).filter(Boolean);
+  const command = tokens[0];
+  if (command !== 'publish' && command !== '/publish' && command !== 'delete' && command !== '/delete' && command !== 'remove') {
+    return false;
+  }
+
+  const action = command === 'publish' || command === '/publish' ? 'publish' : 'delete';
+  const target = getPublishCommandTarget(action === 'publish'
+    ? params.query
+    : `publish ${tokens.slice(1).join(' ')}`);
+  const reply = (text: string) => params.platform.sendMessage(params.roomId, text, { replyTo: params.messageId });
+  if (!target || (action === 'delete' && tokens.length === 1)) {
+    await reply('Use `publish <entry id>`, `publish latest`, `delete <entry id>`, or `delete latest`.');
+    return true;
+  }
+
+  return executePendingEntryAction({
+    storage: params.storage,
+    platform: params.platform,
+    platformName: params.platformName,
+    roomId: params.roomId,
+    messageId: params.messageId,
+    senderId: params.senderId,
+    action,
+    target,
+  });
+}
+
+export async function handlePendingEntryReaction(params: {
+  storage: Storage;
+  platform: Platform;
+  platformName: string;
+  roomId: string;
+  targetMessageId?: string;
+  senderId?: string;
+  reactionKey?: string;
+  entryId?: string;
+}): Promise<boolean> {
+  const action = getPendingEntryReactionAction(params.reactionKey);
+  if (!action || !params.entryId) return false;
+
+  return executePendingEntryAction({
+    storage: params.storage,
+    platform: params.platform,
+    platformName: params.platformName,
+    roomId: params.roomId,
+    messageId: params.targetMessageId,
+    senderId: params.senderId,
+    action,
+    target: params.entryId,
+  });
 }
 
 // ── Registration ─────────────────────────────────────────────
@@ -463,6 +540,13 @@ export function registerAgentHooks(dispatcher: HookDispatcher): void {
     id: 'agent:platform-mention',
     triggers: ['platform_mention'],
     handler: onPlatformMention,
+    priority: 50,
+  });
+
+  dispatcher.register({
+    id: 'agent:platform-reaction',
+    triggers: ['platform_reaction'],
+    handler: onPlatformReaction,
     priority: 50,
   });
 }
@@ -697,6 +781,7 @@ async function onPlatformMention(ctx: HookContext): Promise<void> {
       `Commands:`,
       `• **link** — get a code to connect this ${platformName} account to your Hermes identity`,
       `• **publish <entry id>** — publish one of your pending Hermes posts`,
+      `• **delete <entry id>** — delete one of your pending Hermes posts`,
       `• **help** — show this message`,
       ``,
       `Or just ask me a question about the notebook and I'll search it.`,
@@ -753,6 +838,27 @@ async function onPlatformMention(ctx: HookContext): Promise<void> {
     console.error('[Agent] Mention handler error:', err);
     await platform.sendMessage(room_id, 'Sorry, something went wrong searching the notebook.', { replyTo: message_id });
   }
+}
+
+async function onPlatformReaction(ctx: HookContext): Promise<void> {
+  const { event, storage, platforms } = ctx;
+  const { platform: platformName, room_id, sender_id, target_message_id, reaction_key, entry_id } = event.data;
+
+  if (platformName !== 'matrix' || !room_id || !entry_id) return;
+
+  const platform = platforms.find(p => p.name === platformName);
+  if (!platform) return;
+
+  await handlePendingEntryReaction({
+    storage,
+    platform,
+    platformName,
+    roomId: room_id,
+    targetMessageId: target_message_id,
+    senderId: sender_id,
+    reactionKey: reaction_key,
+    entryId: entry_id,
+  });
 }
 
 // ── Helpers ──────────────────────────────────────────────────

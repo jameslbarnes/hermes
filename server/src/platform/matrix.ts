@@ -402,6 +402,7 @@ export class MatrixPlatform implements Platform {
   private config: MatrixPlatformConfig;
   private channelRooms = new Map<string, string>();
   private entryEventMap = new Map<string, string>();
+  private pendingReviewEventMap = new Map<string, string>();
   private processedMessageEvents = new Set<string>();
 
   constructor(config: MatrixPlatformConfig) {
@@ -805,6 +806,23 @@ export class MatrixPlatform implements Platform {
   async sendDM(userId: string, text: string, opts?: SendMessageOptions): Promise<string> {
     const roomId = await this.findOrCreateDM(userId);
     return this.sendMessage(roomId, text, opts);
+  }
+
+  async sendPendingEntryReviewDM(userId: string, text: string, entryId: string): Promise<string> {
+    if (!this.client) throw new Error('Matrix client not started');
+
+    const roomId = await this.findOrCreateDM(userId);
+    const content = await this.createMessageContent(text);
+    content.pending_entry_id = entryId;
+    content['com.router.pending_entry'] = {
+      entry_id: entryId,
+      actions: ['publish', 'delete'],
+    };
+
+    const result = await this.client.sendMessage(roomId, content);
+    const eventId = result.event_id!;
+    this.pendingReviewEventMap.set(eventId, entryId);
+    return eventId;
   }
 
   // ── Room Management ────────────────────────────────────────
@@ -1608,6 +1626,10 @@ export class MatrixPlatform implements Platform {
 
   private handleIncomingMessageEvent(event: MatrixEvent): void {
     if (!this.client) return;
+    if (event.getType() === EventType.Reaction) {
+      this.handleIncomingReactionEvent(event);
+      return;
+    }
     if (event.getType() !== EventType.RoomMessage) return;
     if (event.getSender() === this.botUserId) return;
     if (!event.getRoomId()) return;
@@ -1684,6 +1706,49 @@ export class MatrixPlatform implements Platform {
       isMention ? 'platform_mention' : 'platform_message',
       eventData,
     );
+  }
+
+  private handleIncomingReactionEvent(event: MatrixEvent): void {
+    if (!this.client) return;
+    if (event.getSender() === this.botUserId) return;
+    if (!event.getRoomId()) return;
+
+    const eventId = event.getId();
+    if (eventId && this.processedMessageEvents.has(eventId)) return;
+
+    const content = event.getContent();
+    const relation = content['m.relates_to'];
+    const targetEventId = typeof relation?.event_id === 'string' ? relation.event_id : undefined;
+    const reactionKey = typeof relation?.key === 'string' ? relation.key : undefined;
+    const isAnnotation = relation?.rel_type === RelationType.Annotation;
+    if (!targetEventId || !reactionKey || !isAnnotation) return;
+
+    const entryId = this.pendingReviewEventMap.get(targetEventId);
+    if (!entryId) return;
+
+    const sender = event.getSender()!;
+    const roomId = event.getRoomId()!;
+    const handleMatch = sender.match(/^@([^:]+):/);
+
+    if (eventId) {
+      this.processedMessageEvents.add(eventId);
+      if (this.processedMessageEvents.size > 10000) {
+        this.processedMessageEvents.clear();
+      }
+    }
+
+    pushEvent('platform_reaction', {
+      platform: 'matrix',
+      room_id: roomId,
+      message_id: eventId,
+      target_message_id: targetEventId,
+      sender_id: sender,
+      sender_handle: handleMatch ? handleMatch[1] : null,
+      reaction_key: reactionKey,
+      entry_id: entryId,
+      timestamp: event.getTs(),
+      is_dm: this.isDirectMessageRoom(sender, roomId, this.client.getRoom(roomId)),
+    });
   }
 
   /**

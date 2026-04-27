@@ -40,9 +40,9 @@ function buildMcpUrl(baseUrl, secretKey) {
 async function loadState(path) {
   try {
     const raw = await readFile(path, 'utf8');
-    return JSON.parse(raw);
+    return { ...JSON.parse(raw), initialized: true };
   } catch {
-    return { cursor: 0 };
+    return { cursor: 0, initialized: false };
   }
 }
 
@@ -54,6 +54,34 @@ async function saveState(path, state) {
 function firstWord(text) {
   const parts = String(text || '').trim().toLowerCase().split(/\s+/);
   return parts[0] || '';
+}
+
+function eventTimestamp(event) {
+  const direct = Number(event?.timestamp);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const dataTs = Number(event?.data?.timestamp);
+  if (Number.isFinite(dataTs) && dataTs > 0) return dataTs;
+
+  return 0;
+}
+
+function matrixRoomKey(event) {
+  const data = event?.data || {};
+  if (event?.type !== 'platform_mention') return null;
+  if (data.platform !== 'matrix') return null;
+  return typeof data.room_id === 'string' && data.room_id ? data.room_id : null;
+}
+
+function latestMatrixMentionIdsByRoom(events) {
+  const latest = new Map();
+  for (const event of events) {
+    const roomKey = matrixRoomKey(event);
+    if (!roomKey) continue;
+    const eventId = parseCursor(event.id, 0);
+    latest.set(roomKey, Math.max(latest.get(roomKey) || 0, eventId));
+  }
+  return latest;
 }
 
 async function connectClient(mcpUrl) {
@@ -132,6 +160,7 @@ async function main() {
   const mcpUrl = process.env.HERMES_MCP_URL || 'http://hermes:3000/mcp/http';
   const pollIntervalMs = Number.parseInt(process.env.HERMES_EVENT_POLL_INTERVAL_MS || '2000', 10);
   const pollLimit = Number.parseInt(process.env.HERMES_EVENT_LIMIT || '20', 10);
+  const maxEventAgeMs = Number.parseInt(process.env.HERMES_EVENT_MAX_AGE_MS || '300000', 10);
   const statePath = join(hermesHome, 'router-event-worker-state.json');
 
   if (!secretKey) {
@@ -163,6 +192,29 @@ async function main() {
 
   let state = await loadState(statePath);
   let cursor = Number.parseInt(String(state.cursor || 0), 10) || 0;
+  if (!state.initialized) {
+    try {
+      const result = await client.callTool({
+        name: 'hermes_poll_events',
+        arguments: { cursor: Number.MAX_SAFE_INTEGER, limit: 1 },
+      });
+      const structured = result.structuredContent || {};
+      cursor = parseCursor(structured.latest_cursor ?? structured.next_cursor ?? 0, 0);
+      state.cursor = cursor;
+      state.initialized = true;
+      state.bootstrapped_at = new Date().toISOString();
+      await saveState(statePath, state);
+      log(`No saved cursor; starting from latest cursor ${cursor}`);
+    } catch (error) {
+      log(`Initial cursor bootstrap failed: ${formatError(error)}`);
+      cursor = Number.MAX_SAFE_INTEGER;
+      state.cursor = cursor;
+      state.initialized = true;
+      state.bootstrap_failed_at = new Date().toISOString();
+      await saveState(statePath, state);
+      log('No saved cursor; temporarily using high-water cursor to avoid replaying old events');
+    }
+  }
   log(`Starting event loop at cursor ${cursor}`);
 
   while (true) {
@@ -198,6 +250,8 @@ async function main() {
       continue;
     }
 
+    const latestMentionByRoom = latestMatrixMentionIdsByRoom(events);
+
     for (const event of events) {
       const eventId = parseCursor(event.id, 0);
       const eventType = event.type;
@@ -218,21 +272,39 @@ async function main() {
         continue;
       }
 
+      const latestInRoom = latestMentionByRoom.get(data.room_id);
+      if (latestInRoom && eventId < latestInRoom) {
+        log(`Skipping superseded Matrix mention ${eventId} in ${data.room_id}; newer mention ${latestInRoom} is queued`);
+        cursor = Math.max(cursor, eventId);
+        state.cursor = cursor;
+        await saveState(statePath, state);
+        continue;
+      }
+
+      const ageMs = Date.now() - eventTimestamp(event);
+      if (maxEventAgeMs > 0 && ageMs > maxEventAgeMs) {
+        log(`Skipping stale Matrix mention ${eventId} in ${data.room_id}; age=${Math.round(ageMs / 1000)}s`);
+        cursor = Math.max(cursor, eventId);
+        state.cursor = cursor;
+        await saveState(statePath, state);
+        continue;
+      }
+
       log(
         `Processing Matrix platform_mention ${eventId} in ${data.room_id} from ${data.sender_id || 'unknown'} (dm=${data.is_dm ? 'yes' : 'no'})`,
       );
+
+      cursor = Math.max(cursor, eventId);
+      state.cursor = cursor;
+      await saveState(statePath, state);
 
       try {
         await runAgentChat(event);
       } catch (error) {
         log(`Event ${eventId} handler error: ${formatError(error)}`);
         await sleep(Math.max(pollIntervalMs, 2000));
-        break;
+        continue;
       }
-
-      cursor = Math.max(cursor, eventId);
-      state.cursor = cursor;
-      await saveState(statePath, state);
     }
   }
 }

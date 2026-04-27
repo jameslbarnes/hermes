@@ -8,7 +8,6 @@ import {
   getPublishedEntryFromEvent,
   getSparkDebounceTopicTerms,
   getUnexpectedSparkHandles,
-  handlePendingEntryReaction,
   handlePendingPublishCommand,
   hasLinkedPlatformAccount,
   notifyLinkedMatrixPendingEntry,
@@ -198,7 +197,11 @@ describe('pending Matrix review flow', () => {
 
     expect(matrix.sendDM).toHaveBeenCalledWith(
       '@alice:matrix.org',
-      expect.stringContaining(`publish ${entry.id}`),
+      expect.stringContaining('Reply to this message with `publish`'),
+    );
+    expect(matrix.sendDM).toHaveBeenCalledWith(
+      '@alice:matrix.org',
+      expect.stringContaining('`delete`'),
     );
   });
 
@@ -272,7 +275,7 @@ describe('pending Matrix review flow', () => {
     );
   });
 
-  it('publishes a pending entry from a linked Matrix check reaction', async () => {
+  it('publishes a pending entry from a linked Matrix reply command', async () => {
     const storage = new PendingMemoryStorage();
     await storage.createUser({
       handle: 'alice',
@@ -283,20 +286,20 @@ describe('pending Matrix review flow', () => {
       pseudonym: 'Alice#abc',
       handle: 'alice',
       client: 'code',
-      content: 'Approve by reaction.',
+      content: 'Approve by reply.',
       timestamp: Date.now(),
     });
     const matrix = makePlatform();
 
-    const handled = await handlePendingEntryReaction({
+    const handled = await handlePendingPublishCommand({
       storage,
       platform: matrix,
       platformName: 'matrix',
       roomId: '!dm:matrix.org',
-      targetMessageId: '$pending-review',
+      messageId: '$reply',
       senderId: '@alice:matrix.org',
-      reactionKey: '✅',
-      entryId: entry.id,
+      query: 'publish',
+      replyPendingEntryId: entry.id,
     });
 
     expect(handled).toBe(true);
@@ -304,11 +307,11 @@ describe('pending Matrix review flow', () => {
     expect(matrix.sendMessage).toHaveBeenCalledWith(
       '!dm:matrix.org',
       expect.stringContaining(`Published entry ${entry.id}`),
-      { replyTo: '$pending-review' },
+      { replyTo: '$reply' },
     );
   });
 
-  it('deletes a pending entry from a linked Matrix trash reaction', async () => {
+  it('deletes a pending entry from a linked Matrix reply command', async () => {
     const storage = new PendingMemoryStorage();
     await storage.createUser({
       handle: 'alice',
@@ -319,20 +322,20 @@ describe('pending Matrix review flow', () => {
       pseudonym: 'Alice#abc',
       handle: 'alice',
       client: 'code',
-      content: 'Delete by reaction.',
+      content: 'Delete by reply.',
       timestamp: Date.now(),
     });
     const matrix = makePlatform();
 
-    const handled = await handlePendingEntryReaction({
+    const handled = await handlePendingPublishCommand({
       storage,
       platform: matrix,
       platformName: 'matrix',
       roomId: '!dm:matrix.org',
-      targetMessageId: '$pending-review',
+      messageId: '$reply',
       senderId: '@alice:matrix.org',
-      reactionKey: '🗑️',
-      entryId: entry.id,
+      query: 'delete',
+      replyPendingEntryId: entry.id,
     });
 
     expect(handled).toBe(true);
@@ -340,7 +343,7 @@ describe('pending Matrix review flow', () => {
     expect(matrix.sendMessage).toHaveBeenCalledWith(
       '!dm:matrix.org',
       `Deleted entry ${entry.id}. It will not publish.`,
-      { replyTo: '$pending-review' },
+      { replyTo: '$reply' },
     );
   });
 

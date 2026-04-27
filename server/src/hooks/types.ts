@@ -15,7 +15,6 @@ export type HookTrigger =
   | 'entry_held'
   | 'platform_message'
   | 'platform_mention'
-  | 'platform_reaction'
   | 'cron';
 
 export interface HookContext {

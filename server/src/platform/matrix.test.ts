@@ -875,27 +875,6 @@ describe('MatrixPlatform agent trigger reactions', () => {
     getTs: () => Date.now(),
   });
 
-  const fakeReactionEvent = (overrides: {
-    id: string;
-    targetEventId: string;
-    key: string;
-    sender?: string;
-    roomId?: string;
-  }) => ({
-    getType: () => EventType.Reaction,
-    getSender: () => overrides.sender || '@alice:mtrx.example.test',
-    getRoomId: () => overrides.roomId || '!room:mtrx.example.test',
-    getId: () => overrides.id,
-    getContent: () => ({
-      'm.relates_to': {
-        rel_type: RelationType.Annotation,
-        event_id: overrides.targetEventId,
-        key: overrides.key,
-      },
-    }),
-    getTs: () => Date.now(),
-  });
-
   const fakeRoom = (members = ['@router:mtrx.example.test', '@alice:mtrx.example.test', '@bob:mtrx.example.test']) => ({
     roomId: '!room:mtrx.example.test',
     getJoinedMemberCount: () => members.length,
@@ -953,7 +932,7 @@ describe('MatrixPlatform agent trigger reactions', () => {
     expect(sendEvent).not.toHaveBeenCalled();
   });
 
-  it('pushes platform_reaction events for reactions on pending review messages', () => {
+  it('includes pending entry IDs when users reply to pending review messages', () => {
     resetEvents();
     const platform = createPlatform();
     (platform as any).botUserId = '@router:mtrx.example.test';
@@ -961,44 +940,32 @@ describe('MatrixPlatform agent trigger reactions', () => {
     (platform as any).client = {
       getRoom: vi.fn().mockReturnValue(fakeRoom(['@router:mtrx.example.test', '@alice:mtrx.example.test'])),
       getAccountData: vi.fn().mockReturnValue(undefined),
+      setAccountData: vi.fn().mockResolvedValue({}),
+      sendEvent: vi.fn().mockResolvedValue({ event_id: '$ack' }),
     };
 
-    (platform as any).handleIncomingMessageEvent(fakeReactionEvent({
-      id: '$reaction',
-      targetEventId: '$pending-review',
-      key: '✅',
+    (platform as any).handleIncomingMessageEvent(fakeIncomingEvent({
+      id: '$reply',
+      text: 'publish',
+      content: {
+        'm.relates_to': {
+          'm.in_reply_to': { event_id: '$pending-review' },
+        },
+      },
     }));
 
     const events = getEventsSince(0);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
-      type: 'platform_reaction',
+      type: 'platform_mention',
       data: {
         platform: 'matrix',
-        entry_id: 'entry-1',
-        reaction_key: '✅',
-        target_message_id: '$pending-review',
+        pending_entry_id: 'entry-1',
+        text: 'publish',
+        message_id: '$reply',
         sender_id: '@alice:mtrx.example.test',
       },
     });
-  });
-
-  it('ignores reactions on messages that are not pending review messages', () => {
-    resetEvents();
-    const platform = createPlatform();
-    (platform as any).botUserId = '@router:mtrx.example.test';
-    (platform as any).client = {
-      getRoom: vi.fn().mockReturnValue(fakeRoom(['@router:mtrx.example.test', '@alice:mtrx.example.test'])),
-      getAccountData: vi.fn().mockReturnValue(undefined),
-    };
-
-    (platform as any).handleIncomingMessageEvent(fakeReactionEvent({
-      id: '$reaction',
-      targetEventId: '$ordinary',
-      key: '✅',
-    }));
-
-    expect(getEventsSince(0)).toHaveLength(0);
   });
 });
 

@@ -639,7 +639,7 @@ export const SYSTEM_SKILLS: Skill[] = [
   {
     id: 'system_hermes_poll_events',
     name: 'hermes_poll_events',
-    description: 'Poll for new events since a cursor. Returns events like entry_staged, entry_published, platform_message, platform_mention, platform_reaction. Use this in a loop to react to what\'s happening in real time.',
+    description: 'Poll for new events since a cursor. Returns events like entry_staged, entry_published, platform_message, platform_mention. Use this in a loop to react to what\'s happening in real time.',
     instructions: '',
     handlerType: 'builtin',
     inputSchema: {

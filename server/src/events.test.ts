@@ -107,7 +107,6 @@ describe('Event Queue', () => {
         'entry_held',
         'platform_message',
         'platform_mention',
-        'platform_reaction',
       ] as const;
 
       for (const type of types) {
@@ -115,7 +114,7 @@ describe('Event Queue', () => {
         expect(e.type).toBe(type);
       }
 
-      expect(getLatestCursor()).toBe(6);
+      expect(getLatestCursor()).toBe(5);
     });
   });
 });

@@ -33,8 +33,6 @@ const SPARK_MATRIX_DEBOUNCE_WINDOW_MS = process.env.SPARK_MATRIX_DEBOUNCE_WINDOW
 const SPARK_MATRIX_DEBOUNCE_LIMIT = process.env.SPARK_MATRIX_DEBOUNCE_LIMIT
   ? parseInt(process.env.SPARK_MATRIX_DEBOUNCE_LIMIT)
   : 160;
-const PENDING_ENTRY_PUBLISH_REACTIONS = new Set(['✅']);
-const PENDING_ENTRY_DELETE_REACTIONS = new Set(['🗑️', '🗑']);
 
 const SPARK_DEBOUNCE_STOP_WORDS = new Set([
   'about', 'after', 'again', 'already', 'also', 'around', 'because', 'between',
@@ -316,28 +314,23 @@ function truncateForMatrix(text: string, maxChars: number): string {
   return `${trimmed.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
-function getPublishCommandTarget(query: string): string | 'latest' | null {
+function getPendingCommandAction(command: string | undefined): 'publish' | 'delete' | null {
+  if (command === 'publish' || command === '/publish') return 'publish';
+  if (command === 'delete' || command === '/delete' || command === 'remove') return 'delete';
+  return null;
+}
+
+function getPendingCommandTarget(query: string, replyPendingEntryId?: string): { action: 'publish' | 'delete'; target: string } | null {
   const tokens = query.split(/\s+/).filter(Boolean);
-  const command = tokens[0];
-  if (command !== 'publish' && command !== '/publish') return null;
+  const action = getPendingCommandAction(tokens[0]);
+  if (!action) return null;
 
   const explicitId = tokens
     .slice(1)
     .find(token => /^[a-z0-9]+-[a-z0-9]+$/.test(token));
-  if (explicitId) return explicitId;
+  if (explicitId) return { action, target: explicitId };
 
-  const args = tokens.slice(1);
-  if (args.length === 0 || args.some(token => token === 'latest' || token === 'now')) {
-    return 'latest';
-  }
-
-  return null;
-}
-
-function getPendingEntryReactionAction(reactionKey: string | undefined): 'publish' | 'delete' | null {
-  if (!reactionKey) return null;
-  if (PENDING_ENTRY_PUBLISH_REACTIONS.has(reactionKey)) return 'publish';
-  if (PENDING_ENTRY_DELETE_REACTIONS.has(reactionKey)) return 'delete';
+  if (tokens.length === 1 && replyPendingEntryId) return { action, target: replyPendingEntryId };
   return null;
 }
 
@@ -361,15 +354,14 @@ export async function notifyLinkedMatrixPendingEntry(ctx: HookContext, entry: Jo
     : '';
   const preview = truncateForMatrix(entry.content, 1800);
   const message = [
-    `A Hermes post is pending.`,
+    `Review this Hermes post before it publishes.`,
     ``,
     `Entry: \`${entry.id}\``,
-    `Publishes: ${formatRelativePublishTime(entry.publishAt)}${destinationLine}${visibilityLine}`,
+    `Automatic publish: ${formatRelativePublishTime(entry.publishAt)}${destinationLine}${visibilityLine}`,
     ``,
     preview,
     ``,
-    `React ✅ to publish, or 🗑️ to delete.`,
-    `You can also reply \`publish ${entry.id}\` or \`delete ${entry.id}\`.`,
+    `Reply to this message with \`publish\` to publish now, or \`delete\` to remove it.`,
   ].join('\n');
 
   if (typeof matrix.sendPendingEntryReviewDM === 'function') {
@@ -387,7 +379,7 @@ async function executePendingEntryAction(params: {
   messageId?: string;
   senderId?: string;
   action: 'publish' | 'delete';
-  target: string | 'latest';
+  target: string;
 }): Promise<boolean> {
   const reply = (text: string) => params.platform.sendMessage(params.roomId, text, { replyTo: params.messageId });
 
@@ -407,26 +399,14 @@ async function executePendingEntryAction(params: {
     return true;
   }
 
-  let entry: JournalEntry | null = null;
-  if (params.target === 'latest') {
-    const pending = params.storage.getAllPendingEntries()
-      .filter(candidate => entryBelongsToUser(candidate, user))
-      .sort((a, b) => b.timestamp - a.timestamp);
-    entry = pending[0] || null;
-    if (!entry) {
-      await reply('You do not have any pending Hermes posts.');
-      return true;
-    }
-  } else {
-    entry = await params.storage.getEntry(params.target);
-    if (!entry || !params.storage.isPending(params.target)) {
-      await reply(`Entry ${params.target} is not pending. It may already be published or deleted.`);
-      return true;
-    }
-    if (!entryBelongsToUser(entry, user)) {
-      await reply('You can only publish your own pending posts.');
-      return true;
-    }
+  const entry = await params.storage.getEntry(params.target);
+  if (!entry || !params.storage.isPending(params.target)) {
+    await reply(`Entry ${params.target} is not pending. It may already be published or deleted.`);
+    return true;
+  }
+  if (!entryBelongsToUser(entry, user)) {
+    await reply('You can only publish your own pending posts.');
+    return true;
   }
 
   if (params.action === 'delete') {
@@ -455,20 +435,15 @@ export async function handlePendingPublishCommand(params: {
   messageId?: string;
   senderId?: string;
   query: string;
+  replyPendingEntryId?: string;
 }): Promise<boolean> {
   const tokens = params.query.split(/\s+/).filter(Boolean);
-  const command = tokens[0];
-  if (command !== 'publish' && command !== '/publish' && command !== 'delete' && command !== '/delete' && command !== 'remove') {
-    return false;
-  }
-
-  const action = command === 'publish' || command === '/publish' ? 'publish' : 'delete';
-  const target = getPublishCommandTarget(action === 'publish'
-    ? params.query
-    : `publish ${tokens.slice(1).join(' ')}`);
+  const action = getPendingCommandAction(tokens[0]);
+  if (!action) return false;
   const reply = (text: string) => params.platform.sendMessage(params.roomId, text, { replyTo: params.messageId });
-  if (!target || (action === 'delete' && tokens.length === 1)) {
-    await reply('Use `publish <entry id>`, `publish latest`, `delete <entry id>`, or `delete latest`.');
+  const command = getPendingCommandTarget(params.query, params.replyPendingEntryId);
+  if (!command) {
+    await reply('Reply to the post review message with `publish` or `delete`.');
     return true;
   }
 
@@ -479,33 +454,8 @@ export async function handlePendingPublishCommand(params: {
     roomId: params.roomId,
     messageId: params.messageId,
     senderId: params.senderId,
-    action,
-    target,
-  });
-}
-
-export async function handlePendingEntryReaction(params: {
-  storage: Storage;
-  platform: Platform;
-  platformName: string;
-  roomId: string;
-  targetMessageId?: string;
-  senderId?: string;
-  reactionKey?: string;
-  entryId?: string;
-}): Promise<boolean> {
-  const action = getPendingEntryReactionAction(params.reactionKey);
-  if (!action || !params.entryId) return false;
-
-  return executePendingEntryAction({
-    storage: params.storage,
-    platform: params.platform,
-    platformName: params.platformName,
-    roomId: params.roomId,
-    messageId: params.targetMessageId,
-    senderId: params.senderId,
-    action,
-    target: params.entryId,
+    action: command.action,
+    target: command.target,
   });
 }
 
@@ -540,13 +490,6 @@ export function registerAgentHooks(dispatcher: HookDispatcher): void {
     id: 'agent:platform-mention',
     triggers: ['platform_mention'],
     handler: onPlatformMention,
-    priority: 50,
-  });
-
-  dispatcher.register({
-    id: 'agent:platform-reaction',
-    triggers: ['platform_reaction'],
-    handler: onPlatformReaction,
     priority: 50,
   });
 }
@@ -739,7 +682,7 @@ async function onPlatformMessage(ctx: HookContext): Promise<void> {
  */
 async function onPlatformMention(ctx: HookContext): Promise<void> {
   const { event, storage, platforms } = ctx;
-  const { platform: platformName, room_id, text, sender_handle, sender_id, message_id, is_dm } = event.data;
+  const { platform: platformName, room_id, text, sender_handle, sender_id, message_id, is_dm, pending_entry_id } = event.data;
 
   if (!text || !room_id) return;
 
@@ -780,8 +723,8 @@ async function onPlatformMention(ctx: HookContext): Promise<void> {
       ``,
       `Commands:`,
       `• **link** — get a code to connect this ${platformName} account to your Hermes identity`,
-      `• **publish <entry id>** — publish one of your pending Hermes posts`,
-      `• **delete <entry id>** — delete one of your pending Hermes posts`,
+      `• Reply **publish** to a post review message to publish it now`,
+      `• Reply **delete** to a post review message to delete it`,
       `• **help** — show this message`,
       ``,
       `Or just ask me a question about the notebook and I'll search it.`,
@@ -799,6 +742,7 @@ async function onPlatformMention(ctx: HookContext): Promise<void> {
       messageId: message_id,
       senderId: sender_id,
       query,
+      replyPendingEntryId: pending_entry_id,
     });
     if (handled) return;
   }
@@ -838,27 +782,6 @@ async function onPlatformMention(ctx: HookContext): Promise<void> {
     console.error('[Agent] Mention handler error:', err);
     await platform.sendMessage(room_id, 'Sorry, something went wrong searching the notebook.', { replyTo: message_id });
   }
-}
-
-async function onPlatformReaction(ctx: HookContext): Promise<void> {
-  const { event, storage, platforms } = ctx;
-  const { platform: platformName, room_id, sender_id, target_message_id, reaction_key, entry_id } = event.data;
-
-  if (platformName !== 'matrix' || !room_id || !entry_id) return;
-
-  const platform = platforms.find(p => p.name === platformName);
-  if (!platform) return;
-
-  await handlePendingEntryReaction({
-    storage,
-    platform,
-    platformName,
-    roomId: room_id,
-    targetMessageId: target_message_id,
-    senderId: sender_id,
-    reactionKey: reaction_key,
-    entryId: entry_id,
-  });
 }
 
 // ── Helpers ──────────────────────────────────────────────────

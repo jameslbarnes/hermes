@@ -11,8 +11,7 @@ export type EventType =
   | 'entry_published'
   | 'entry_held'
   | 'platform_message'
-  | 'platform_mention'
-  | 'platform_reaction';
+  | 'platform_mention';
 
 export interface HermesEvent {
   id: number;

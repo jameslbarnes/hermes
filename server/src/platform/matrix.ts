@@ -1239,6 +1239,18 @@ export class MatrixPlatform implements Platform {
     return this.channelRooms.get(channelId);
   }
 
+  private getPendingReviewEntryId(roomId: string, eventId: string): string | undefined {
+    const mapped = this.pendingReviewEventMap.get(eventId);
+    if (mapped) return mapped;
+
+    const event = this.client?.getRoom(roomId)?.findEventById?.(eventId);
+    const content = event?.getContent?.();
+    if (typeof content?.pending_entry_id === 'string') return content.pending_entry_id;
+
+    const structured = content?.['com.router.pending_entry'];
+    return typeof structured?.entry_id === 'string' ? structured.entry_id : undefined;
+  }
+
   // ── Identity ───────────────────────────────────────────────
 
   async resolveHermesHandle(platformUserId: string): Promise<string | null> {
@@ -1626,10 +1638,6 @@ export class MatrixPlatform implements Platform {
 
   private handleIncomingMessageEvent(event: MatrixEvent): void {
     if (!this.client) return;
-    if (event.getType() === EventType.Reaction) {
-      this.handleIncomingReactionEvent(event);
-      return;
-    }
     if (event.getType() !== EventType.RoomMessage) return;
     if (event.getSender() === this.botUserId) return;
     if (!event.getRoomId()) return;
@@ -1667,6 +1675,7 @@ export class MatrixPlatform implements Platform {
     // Check if this is a reply to a notebook entry
     const replyToEventId = content['m.relates_to']?.['m.in_reply_to']?.event_id;
     const replyToEntryId = replyToEventId ? this.entryEventMap.get(replyToEventId) : undefined;
+    const replyToPendingEntryId = replyToEventId ? this.getPendingReviewEntryId(roomId, replyToEventId) : undefined;
 
     // Check if the message itself contains entry data (reply to entry card)
     const isEntryMessage = content.entry_id != null;
@@ -1701,54 +1710,14 @@ export class MatrixPlatform implements Platform {
     if (replyToEntryId) {
       eventData.reply_to_entry_id = replyToEntryId;
     }
+    if (replyToPendingEntryId) {
+      eventData.pending_entry_id = replyToPendingEntryId;
+    }
 
     pushEvent(
       isMention ? 'platform_mention' : 'platform_message',
       eventData,
     );
-  }
-
-  private handleIncomingReactionEvent(event: MatrixEvent): void {
-    if (!this.client) return;
-    if (event.getSender() === this.botUserId) return;
-    if (!event.getRoomId()) return;
-
-    const eventId = event.getId();
-    if (eventId && this.processedMessageEvents.has(eventId)) return;
-
-    const content = event.getContent();
-    const relation = content['m.relates_to'];
-    const targetEventId = typeof relation?.event_id === 'string' ? relation.event_id : undefined;
-    const reactionKey = typeof relation?.key === 'string' ? relation.key : undefined;
-    const isAnnotation = relation?.rel_type === RelationType.Annotation;
-    if (!targetEventId || !reactionKey || !isAnnotation) return;
-
-    const entryId = this.pendingReviewEventMap.get(targetEventId);
-    if (!entryId) return;
-
-    const sender = event.getSender()!;
-    const roomId = event.getRoomId()!;
-    const handleMatch = sender.match(/^@([^:]+):/);
-
-    if (eventId) {
-      this.processedMessageEvents.add(eventId);
-      if (this.processedMessageEvents.size > 10000) {
-        this.processedMessageEvents.clear();
-      }
-    }
-
-    pushEvent('platform_reaction', {
-      platform: 'matrix',
-      room_id: roomId,
-      message_id: eventId,
-      target_message_id: targetEventId,
-      sender_id: sender,
-      sender_handle: handleMatch ? handleMatch[1] : null,
-      reaction_key: reactionKey,
-      entry_id: entryId,
-      timestamp: event.getTs(),
-      is_dm: this.isDirectMessageRoom(sender, roomId, this.client.getRoom(roomId)),
-    });
   }
 
   /**

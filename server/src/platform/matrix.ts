@@ -29,6 +29,7 @@ import {
   RelationType,
   MsgType,
   RoomMemberEvent,
+  RoomEvent,
   ClientEvent,
   KnownMembership,
   Preset,
@@ -404,6 +405,8 @@ export class MatrixPlatform implements Platform {
   private entryEventMap = new Map<string, string>();
   private pendingReviewEventMap = new Map<string, string>();
   private processedMessageEvents = new Set<string>();
+  private pendingInviteJoins = new Set<string>();
+  private joinedInviteRooms = new Set<string>();
 
   constructor(config: MatrixPlatformConfig) {
     this.config = config;
@@ -610,6 +613,8 @@ export class MatrixPlatform implements Platform {
         }
       });
     });
+
+    await this.joinPendingInvitedRooms('initial sync');
   }
 
   async stop(): Promise<void> {
@@ -1606,34 +1611,64 @@ export class MatrixPlatform implements Platform {
       this.handleIncomingMessageEvent(event);
     });
 
-    // Auto-join on invite
-    this.client.on(RoomMemberEvent.Membership, async (event: MatrixEvent, member: any) => {
-      if (member.userId !== this.botUserId) return;
-      if (member.membership !== KnownMembership.Invite) return;
-
-      const roomId = member.roomId;
-      try {
-        await this.client!.joinRoom(roomId);
-        console.log(`[Matrix] Auto-joined room ${roomId}`);
-
-        // Delay the welcome message so room encryption state has time to sync.
-        // Element withholds Megolm keys from devices that haven't "spoken" —
-        // the wake message triggers key sharing — but sending too early fails
-        // with "Cannot encrypt event in unconfigured room".
-        setTimeout(async () => {
-          try {
-            await this.client!.sendMessage(
-              roomId,
-              await this.createMessageContent('Hi — I\'m the Router. Say `help` for what I can do, or `link` to connect your Hermes notebook account.'),
-            );
-          } catch (err) {
-            console.error(`[Matrix] Welcome message failed in ${roomId}:`, err);
-          }
-        }, 5000);
-      } catch (err) {
-        console.error(`[Matrix] Failed to join room ${roomId}:`, err);
+    this.client.on(ClientEvent.Room, (room: Room) => {
+      if (room.getMyMembership?.() === KnownMembership.Invite) {
+        void this.joinInvitedRoom(room.roomId, 'room sync');
       }
     });
+
+    this.client.on(RoomEvent.MyMembership, (room: Room, membership: string) => {
+      if (membership === KnownMembership.Invite) {
+        void this.joinInvitedRoom(room.roomId, 'my membership');
+      }
+    });
+
+    // Auto-join on invite.
+    this.client.on(RoomMemberEvent.Membership, (event: MatrixEvent, member: any) => {
+      if (member.userId !== this.botUserId) return;
+      if (member.membership !== KnownMembership.Invite) return;
+      void this.joinInvitedRoom(member.roomId, 'member event');
+    });
+  }
+
+  private async joinPendingInvitedRooms(reason: string): Promise<void> {
+    if (!this.client) return;
+    const rooms = this.client.getRooms?.() || [];
+    await Promise.all(rooms
+      .filter(room => room.getMyMembership?.() === KnownMembership.Invite)
+      .map(room => this.joinInvitedRoom(room.roomId, reason)));
+  }
+
+  private async joinInvitedRoom(roomId: string | null | undefined, reason: string): Promise<void> {
+    if (!this.client || !roomId) return;
+    if (this.pendingInviteJoins.has(roomId)) return;
+    if (this.joinedInviteRooms.has(roomId)) return;
+
+    this.pendingInviteJoins.add(roomId);
+    try {
+      await this.client.joinRoom(roomId);
+      this.joinedInviteRooms.add(roomId);
+      console.log(`[Matrix] Auto-joined room ${roomId} (${reason})`);
+
+      // Delay the welcome message so room encryption state has time to sync.
+      // Element withholds Megolm keys from devices that haven't "spoken" —
+      // the wake message triggers key sharing — but sending too early fails
+      // with "Cannot encrypt event in unconfigured room".
+      setTimeout(async () => {
+        try {
+          await this.client!.sendMessage(
+            roomId,
+            await this.createMessageContent('Hi — I\'m the Router. Say `help` for what I can do, or `link` to connect your Hermes notebook account.'),
+          );
+        } catch (err) {
+          console.error(`[Matrix] Welcome message failed in ${roomId}:`, err);
+        }
+      }, 5000);
+    } catch (err) {
+      console.error(`[Matrix] Failed to join room ${roomId} (${reason}):`, err);
+    } finally {
+      this.pendingInviteJoins.delete(roomId);
+    }
   }
 
   private handleIncomingMessageEvent(event: MatrixEvent): void {

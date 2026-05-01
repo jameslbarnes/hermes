@@ -1,4 +1,4 @@
-import { EventType, KnownMembership, RelationType } from 'matrix-js-sdk';
+import { ClientEvent, EventType, KnownMembership, RelationType, RoomEvent } from 'matrix-js-sdk';
 import { describe, expect, it, vi } from 'vitest';
 import { MatrixPlatform, ROUTER_CHANNEL_STATE, ROUTER_SPARK_EVENT, buildRouterDiscoBallAvatarPng, isMatrixMention } from './matrix.js';
 import { getEventsSince, resetEvents } from '../events.js';
@@ -561,6 +561,74 @@ describe('MatrixPlatform DMs', () => {
     };
 
     expect((platform as any).isDirectMessageRoom('@socrates1024:matrix.org', '!spark:mtrx.example.test', room)).toBe(false);
+  });
+
+  it('joins rooms that were already invited during initial sync', async () => {
+    vi.useFakeTimers();
+    try {
+      const joinRoom = vi.fn().mockResolvedValue({});
+      const platform = createPlatform();
+      (platform as any).client = {
+        getRooms: vi.fn().mockReturnValue([
+          fakeRoom('!invited:mtrx.example.test', { membership: KnownMembership.Invite }),
+          fakeRoom('!joined:mtrx.example.test', { membership: KnownMembership.Join }),
+        ]),
+        joinRoom,
+      };
+
+      await (platform as any).joinPendingInvitedRooms('test');
+
+      expect(joinRoom).toHaveBeenCalledTimes(1);
+      expect(joinRoom).toHaveBeenCalledWith('!invited:mtrx.example.test');
+      vi.clearAllTimers();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('auto-joins invite rooms from my-membership updates', async () => {
+    vi.useFakeTimers();
+    try {
+      const handlers = new Map<string, (...args: any[]) => void>();
+      const joinRoom = vi.fn().mockResolvedValue({});
+      const platform = createPlatform();
+      (platform as any).client = {
+        on: vi.fn((eventName: string, handler: (...args: any[]) => void) => {
+          handlers.set(eventName, handler);
+        }),
+        joinRoom,
+      };
+
+      (platform as any).setupEventListeners();
+      handlers.get(RoomEvent.MyMembership)?.(
+        fakeRoom('!direct-invite:mtrx.example.test', { membership: KnownMembership.Invite }),
+        KnownMembership.Invite,
+      );
+
+      expect(joinRoom).toHaveBeenCalledWith('!direct-invite:mtrx.example.test');
+      expect((platform as any).client.on).toHaveBeenCalledWith(ClientEvent.Room, expect.any(Function));
+      await Promise.resolve();
+      vi.clearAllTimers();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('deduplicates repeated invite join attempts for the same room', async () => {
+    vi.useFakeTimers();
+    try {
+      const joinRoom = vi.fn().mockResolvedValue({});
+      const platform = createPlatform();
+      (platform as any).client = { joinRoom };
+
+      await (platform as any).joinInvitedRoom('!dupe:mtrx.example.test', 'first');
+      await (platform as any).joinInvitedRoom('!dupe:mtrx.example.test', 'second');
+
+      expect(joinRoom).toHaveBeenCalledTimes(1);
+      vi.clearAllTimers();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -23,7 +23,7 @@ function makeFakePlatform(name: string): Platform {
     setRoomTopic: vi.fn(async () => {}),
     setUserRole: vi.fn(async () => {}),
     deleteMessage: vi.fn(async () => {}),
-    resolveHermesHandle: vi.fn(async () => null),
+    resolveRouterHandle: vi.fn(async () => null),
     resolvePlatformId: vi.fn(async () => null),
     formatContent: (s: string) => s,
   };

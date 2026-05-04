@@ -81,7 +81,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
     setRoomTopic: vi.fn(),
     setUserRole: vi.fn(),
     deleteMessage: vi.fn(),
-    resolveHermesHandle: vi.fn(),
+    resolveRouterHandle: vi.fn(),
     resolvePlatformId: vi.fn(),
     formatContent: (markdown: string) => markdown,
     ...overrides,

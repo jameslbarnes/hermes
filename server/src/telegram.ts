@@ -1,5 +1,5 @@
 /**
- * Telegram Bot for Hermes — facade re-export.
+ * Telegram Bot for Router — facade re-export.
  *
  * The implementation lives in telegram/ module directory.
  * This file exists so http.ts imports don't break.

@@ -8,7 +8,7 @@
  * each event. Handlers run in priority order, sequentially.
  */
 
-import type { HermesEvent } from '../events.js';
+import type { RouterEvent } from '../events.js';
 import type { Storage } from '../storage.js';
 import type { HookRegistration, HookTrigger, HookContext } from './types.js';
 import { getAllPlatforms } from '../platform/registry.js';
@@ -32,7 +32,7 @@ export class HookDispatcher {
     this.hooks = this.hooks.filter(h => h.id !== id);
   }
 
-  async dispatch(event: HermesEvent): Promise<void> {
+  async dispatch(event: RouterEvent): Promise<void> {
     const trigger = event.type as HookTrigger;
     const matching = this.hooks.filter(h => h.triggers.includes(trigger));
 

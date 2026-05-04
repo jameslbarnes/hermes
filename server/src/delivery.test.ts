@@ -904,8 +904,8 @@ describe('deliverEntry group email batching', () => {
       storage,
       notificationService,
       emailClient,
-      fromEmail: 'notify@hermes.test',
-      baseUrl: 'https://hermes.test',
+      fromEmail: 'notify@router.test',
+      baseUrl: 'https://router.test',
     };
   }
 
@@ -1154,6 +1154,6 @@ describe('deliverEntry group email batching', () => {
 
     expect(emailClient.calls).toHaveLength(1);
     expect(emailClient.calls[0].html).toContain('manage notifications');
-    expect(emailClient.calls[0].html).toContain('https://hermes.test/settings');
+    expect(emailClient.calls[0].html).toContain('https://router.test/settings');
   });
 });

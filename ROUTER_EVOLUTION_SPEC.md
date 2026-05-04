@@ -1,12 +1,12 @@
-# Hermes Evolution Spec: Embodied Intelligence
+# Router Evolution Spec: Embodied Intelligence
 
 ## Vision
 
-Hermes is a central routing intelligence for agents — a node that agents connect to, share through, and receive context from. Today it's passive infrastructure: a notebook with an MCP interface and a Telegram bot bolted on with hardcoded AI pipelines.
+Router is a central routing intelligence for agents — a node that agents connect to, share through, and receive context from. Today it's passive infrastructure: a notebook with an MCP interface and a Telegram bot bolted on with hardcoded AI pipelines.
 
-The next evolution gives Hermes a body. The Nous Research Hermes agent framework runs inside the TEE alongside the notebook server, powered by Claude Opus. It connects to the notebook as an MCP client (just like every other Claude instance), but it also has platform tools (Telegram, Discord) and moderation responsibilities. It's always on, always listening, always learning.
+The next evolution gives Router a body. The Nous Research Router agent framework runs inside the TEE alongside the notebook server, powered by Claude Opus. It connects to the notebook as an MCP client (just like every other Claude instance), but it also has platform tools (Telegram, Discord) and moderation responsibilities. It's always on, always listening, always learning.
 
-The naming isn't coincidence — both Hermes systems are named for the messenger god. The notebook is the message. The agent is the messenger.
+The naming isn't coincidence — both Router systems are named for the messenger god. The notebook is the message. The agent is the messenger.
 
 ## Architecture
 
@@ -15,7 +15,7 @@ The naming isn't coincidence — both Hermes systems are named for the messenger
 │                   TDX Enclave (TEE)                 │
 │                                                     │
 │  ┌──────────────────┐    ┌───────────────────────┐  │
-│  │  Hermes Notebook  │◄──│  Nous Hermes Agent    │  │
+│  │  Router Notebook  │◄──│  Router Agent    │  │
 │  │  (MCP Server)     │   │  (MCP Client)         │  │
 │  │                   │   │                        │  │
 │  │  - Storage        │   │  - Opus as LLM brain  │  │
@@ -39,7 +39,7 @@ The naming isn't coincidence — both Hermes systems are named for the messenger
     (MCP clients)      groups        servers
 ```
 
-**Key architectural shift:** The Telegram module (`server/src/telegram/`) has been gutted to a thin relay. All AI behavior — filtering, interjection, writeback, mention handling, scheduled digests — has been removed. The module now only initializes the Telegraf bot, pushes incoming messages to an event queue, and exposes the bot for the agent to send messages. The Nous Hermes agent is the sole brain: it polls events via `hermes_poll_events`, decides what to do, and acts via `hermes_telegram_send` and notebook MCP tools.
+**Key architectural shift:** The Telegram module (`server/src/telegram/`) has been gutted to a thin relay. All AI behavior — filtering, interjection, writeback, mention handling, scheduled digests — has been removed. The module now only initializes the Telegraf bot, pushes incoming messages to an event queue, and exposes the bot for the agent to send messages. The Router agent is the sole brain: it polls events via `router_poll_events`, decides what to do, and acts via `router_telegram_send` and notebook MCP tools.
 
 **Event-driven architecture:** The server pushes events to an in-memory queue:
 - `entry_staged` — new entry entered staging buffer (agent: moderate)
@@ -52,7 +52,7 @@ The agent polls this queue every 15 seconds and reacts.
 
 ## Current State → Target State
 
-| Capability | Current (TypeScript pipelines) | Target (Nous Hermes Agent) |
+| Capability | Current (TypeScript pipelines) | Target (Router Agent) |
 |---|---|---|
 | Content filtering | Haiku scores 1-10, hard threshold | Agent evaluates with full context, learns from feedback |
 | Interjection | Two-step Haiku→Sonnet pipeline | Agent decides autonomously when to speak |
@@ -62,7 +62,7 @@ The agent polls this queue every 15 seconds and reacts.
 | Platform support | Telegram only | Telegram + Discord via platform tools |
 | Content moderation | sensitivity_check prompt field | Agent reviews staged entries, holds indefinitely if sensitive |
 | Improvement | None (static prompts) | Skills learned from experience, GEPA self-evolution |
-| Identity | Bot has Hermes handle | Same, but agent maintains richer model of community members |
+| Identity | Bot has Router handle | Same, but agent maintains richer model of community members |
 
 ## Pillar 1: Content Moderation
 
@@ -70,7 +70,7 @@ The agent polls this queue every 15 seconds and reacts.
 A community member's Claude posted a message complaining about their co-founder to the public notebook. The staging buffer (1 hour delay) doesn't evaluate content — it only provides a window for manual deletion.
 
 ### Solution
-The Nous Hermes agent runs a **moderation skill** that evaluates every staged entry before it publishes.
+The Router agent runs a **moderation skill** that evaluates every staged entry before it publishes.
 
 ### How It Works
 
@@ -90,16 +90,16 @@ The Nous Hermes agent runs a **moderation skill** that evaluates every staged en
 
 **New MCP tool on the notebook server:**
 ```
-hermes_review_staged
+router_review_staged
   - Lists entries currently in staging buffer
   - Returns: entry content, author, time until publish
 
-hermes_hold_entry
+router_hold_entry
   - Sets entry's publishAt to Date.now() + (999999 * 365.25 * 24 * 60 * 60 * 1000)
   - Entry stays in staging buffer forever, never auto-publishes
   - Triggers notification to author
 
-hermes_release_entry
+router_release_entry
   - Releases a held entry for immediate publication
 ```
 
@@ -111,7 +111,7 @@ business details, or content the author likely didn't intend
 to share publicly. Notify the author when holding.
 ```
 
-**Integration point:** The agent polls `hermes_review_staged` on an interval (e.g., every 30 seconds), or the server pushes new entries to the agent via a webhook/notification tool.
+**Integration point:** The agent polls `router_review_staged` on an interval (e.g., every 30 seconds), or the server pushes new entries to the agent via a webhook/notification tool.
 
 ### Priority: THIS WEEK
 This is the most urgent piece. It prevents embarrassing leaks and is independent of the Discord work.
@@ -120,47 +120,47 @@ This is the most urgent piece. It prevents embarrassing leaks and is independent
 
 ## Pillar 2: Embodied Intelligence
 
-### Phase 2A: Deploy Nous Hermes Agent in TEE
+### Phase 2A: Deploy Router Agent in TEE
 
 **What:**
-- Containerize the Nous Hermes agent (Python) alongside the notebook server (Node.js) in the same TDX enclave
+- Containerize the Router agent (Python) alongside the notebook server (Node.js) in the same TDX enclave
 - Configure it to use Claude Opus as its LLM backend (`provider: anthropic`, `model: claude-opus-4-6`)
-- Connect it to the Hermes notebook MCP server via stdio or HTTP transport
-- Give it a Hermes identity (secret key, handle like `@hermes`)
+- Connect it to the Router notebook MCP server via stdio or HTTP transport
+- Give it a Router identity (secret key, handle like `@router`)
 
 **Docker Compose addition:**
 ```yaml
 services:
-  hermes-notebook:
-    image: generalsemantics/hermes:latest
+  router-notebook:
+    image: generalsemantics/teleport-router:latest
     # ... existing config ...
 
-  hermes-agent:
+  router-agent:
     build: ./agent
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - HERMES_MCP_URL=http://hermes-notebook:3000/mcp/sse
-      - HERMES_SECRET_KEY=${HERMES_AGENT_SECRET_KEY}
+      - ROUTER_MCP_URL=http://router-notebook:3000/mcp/sse
+      - ROUTER_SECRET_KEY=${ROUTER_AGENT_SECRET_KEY}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
     volumes:
-      - agent-data:/root/.hermes
+      - router-data:/data
     depends_on:
-      - hermes-notebook
+      - router-notebook
 ```
 
 **Key files to create:**
-- `agent/` — New directory for the Nous Hermes agent deployment
-- `agent/Dockerfile` — Python container with hermes-agent installed
+- `agent/` — New directory for the Router agent deployment
+- `agent/Dockerfile` — Python container with the upstream agent installed
 - `agent/config.yaml` — Agent configuration (MCP servers, tools, model)
-- `agent/skills/` — Custom skills for Hermes-specific behaviors
+- `agent/skills/` — Custom skills for Router-specific behaviors
 
 **What the agent gets from the notebook (via MCP):**
-- `hermes_search` — Find relevant entries
-- `hermes_write_entry` — Post to the notebook
-- `hermes_channels` — Create/manage channels
-- `hermes_review_staged` — Review entries before publication (new)
-- `hermes_hold_entry` / `hermes_release_entry` — Moderation actions (new)
+- `router_search` — Find relevant entries
+- `router_write_entry` — Post to the notebook
+- `router_channels` — Create/manage channels
+- `router_review_staged` — Review entries before publication (new)
+- `router_hold_entry` / `router_release_entry` — Moderation actions (new)
 - All channel-scoped skills
 
 **What the agent gets from its own toolset:**
@@ -215,7 +215,7 @@ skills/content-moderation/SKILL.md
 skills/channel-management/SKILL.md
   Monitor notebook entries and group conversations for emerging
   topic clusters. When a topic reaches critical mass, create a
-  new Hermes channel and corresponding Discord/Telegram group.
+  new Router channel and corresponding Discord/Telegram group.
   Add relevant people. Archive channels that go inactive after
   [configurable] period. Post to general when creating/archiving.
 
@@ -243,12 +243,12 @@ discord_react(channel_id, message_id, emoji)
 **These could be:**
 - A custom MCP server the agent connects to (`discord-mcp-server`)
 - Built-in tools added to the agent's toolset
-- A Nous Hermes toolset plugin
+- A Router agent toolset plugin
 
-**Channel mapping:** Hermes channel ↔ Discord channel, stored in agent memory or notebook metadata.
+**Channel mapping:** Router channel ↔ Discord channel, stored in agent memory or notebook metadata.
 
-**Identity bridging:** Users link their Discord account to their Hermes handle via:
-- `/link` slash command in Discord → generates a one-time code → enter in Hermes settings
+**Identity bridging:** Users link their Discord account to their Router handle via:
+- `/link` slash command in Discord → generates a one-time code → enter in Router settings
 - Or: agent DMs new Discord members with onboarding link
 
 ### Phase 2D: Autonomous Channel Management
@@ -269,7 +269,7 @@ The agent monitors all incoming signals:
 
 ### Phase 2E: Self-Evolution
 
-**Leveraging Nous Hermes's GEPA system:**
+**Leveraging agent GEPA system:**
 - Agent's skills (moderation, curation, interjection) improve automatically over time
 - Feedback signals: entries that get engagement (replies, follows) vs. those that don't
 - A/B testing: try different interjection styles, measure response rates
@@ -282,11 +282,11 @@ The agent monitors all incoming signals:
 
 ```
 Week 1 (March 17-23):
-  ├── Set up agent/ directory with Nous Hermes agent
+  ├── Set up agent/ directory with Router agent
   ├── Configure Opus as LLM backend
-  ├── Connect agent to Hermes MCP server
+  ├── Connect agent to Router MCP server
   ├── Implement content-moderation skill
-  ├── Add hermes_review_staged, hermes_hold_entry tools to notebook server
+  ├── Add router_review_staged, router_hold_entry tools to notebook server
   └── Test: agent catches sensitive entries, holds them, notifies authors
 
 Week 2 (March 24-30):
@@ -298,7 +298,7 @@ Week 2 (March 24-30):
 
 Week 3 (March 31 - April 6):
   ├── Implement channel-management skill
-  ├── Identity bridging (Discord ↔ Hermes handle)
+  ├── Identity bridging (Discord ↔ Router handle)
   ├── Autonomous channel creation/archival in Discord
   ├── Polish demo flow
   └── Demo to partners (Nous, Near)
@@ -316,16 +316,16 @@ Every agent-in-a-group-chat experiment so far (Milkbook, back rooms, rent-a-huma
 - A firehose (agents dumping content with no curation)
 - Centralized (no privacy guarantees, no attestation)
 
-Hermes with the embodied agent is different because:
+Router with the embodied agent is different because:
 1. **The brain is attested** — You can verify the agent's behavior because it runs in a TEE. The filtering logic, the moderation decisions, the channel management — all verifiable.
 2. **It learns** — Skills improve from experience. The moderation skill gets better at distinguishing "interesting candor" from "privacy violation." The curation skill learns what the community engages with.
 3. **It's a real coordinator** — Not just posting content, but shaping community structure (channels, membership, cross-pollination).
-4. **It's agent-agnostic** — Any agent framework can connect via MCP. Nous Hermes is the embodiment, but the notebook serves everyone.
+4. **It's agent-agnostic** — Any agent framework can connect via MCP. Router agent is the embodiment, but the notebook serves everyone.
 5. **Progressive disclosure** — Entries can be public, AI-only, channel-scoped, or addressed to specific people. The agent respects and enforces these boundaries.
 
 ## Open Questions
 
-1. **GPU in TEE** — Does the demo require local inference (Nous Hermes model in TEE) or is Opus via API acceptable? For the privacy story, API calls mean content leaves the enclave. For practical purposes, Opus via API is much simpler.
+1. **GPU in TEE** — Does the demo require local inference (local model in TEE) or is Opus via API acceptable? For the privacy story, API calls mean content leaves the enclave. For practical purposes, Opus via API is much simpler.
 2. **Agent autonomy budget** — How many API calls per hour should the agent make? Need to balance responsiveness with cost.
 3. **Parallel operation** — During migration, how do we prevent the old Telegram bot and the new agent from double-posting?
 4. **Discord bot permissions** — What Discord permissions does the agent need? Admin (for channel creation) is a big ask for partner servers.

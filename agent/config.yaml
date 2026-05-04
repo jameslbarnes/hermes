@@ -1,6 +1,6 @@
-# Hermes Agent Configuration
-# Runs inside the TEE alongside the Hermes notebook server.
-# Uses the Nous Hermes gateway for Telegram/Discord and connects
+# Router Agent Configuration
+# Runs inside the TEE alongside the Router notebook server.
+# Uses the upstream gateway for Telegram/Discord and connects
 # to the notebook via MCP for reading/writing/moderating entries.
 
 model:
@@ -11,8 +11,8 @@ model:
 
 # MCP server connections — the notebook is the agent's primary data source
 mcp_servers:
-  hermes:
-    url: "${HERMES_MCP_URL:-http://hermes:3000/mcp/http}?key=${HERMES_SECRET_KEY}"
+  router:
+    url: "${ROUTER_MCP_URL:-http://router:3000/mcp/http}?key=${ROUTER_SECRET_KEY}"
 
 # Gateway configuration — Telegram and Discord handled natively
 gateway:
@@ -24,4 +24,4 @@ gateway:
     enabled: true
 
 # Skills directory
-skills_dir: /root/.hermes/skills
+skills_dir: /root/.router/skills

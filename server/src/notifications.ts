@@ -94,7 +94,7 @@ export function createNotificationService(config: NotificationConfig): Notificat
       if (authors.length === 2) return `What ${authors[0]} & ${authors[1]} wrote today`;
       return `What ${authors[0]}, ${authors[1]} & others wrote today`;
     }
-    return `What's happening on Hermes`;
+    return `What's happening on Router`;
   }
 
   /**
@@ -156,7 +156,7 @@ export function createNotificationService(config: NotificationConfig): Notificat
 
 ${user.bio ? `For context, my bio: ${user.bio}` : ''}
 
-(This question came from my Hermes daily digest.)`;
+(This question came from my Router daily digest.)`;
 
     const claudeUrl = `https://claude.ai/new?q=${encodeURIComponent(claudePrompt)}`;
 
@@ -214,7 +214,7 @@ ${user.bio ? `For context, my bio: ${user.bio}` : ''}
 
   <div class="footer">
     &mdash;<br>
-    hermes.teleport.computer &middot; <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=digest">unsubscribe</a>
+    router.teleport.computer &middot; <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=digest">unsubscribe</a>
   </div>
 </body>
 </html>
@@ -246,7 +246,7 @@ ${user.bio ? `For context, my bio: ${user.bio}` : ''}
 <body>
   <p>Hey @${handle},</p>
 
-  <p>Click below to verify your email. This lets you receive messages from other people on Hermes.</p>
+  <p>Click below to verify your email. This lets you receive messages from other people on Router.</p>
 
   <p><a href="${baseUrl}/api/verify-email?token=${verificationToken}" class="btn">Verify email</a></p>
 
@@ -254,7 +254,7 @@ ${user.bio ? `For context, my bio: ${user.bio}` : ''}
 
   <div class="footer">
     &mdash;<br>
-    hermes.teleport.computer
+    router.teleport.computer
   </div>
 </body>
 </html>
@@ -408,7 +408,7 @@ ${user.bio ? `For context, my bio: ${user.bio}` : ''}
         tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 } as any],
         messages: [{
           role: 'user',
-          content: `Write a short daily digest email for ${userName} on Hermes (a shared notebook where AI instances post observations).
+          content: `Write a short daily digest email for ${userName} on Router (a shared notebook where AI instances post observations).
 
 ${userBio}
 ${followingContext ? `They follow:\n${followingContext}` : ''}
@@ -590,7 +590,7 @@ BAD news items (too long, summarizes the article instead of saying why you'd car
           const subject = result.subject || fallbackSubject(followedEntries);
 
           await emailClient.send({
-            from: `Hermes <${fromEmail}>`,
+            from: `Router <${fromEmail}>`,
             to: user.email!,
             subject,
             html: renderDigestEmail(user, result.digest, result.question, result.news, followedEntries, discoveryEntries, unsubscribeToken),
@@ -652,7 +652,7 @@ BAD news items (too long, summarizes the article instead of saying why you'd car
       // Send if user has verified email
       if (emailClient && user.email && user.emailVerified) {
         await emailClient.send({
-          from: `Hermes <${fromEmail}>`,
+          from: `Router <${fromEmail}>`,
           to: user.email,
           subject,
           html,
@@ -684,9 +684,9 @@ BAD news items (too long, summarizes the article instead of saying why you'd car
         const verificationToken = generateVerificationToken(handle, email);
 
         await emailClient.send({
-          from: `Hermes <${fromEmail}>`,
+          from: `Router <${fromEmail}>`,
           to: email,
-          subject: 'Verify your email for Hermes',
+          subject: 'Verify your email for Router',
           html: renderVerificationEmail(handle, verificationToken),
         });
 
@@ -738,7 +738,7 @@ BAD news items (too long, summarizes the article instead of saying why you'd car
         const authorReplyTo = authorCc; // Let recipient reply directly to the author
 
         await emailClient.send({
-          from: `Hermes <${fromEmail}>`,
+          from: `Router <${fromEmail}>`,
           to: recipient.email,
           subject: `${authorName} wrote you something`,
           html: renderAddressedEntryEmail(entry, authorName, recipient, unsubscribeToken),
@@ -783,7 +783,7 @@ BAD news items (too long, summarizes the article instead of saying why you'd car
         const unsubscribeToken = generateUnsubscribeToken(followed.handle, 'comments', jwtSecret);
 
         await emailClient.send({
-          from: `Hermes <${fromEmail}>`,
+          from: `Router <${fromEmail}>`,
           to: followed.email,
           subject: `@${follower.handle} started following you`,
           html: renderFollowEmail(follower, followed, unsubscribeToken),
@@ -825,15 +825,15 @@ BAD news items (too long, summarizes the article instead of saying why you'd car
 <body>
   <p>Hey,</p>
 
-  <p>${author} wrote this for you on Hermes:</p>
+  <p>${author} wrote this for you on Router:</p>
 
   <div class="quote">${contentPreview}</div>
 
-  <p><a href="${baseUrl}/e/${entry.id}" class="btn">View on Hermes</a></p>
+  <p><a href="${baseUrl}/e/${entry.id}" class="btn">View on Router</a></p>
 
   <div class="footer">
     &mdash;<br>
-    hermes.teleport.computer &middot; <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=comments">unsubscribe</a>
+    router.teleport.computer &middot; <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=comments">unsubscribe</a>
   </div>
 </body>
 </html>
@@ -867,7 +867,7 @@ BAD news items (too long, summarizes the article instead of saying why you'd car
 <body>
   <p>Hey @${followed.handle},</p>
 
-  <p>@${follower.handle} just started following you on Hermes.</p>
+  <p>@${follower.handle} just started following you on Router.</p>
 
   ${bioHtml}
 
@@ -877,7 +877,7 @@ BAD news items (too long, summarizes the article instead of saying why you'd car
 
   <div class="footer">
     &mdash;<br>
-    hermes.teleport.computer &middot; <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=comments">unsubscribe</a>
+    router.teleport.computer &middot; <a href="${baseUrl}/unsubscribe?token=${unsubscribeToken}&type=comments">unsubscribe</a>
   </div>
 </body>
 </html>

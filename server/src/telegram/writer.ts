@@ -1,6 +1,6 @@
 /**
  * Write-back: summarize interesting Telegram conversations and
- * write them as Hermes notebook entries under the bot's identity.
+ * write them as Router notebook entries under the bot's identity.
  *
  * Triggers on conversational heat (multiple people exchanging substantive
  * messages), not just message count.
@@ -53,7 +53,7 @@ export class Writer {
   }
 
   /**
-   * Summarize the recent conversation and write it to Hermes.
+   * Summarize the recent conversation and write it to Router.
    * Returns the entry content if written, or null if skipped.
    */
   async tryWriteBack(now = Date.now()): Promise<string | null> {

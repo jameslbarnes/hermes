@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Join - Hermes</title>
+    <title>Join - Router</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
@@ -538,7 +538,7 @@
 
         <!-- Success state: inline onboarding flow -->
         <div class="success-state" id="success-state">
-            <h2 id="success-title">Welcome to Hermes</h2>
+            <h2 id="success-title">Welcome to Router</h2>
             <div class="handle-display" id="success-handle"></div>
 
             <!-- Step 1: Connect -->
@@ -564,7 +564,7 @@
                     <div class="connect-fields">
                         <div class="connect-field">
                             <label>Name</label>
-                            <span>hermes</span>
+                            <span>teleport-router</span>
                         </div>
                         <div class="connect-field">
                             <label>URL</label>
@@ -690,7 +690,7 @@
             // Start resolving invite in parallel with key check
             resolveChannelInvite();
 
-            const savedKey = localStorage.getItem('hermes_key');
+            const savedKey = localStorage.getItem('router_key');
             if (savedKey) {
                 try {
                     const res = await fetch('/api/identity/lookup', {
@@ -820,7 +820,7 @@
                 }
 
                 // Save key to localStorage
-                localStorage.setItem('hermes_key', keyData.secret_key);
+                localStorage.setItem('router_key', keyData.secret_key);
 
                 // Join pending channel invite if present
                 let joinedChannel = null;
@@ -877,8 +877,8 @@
             }
 
             // Populate MCP commands with actual key
-            const savedKey = localStorage.getItem('hermes_key');
-            const mcpCmd = `claude mcp add hermes --transport sse --scope user "${sseBaseUrl}/mcp/sse?key=${savedKey}"`;
+            const savedKey = localStorage.getItem('router_key');
+            const mcpCmd = `claude mcp add teleport-router --transport sse --scope user "${sseBaseUrl}/mcp/sse?key=${savedKey}"`;
             document.getElementById('mcp-cmd-text').textContent = mcpCmd;
             document.getElementById('sse-url-text').textContent = `${sseBaseUrl}/mcp/sse?key=${savedKey}`;
 

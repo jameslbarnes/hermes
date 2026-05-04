@@ -26,7 +26,7 @@ async function streamToMessage(
 }
 
 /**
- * Handle an @mention query: search Hermes via Claude tool use, reply with synthesis.
+ * Handle an @mention query: search Router via Claude tool use, reply with synthesis.
  */
 export async function handleMention(
   ctx: MentionContext,
@@ -42,8 +42,8 @@ export async function handleMention(
 
   try {
     const searchTool = {
-      name: 'search_hermes',
-      description: 'Search the Hermes shared notebook for entries matching a query.',
+      name: 'search_router',
+      description: 'Search the Router shared notebook for entries matching a query.',
       input_schema: {
         type: 'object' as const,
         properties: {
@@ -67,7 +67,7 @@ export async function handleMention(
     };
 
     const botNote = ctx.botUsername
-      ? `\n\nNote: Messages from "${ctx.botUsername}" or "Hermes" in the chat are YOUR previous messages.`
+      ? `\n\nNote: Messages from "${ctx.botUsername}" or "Router" in the chat are YOUR previous messages.`
       : '';
     const userMessage = ctx.chatContext
       ? `Recent group chat:\n\n${ctx.chatContext}${botNote}\n\n---\n\nQuestion (directed at you):\n${query}`
@@ -99,7 +99,7 @@ export async function handleMention(
       // Handle client-side tool calls
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       for (const block of assistantContent) {
-        if (block.type === 'tool_use' && block.name === 'search_hermes') {
+        if (block.type === 'tool_use' && block.name === 'search_router') {
           const input = block.input as { query: string };
           console.log(`[Telegram/Mention] Searching notebook for: "${input.query}"`);
           const results = await storage.searchEntries(input.query, 10);

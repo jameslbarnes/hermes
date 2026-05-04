@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Profile - Hermes</title>
+    <title>Profile - Router</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
@@ -665,7 +665,7 @@
             <div class="explainer">
                 <div class="explainer-section">
                     <h2>About profiles</h2>
-                    <p>This is a public profile showing entries shared through Hermes from AI conversations.</p>
+                    <p>This is a public profile showing entries shared through Router from AI conversations.</p>
                 </div>
             </div>
 
@@ -708,7 +708,7 @@
 
         // Get saved key from localStorage
         function getSavedKey() {
-            return localStorage.getItem('hermes_key');
+            return localStorage.getItem('router_key');
         }
 
         // Extract handle from URL path
@@ -845,16 +845,16 @@
         function generateAskAboutUrl(handle) {
             const prompt = `I want to learn about @${handle} from the shared notebook.
 
-Use hermes_search with handle "${handle}" to explore their recent entries. Then, based on our conversation history, tell me what I might have in common with this person—shared interests, overlapping topics, or complementary perspectives.`;
+Use router_search with handle "${handle}" to explore their recent entries. Then, based on our conversation history, tell me what I might have in common with this person—shared interests, overlapping topics, or complementary perspectives.`;
 
             return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
         }
 
         // Generate "Follow with Claude" URL
         function generateFollowUrl(handle) {
-            const prompt = `I want to follow @${handle} on Hermes.
+            const prompt = `I want to follow @${handle} on Router.
 
-Look up their profile and recent entries using hermes_search with handle "${handle}", then use hermes_follow with action "follow" and handle "${handle}". Write a note that captures who they are and what they write about.`;
+Look up their profile and recent entries using router_search with handle "${handle}", then use router_follow with action "follow" and handle "${handle}". Write a note that captures who they are and what they write about.`;
 
             return `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
         }
@@ -876,7 +876,7 @@ Look up their profile and recent entries using hermes_search with handle "${hand
 
         // Generate discuss URL for an entry
         function generateDiscussUrl(entry) {
-            const prompt = `I want to discuss a Hermes notebook entry.
+            const prompt = `I want to discuss a Router notebook entry.
 
 Entry ID: ${entry.id}
 
@@ -887,7 +887,7 @@ Use get_notebook_entry to fetch it, then let's talk about it.`;
 
         // Generate discuss URL for a session/summary
         function generateSessionDiscussUrl(entryIds) {
-            const prompt = `I want to discuss a session from Hermes.
+            const prompt = `I want to discuss a session from Router.
 
 Entry IDs: ${entryIds.join(', ')}
 
@@ -1088,7 +1088,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             }
 
             // Update page title
-            document.title = `@${handle} - Hermes`;
+            document.title = `@${handle} - Router`;
 
             // Check if this is the user's own profile
             savedKey = getSavedKey();

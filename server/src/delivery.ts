@@ -167,7 +167,7 @@ export function isInternalUrl(urlString: string): boolean {
  *   "visibility": "public",
  *   "to": ["@bob", "https://webhook.example.com/notify"],
  *   "inReplyTo": null,
- *   "url": "https://hermes.ing/e/en_abc123def456"
+ *   "url": "https://router.teleport.computer/e/en_abc123def456"
  * }
  * ```
  */
@@ -204,7 +204,7 @@ export interface WebhookPayload {
  *
  * @param url - Webhook URL
  * @param entry - The entry to deliver
- * @param baseUrl - Base URL for permalinks (e.g., "https://hermes.ing")
+ * @param baseUrl - Base URL for permalinks (e.g., "https://router.teleport.computer")
  * @param headers - Optional custom headers
  * @returns Success status and any error message
  */
@@ -240,7 +240,7 @@ export async function deliverWebhook(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Hermes/1.0',
+        'User-Agent': 'Router/1.0',
         ...(headers || {}),
       },
       body: JSON.stringify(payload),
@@ -379,7 +379,7 @@ export async function deliverEntry(
       const replyTo = authorEmail;
 
       await emailClient.send({
-        from: `Hermes <${fromEmail}>`,
+        from: `Router <${fromEmail}>`,
         to: recipientEmails,
         subject: `${author} wrote you something`,
         html: renderAddressedEntryEmail(entry, author, baseUrl),
@@ -422,15 +422,15 @@ function renderAddressedEntryEmail(entry: JournalEntry, author: string, baseUrl:
 <body>
   <p>Hey,</p>
 
-  <p>${author} wrote this for you on Hermes:</p>
+  <p>${author} wrote this for you on Router:</p>
 
   <div class="quote">${contentPreview}</div>
 
-  <p><a href="${baseUrl}/e/${entry.id}" class="btn">View on Hermes</a></p>
+  <p><a href="${baseUrl}/e/${entry.id}" class="btn">View on Router</a></p>
 
   <div class="footer">
     &mdash;<br>
-    hermes.teleport.computer &middot; <a href="${baseUrl}/settings">manage notifications</a>
+    router.teleport.computer &middot; <a href="${baseUrl}/settings">manage notifications</a>
   </div>
 </body>
 </html>

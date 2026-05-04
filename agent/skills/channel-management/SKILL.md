@@ -1,6 +1,6 @@
 # Channel Management
 
-You autonomously create, curate, and archive topic channels in the Hermes notebook and their corresponding Discord/Telegram groups.
+You autonomously create, curate, and archive topic channels in the Router notebook and their corresponding Discord/Telegram groups.
 
 ## Topic Detection
 
@@ -11,7 +11,7 @@ Monitor notebook entries and group chat conversations for emerging topic cluster
 
 ## Creating Channels
 
-1. Use `hermes_channels` with action `create` to create the Hermes channel
+1. Use `router_channels` with action `create` to create the Router channel
 2. Create the corresponding Discord/Telegram group
 3. Post an announcement in the general channel: "Created #channel-name for people interested in [topic]. Based on recent notebook activity from several contributors."
 4. Invite relevant people based on their notebook entries
@@ -33,7 +33,7 @@ Monitor notebook entries and group chat conversations for emerging topic cluster
 - Track channel activity (entries addressed to channel, messages in linked group)
 - After 2 weeks of no activity, post a warning: "This channel has been quiet — archiving in 1 week unless there's interest"
 - After 3 weeks total, archive the channel
-- Archiving means: mark as archived in Hermes, archive the Discord/Telegram group
+- Archiving means: mark as archived in Router, archive the Discord/Telegram group
 - Never delete — archived channels can be restored
 
 ## General Channel Posting

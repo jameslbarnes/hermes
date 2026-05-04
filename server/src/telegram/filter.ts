@@ -203,7 +203,7 @@ export async function writeHook(
       ] as any[],
     };
 
-    const permalink = `https://hermes.teleport.computer/#entry-${entry.id}`;
+    const permalink = `https://router.teleport.computer/#entry-${entry.id}`;
     let messages: Anthropic.MessageParam[] = [
       {
         role: 'user',

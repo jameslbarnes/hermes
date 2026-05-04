@@ -2,7 +2,7 @@
  * Matrix Platform Plugin with E2EE
  *
  * Implements the Platform interface using matrix-js-sdk with Rust crypto.
- * The bot authenticates with credentials derived from a Hermes secret key
+ * The bot authenticates with credentials derived from a Router secret key
  * and participates in encrypted rooms.
  *
  * Key lessons from Andrew's shape-rotator-matrix work:
@@ -70,8 +70,8 @@ export interface MatrixPlatformConfig {
   cryptoStoreName?: string;
   cryptoStorePassword?: string;
   baseUrl?: string;
-  resolveLinkedPlatformId?: (platform: string, hermesHandle: string) => Promise<string | null>;
-  resolveLinkedHermesHandle?: (platform: string, platformUserId: string) => Promise<string | null>;
+  resolveLinkedPlatformId?: (platform: string, routerHandle: string) => Promise<string | null>;
+  resolveLinkedRouterHandle?: (platform: string, platformUserId: string) => Promise<string | null>;
 }
 
 export interface MatrixHistoryMessage {
@@ -333,7 +333,7 @@ function isMatrixUserId(value: string): boolean {
   return /^@[^:\s]+:[^:\s]+$/.test(value);
 }
 
-function normalizeHermesHandle(value: string | undefined | null): string | null {
+function normalizeRouterHandle(value: string | undefined | null): string | null {
   const normalized = value?.replace(/^@/, '').trim().toLowerCase();
   return normalized || null;
 }
@@ -497,7 +497,7 @@ export class MatrixPlatform implements Platform {
     this.botUserId = userId;
 
     // Crypto callbacks — getSecretStorageKey is called when SSSS needs to unlock
-    // a secret. We derive keys from the bot's Hermes secret key.
+    // a secret. We derive keys from the bot's Router secret key.
     const stableSecret = this.config.botSecretKey;
     const cryptoCallbacks: any = {
       getSecretStorageKey: async ({ keys }: { keys: Record<string, any> }): Promise<[string, Uint8Array] | null> => {
@@ -1028,7 +1028,7 @@ export class MatrixPlatform implements Platform {
 
     const result = await this.client.createRoom({
       name: channelName,
-      topic: description || `Hermes channel: #${channelId}`,
+      topic: description || `Router channel: #${channelId}`,
       room_alias_name: channelId,
       visibility: Visibility.Private,
       preset: Preset.PrivateChat,
@@ -1064,7 +1064,7 @@ export class MatrixPlatform implements Platform {
   }, editorialHook?: string): Promise<string> {
     if (!this.client) throw new Error('Matrix client not started');
 
-    const baseUrl = this.config.baseUrl || 'https://hermes.teleport.computer';
+    const baseUrl = this.config.baseUrl || 'https://router.teleport.computer';
     const permalink = `${baseUrl}/#entry-${entry.id}`;
     const linkedAuthorId = entry.handle
       ? await this.config.resolveLinkedPlatformId?.(this.name, entry.handle)
@@ -1157,8 +1157,8 @@ export class MatrixPlatform implements Platform {
     const room = this.client.getRoom(roomId);
     const event = room?.currentState?.getStateEvents(ROUTER_SPARK_EVENT as any, '');
     const content = event && !Array.isArray(event) ? event.getContent?.() : null;
-    const sourceHandle = normalizeHermesHandle(content?.source_handle);
-    const targetHandle = normalizeHermesHandle(content?.target_handle);
+    const sourceHandle = normalizeRouterHandle(content?.source_handle);
+    const targetHandle = normalizeRouterHandle(content?.target_handle);
 
     if (!sourceHandle || !targetHandle) return null;
     return { sourceHandle, targetHandle };
@@ -1168,7 +1168,7 @@ export class MatrixPlatform implements Platform {
     const pair = await this.getSparkRoomPair(roomId);
     if (!pair) return false;
 
-    const expected = [normalizeHermesHandle(handleA), normalizeHermesHandle(handleB)].sort().join(':');
+    const expected = [normalizeRouterHandle(handleA), normalizeRouterHandle(handleB)].sort().join(':');
     const actual = [pair.sourceHandle, pair.targetHandle].sort().join(':');
     return expected === actual;
   }
@@ -1258,19 +1258,19 @@ export class MatrixPlatform implements Platform {
 
   // ── Identity ───────────────────────────────────────────────
 
-  async resolveHermesHandle(platformUserId: string): Promise<string | null> {
-    const linkedHandle = await this.config.resolveLinkedHermesHandle?.(this.name, platformUserId);
+  async resolveRouterHandle(platformUserId: string): Promise<string | null> {
+    const linkedHandle = await this.config.resolveLinkedRouterHandle?.(this.name, platformUserId);
     if (linkedHandle) return linkedHandle;
 
     const match = platformUserId.match(/^@([^:]+):/);
     return match ? match[1] : null;
   }
 
-  async resolvePlatformId(hermesHandle: string): Promise<string | null> {
-    const linkedUserId = await this.config.resolveLinkedPlatformId?.(this.name, hermesHandle);
+  async resolvePlatformId(routerHandle: string): Promise<string | null> {
+    const linkedUserId = await this.config.resolveLinkedPlatformId?.(this.name, routerHandle);
     if (linkedUserId) return linkedUserId;
 
-    return `@${hermesHandle}:${this.config.serverName}`;
+    return `@${routerHandle}:${this.config.serverName}`;
   }
 
   // ── Formatting ─────────────────────────────────────────────
@@ -1570,7 +1570,7 @@ export class MatrixPlatform implements Platform {
 
         let senderHandle = senderHandleCache.get(senderId);
         if (senderHandle === undefined) {
-          senderHandle = await this.resolveHermesHandle(senderId).catch(() => null);
+          senderHandle = await this.resolveRouterHandle(senderId).catch(() => null);
           senderHandleCache.set(senderId, senderHandle);
         }
 
@@ -1658,7 +1658,7 @@ export class MatrixPlatform implements Platform {
         try {
           await this.client!.sendMessage(
             roomId,
-            await this.createMessageContent('Hi — I\'m the Router. Say `help` for what I can do, or `link` to connect your Hermes notebook account.'),
+            await this.createMessageContent('Hi — I\'m the Router. Say `help` for what I can do, or `link` to connect your Router notebook account.'),
           );
         } catch (err) {
           console.error(`[Matrix] Welcome message failed in ${roomId}:`, err);

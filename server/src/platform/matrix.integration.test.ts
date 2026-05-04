@@ -41,12 +41,12 @@ describe.skipIf(!shouldRun)('MatrixPlatform integration', () => {
   });
 
   describe('identity', () => {
-    it('resolves Hermes handle from Matrix user ID', async () => {
-      const handle = await platform.resolveHermesHandle(`@alice:${MATRIX_SERVER_NAME}`);
+    it('resolves Router handle from Matrix user ID', async () => {
+      const handle = await platform.resolveRouterHandle(`@alice:${MATRIX_SERVER_NAME}`);
       expect(handle).toBe('alice');
     });
 
-    it('resolves platform ID from Hermes handle', async () => {
+    it('resolves platform ID from Router handle', async () => {
       const id = await platform.resolvePlatformId('alice');
       expect(id).toBe(`@alice:${MATRIX_SERVER_NAME}`);
     });
@@ -153,7 +153,7 @@ describe('MatrixPlatform interface contract', () => {
     expect(typeof platform.createRoom).toBe('function');
     expect(typeof platform.inviteToRoom).toBe('function');
     expect(typeof platform.setRoomTopic).toBe('function');
-    expect(typeof platform.resolveHermesHandle).toBe('function');
+    expect(typeof platform.resolveRouterHandle).toBe('function');
     expect(typeof platform.resolvePlatformId).toBe('function');
   });
 });

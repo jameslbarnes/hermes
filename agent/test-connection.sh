@@ -8,7 +8,7 @@
 # What it does:
 #   - Generates a secret key and registers a handle for the agent
 #   - Runs the agent container with that key
-#   - Agent tries to call hermes_poll_events via MCP
+#   - Agent tries to call router_poll_events via MCP
 #   - Prints success or failure
 
 set -e
@@ -16,7 +16,7 @@ set -e
 PORT=${PORT:-3000}
 SERVER_URL="http://host.docker.internal:${PORT}"
 
-echo "=== Hermes Agent Connection Test ==="
+echo "=== Router Agent Connection Test ==="
 echo "Server: ${SERVER_URL}"
 echo ""
 
@@ -36,33 +36,36 @@ echo "   ${REG_RESULT}"
 
 # 3. Run the agent container with a simple query
 echo "3. Testing agent MCP connection..."
-echo "   Running: hermes chat -q 'Call hermes_poll_events with cursor 0' --provider anthropic -Q --yolo"
+echo "   Running: hermes chat -q 'Call router_poll_events with cursor 0' --provider anthropic -Q --yolo"
 echo ""
 
 docker run --rm \
   --add-host=host.docker.internal:host-gateway \
   -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
-  -e HERMES_MCP_URL="${SERVER_URL}/mcp/http" \
-  -e HERMES_SECRET_KEY="${KEY}" \
-  generalsemantics/hermes-agent:test \
+  -e HERMES_HOME="/root/.router" \
+  -e ROUTER_MCP_URL="${SERVER_URL}/mcp/http" \
+  -e ROUTER_SECRET_KEY="${KEY}" \
+  generalsemantics/teleport-router-agent:test \
   bash -c "
+    mkdir -p /root/.router
+
     # Write the .env file
-    echo 'ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}' > /root/.hermes/.env
+    echo 'ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}' > /root/.router/.env
 
     # Update config with resolved URL
-    cat > /root/.hermes/config.yaml << 'YAML'
+    cat > /root/.router/config.yaml << 'YAML'
 model:
   provider: anthropic
   model: claude-opus-4-6
   temperature: 0.7
 
 mcp_servers:
-  hermes:
-    url: \"${HERMES_MCP_URL}?key=${HERMES_SECRET_KEY}\"
+  router:
+    url: \"${ROUTER_MCP_URL}?key=${ROUTER_SECRET_KEY}\"
 YAML
 
     # Run a single query to test the connection
-    hermes chat -q 'List available tools by calling list_tools, then call hermes_poll_events with cursor 0. Report what tools you see and what events you get.' \
+    hermes chat -q 'List available tools by calling list_tools, then call router_poll_events with cursor 0. Report what tools you see and what events you get.' \
       --provider anthropic \
       -Q --yolo
   "

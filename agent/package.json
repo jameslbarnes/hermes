@@ -1,5 +1,5 @@
 {
-  "name": "hermes-agent-wrapper",
+  "name": "teleport-router-agent-wrapper",
   "private": true,
   "type": "module",
   "dependencies": {

@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# System deps for hermes-agent build
+# System deps for the upstream agent build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl build-essential nodejs npm && \
     rm -rf /var/lib/apt/lists/*
@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
-# Clone and install hermes-agent from source
+# Clone and install the upstream agent from source
 RUN git clone --recurse-submodules --depth 1 \
     https://github.com/NousResearch/hermes-agent.git /opt/hermes-agent
 
@@ -21,7 +21,7 @@ RUN uv venv /opt/venv --python 3.11 && \
 ENV PATH="/opt/venv/bin:$PATH"
 ENV VIRTUAL_ENV="/opt/venv"
 
-# Copy defaults to a staging area (NOT directly to /root/.hermes)
+# Copy defaults to a staging area
 # The entrypoint merges these with any existing state on the volume
 WORKDIR /app
 COPY config.yaml /app/defaults/config.yaml
@@ -33,6 +33,6 @@ COPY entrypoint.sh /app/entrypoint.sh
 RUN npm install --omit=dev
 RUN chmod +x /app/entrypoint.sh
 
-VOLUME /root/.hermes
+VOLUME /root/.router
 
 ENTRYPOINT ["/app/entrypoint.sh"]

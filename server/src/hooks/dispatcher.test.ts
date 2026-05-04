@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { HookDispatcher } from './dispatcher.js';
 import { MemoryStorage } from '../storage.js';
-import type { HermesEvent } from '../events.js';
+import type { RouterEvent } from '../events.js';
 
-function makeEvent(type: HermesEvent['type'], data: Record<string, any> = {}): HermesEvent {
+function makeEvent(type: RouterEvent['type'], data: Record<string, any> = {}): RouterEvent {
   return { id: 1, type, timestamp: Date.now(), data };
 }
 

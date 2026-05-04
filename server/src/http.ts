@@ -1,5 +1,5 @@
 /**
- * Hermes HTTP Server
+ * Router HTTP Server
  *
  * Provides:
  * 1. Remote MCP endpoint (for Claude Desktop/Code)
@@ -103,8 +103,8 @@ const STAGING_DELAY_MS = process.env.STAGING_DELAY_MS
   ? parseInt(process.env.STAGING_DELAY_MS)
   : 60 * 60 * 1000;
 
-// Base URL for links - defaults to hermes.teleport.computer but can be overridden
-const BASE_URL = process.env.BASE_URL || 'https://hermes.teleport.computer';
+// Base URL for links - defaults to router.teleport.computer but can be overridden
+const BASE_URL = process.env.BASE_URL || 'https://router.teleport.computer';
 
 // Handles allowed to use agent tools (moderation, events, platform actions)
 const MODERATOR_HANDLES = new Set(
@@ -242,8 +242,8 @@ Note: Your own entries may appear in results. Results only include published ent
 // Tools are generated from this array at runtime
 export const SYSTEM_SKILLS: Skill[] = [
   {
-    id: 'system_hermes_write_entry',
-    name: 'hermes_write_entry',
+    id: 'system_router_write_entry',
+    name: 'router_write_entry',
     description: 'Write a brief entry to the shared notebook. Captures moments from conversations - questions asked, ideas explored, things being built. Present tense, 2-3 sentences.',
     instructions: '', // Builtin - no instructions needed
     handlerType: 'builtin',
@@ -309,8 +309,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_search',
-    name: 'hermes_search',
+    id: 'system_router_search',
+    name: 'router_search',
     description: 'Search the shared notebook for entries matching a query. If the caller has a verified linked Matrix account, this may also include matching recent Matrix room messages visible to that Matrix account. Router can search all non-DM Matrix rooms it has joined, and can pass event.data.room_id to read the current room, including the current DM.',
     instructions: '',
     handlerType: 'builtin',
@@ -347,8 +347,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_delete_entry',
-    name: 'hermes_delete_entry',
+    id: 'system_router_delete_entry',
+    name: 'router_delete_entry',
     description: 'Delete an entry you posted. Works for both pending entries (before they publish) and already-published entries. Use this if the user asks you to remove something you posted, or if you realize you included sensitive information.',
     instructions: '',
     handlerType: 'builtin',
@@ -365,8 +365,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_get_entry',
-    name: 'hermes_get_entry',
+    id: 'system_router_get_entry',
+    name: 'router_get_entry',
     description: 'Get full details of a notebook entry or conversation. Use this after searching to see the complete content of an interesting result. For conversations, this returns the full thread instead of just the summary.',
     instructions: '',
     handlerType: 'builtin',
@@ -383,9 +383,9 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_settings',
-    name: 'hermes_settings',
-    description: 'View or update the user\'s Hermes settings. Always confirm with the user before making changes.',
+    id: 'system_router_settings',
+    name: 'router_settings',
+    description: 'View or update the user\'s Router settings. Always confirm with the user before making changes.',
     instructions: '',
     handlerType: 'builtin',
     inputSchema: {
@@ -434,8 +434,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_skills',
-    name: 'hermes_skills',
+    id: 'system_router_skills',
+    name: 'router_skills',
     description: 'Shape how your Claude behaves. If entries are too long, search isn\'t finding the right things, or the tone is wrong — describe what you want different and Claude will update the instructions. Changes take effect on next connection.',
     instructions: '',
     handlerType: 'builtin',
@@ -449,7 +449,7 @@ export const SYSTEM_SKILLS: Skill[] = [
         },
         tool_name: {
           type: 'string',
-          description: 'For edit/reset: the system tool name (e.g., "hermes_write_entry", "hermes_search").',
+          description: 'For edit/reset: the system tool name (e.g., "router_write_entry", "router_search").',
         },
         description: {
           type: 'string',
@@ -461,7 +461,7 @@ export const SYSTEM_SKILLS: Skill[] = [
         },
         name: {
           type: 'string',
-          description: 'For create: skill name (lowercase, [a-z0-9_], 1-30 chars). Must not start with "hermes".',
+          description: 'For create: skill name (lowercase, [a-z0-9_], 1-30 chars). Must not start with "router".',
         },
         skill_id: {
           type: 'string',
@@ -510,8 +510,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_skills_browse',
-    name: 'hermes_skills_browse',
+    id: 'system_router_skills_browse',
+    name: 'router_skills_browse',
     description: 'Browse the public skills gallery. Discover skills created by other users that you can clone and customize.',
     instructions: '',
     handlerType: 'builtin',
@@ -531,8 +531,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_skills_clone',
-    name: 'hermes_skills_clone',
+    id: 'system_router_skills_clone',
+    name: 'router_skills_clone',
     description: 'Clone a skill from the public gallery into your own skill list. The cloned skill starts as private with no destinations — customize it after cloning.',
     instructions: '',
     handlerType: 'builtin',
@@ -553,8 +553,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_follow',
-    name: 'hermes_follow',
+    id: 'system_router_follow',
+    name: 'router_follow',
     description: 'Manage your following list. Follow users to boost their entries in search and get context for addressing.',
     instructions: '',
     handlerType: 'builtin',
@@ -580,8 +580,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_channels',
-    name: 'hermes_channels',
+    id: 'system_router_channels',
+    name: 'router_channels',
     description: 'Manage channel memberships. Channels are shared containers with subscribers and attached skills.',
     instructions: '',
     handlerType: 'builtin',
@@ -637,8 +637,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_poll_events',
-    name: 'hermes_poll_events',
+    id: 'system_router_poll_events',
+    name: 'router_poll_events',
     description: 'Poll for new events since a cursor. Returns events like entry_staged, entry_published, platform_message, platform_mention. Use this in a loop to react to what\'s happening in real time.',
     instructions: '',
     handlerType: 'builtin',
@@ -659,8 +659,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_review_staged',
-    name: 'hermes_review_staged',
+    id: 'system_router_review_staged',
+    name: 'router_review_staged',
     description: 'Review entries currently in the staging buffer. Moderators see all pending entries; regular users see only their own. Use this to evaluate entries before they publish — for content moderation, quality review, or checking your own pending posts.',
     instructions: '',
     handlerType: 'builtin',
@@ -677,8 +677,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_hold_entry',
-    name: 'hermes_hold_entry',
+    id: 'system_router_hold_entry',
+    name: 'router_hold_entry',
     description: 'Hold a staged entry indefinitely, preventing it from auto-publishing. The entry stays in the buffer forever until manually released or deleted. Use this for content moderation when an entry contains sensitive content that should not be published without review. The author will be notified.',
     instructions: '',
     handlerType: 'builtin',
@@ -699,8 +699,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_release_entry',
-    name: 'hermes_release_entry',
+    id: 'system_router_release_entry',
+    name: 'router_release_entry',
     description: 'Release a held entry for immediate publication. Use this after reviewing a held entry and determining it is safe to publish.',
     instructions: '',
     handlerType: 'builtin',
@@ -717,8 +717,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_daily_question',
-    name: 'hermes_daily_question',
+    id: 'system_router_daily_question',
+    name: 'router_daily_question',
     description: 'Gather context for a personalized daily question. Call this proactively at the start of a conversation. Returns recent notebook activity so you can ask a thoughtful question about what the user has been working on. Available once per day (resets midnight UTC).',
     instructions: '',
     handlerType: 'builtin',
@@ -726,8 +726,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_platform_send',
-    name: 'hermes_platform_send',
+    id: 'system_router_platform_send',
+    name: 'router_platform_send',
     description: 'Send a message to a room on any connected platform (Matrix, Telegram, etc.).',
     instructions: '',
     handlerType: 'builtin',
@@ -744,8 +744,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_send_dm',
-    name: 'hermes_send_dm',
+    id: 'system_router_send_dm',
+    name: 'router_send_dm',
     description: 'Send a direct message to a linked account on a connected platform. Defaults to your own linked account. Moderators may target another handle.',
     instructions: '',
     handlerType: 'builtin',
@@ -754,15 +754,15 @@ export const SYSTEM_SKILLS: Skill[] = [
       properties: {
         platform: { type: 'string', description: 'Platform name (e.g. "matrix", "telegram")' },
         text: { type: 'string', description: 'Message text (markdown supported)' },
-        handle: { type: 'string', description: 'Optional Hermes handle to DM instead of yourself. Moderators only.' },
+        handle: { type: 'string', description: 'Optional Router handle to DM instead of yourself. Moderators only.' },
       },
       required: ['platform', 'text'],
     },
     createdAt: 0,
   },
   {
-    id: 'system_hermes_platform_create_room',
-    name: 'hermes_platform_create_room',
+    id: 'system_router_platform_create_room',
+    name: 'router_platform_create_room',
     description: 'Create a new room on a platform. Use for introductions, channels, or ad-hoc groups.',
     instructions: '',
     handlerType: 'builtin',
@@ -775,7 +775,7 @@ export const SYSTEM_SKILLS: Skill[] = [
         invite_handles: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Hermes handles to invite',
+          description: 'Router handles to invite',
         },
         topic: { type: 'string', description: 'Room topic/description' },
         encrypted: { type: 'boolean', description: 'Enable encryption (default true for DMs/groups)' },
@@ -785,8 +785,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_search_sparks',
-    name: 'hermes_search_sparks',
+    id: 'system_router_search_sparks',
+    name: 'router_search_sparks',
     description: 'Search for potential introduction opportunities (sparks) between notebook users. Returns pairs of people with overlapping interests and their connection status.',
     instructions: '',
     handlerType: 'builtin',
@@ -801,16 +801,16 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_trigger_spark',
-    name: 'hermes_trigger_spark',
+    id: 'system_router_trigger_spark',
+    name: 'router_trigger_spark',
     description: 'Moderator-only: manually create or reuse a private spark room between two users for testing or facilitation.',
     instructions: '',
     handlerType: 'builtin',
     inputSchema: {
       type: 'object',
       properties: {
-        source_handle: { type: 'string', description: 'First Hermes handle' },
-        target_handle: { type: 'string', description: 'Second Hermes handle' },
+        source_handle: { type: 'string', description: 'First Router handle' },
+        target_handle: { type: 'string', description: 'Second Router handle' },
         reason: { type: 'string', description: 'Why these two should talk' },
         message: { type: 'string', description: 'Optional message to post into the spark room' },
       },
@@ -819,8 +819,8 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_connection_graph',
-    name: 'hermes_connection_graph',
+    id: 'system_router_connection_graph',
+    name: 'router_connection_graph',
     description: 'Get a user\'s connection graph — who they\'re connected to, shared channels, mutual follows, and interaction history.',
     instructions: '',
     handlerType: 'builtin',
@@ -834,9 +834,9 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
-    id: 'system_hermes_link_platform',
-    name: 'hermes_link_platform',
-    description: 'Link a platform account (Matrix, Telegram, etc.) to your Hermes identity. First DM the Router bot on the platform with "link" to get a one-time code, then call this tool with the code. After linking, the Router agent can send you personalized digests, introduction suggestions, and notifications on that platform.',
+    id: 'system_router_link_platform',
+    name: 'router_link_platform',
+    description: 'Link a platform account (Matrix, Telegram, etc.) to your Router identity. First DM the Router bot on the platform with "link" to get a one-time code, then call this tool with the code. After linking, the Router agent can send you personalized digests, introduction suggestions, and notifications on that platform.',
     instructions: '',
     handlerType: 'builtin',
     inputSchema: {
@@ -856,8 +856,11 @@ export const SYSTEM_SKILLS: Skill[] = [
 const PORT = process.env.PORT || 3000;
 
 const useFirestore = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS;
+const useStagedMemory = process.env.STAGED_STORAGE === 'memory';
 const storage = useFirestore
   ? new StagedStorage(STAGING_DELAY_MS)
+  : useStagedMemory
+    ? new StagedStorage(STAGING_DELAY_MS, new MemoryStorage())
   : new MemoryStorage();
 const STATIC_DIR = join(process.cwd(), '..');
 
@@ -955,9 +958,9 @@ const notificationService: NotificationService = createNotificationService({
   storage,
   emailClient,
   anthropic,
-  fromEmail: process.env.SENDGRID_FROM_EMAIL || 'notify@hermes.teleport.computer',
+  fromEmail: process.env.SENDGRID_FROM_EMAIL || 'notify@router.teleport.computer',
   baseUrl: BASE_URL,
-  jwtSecret: process.env.JWT_SECRET || 'hermes-default-secret-change-in-production',
+  jwtSecret: process.env.JWT_SECRET || 'router-default-secret-change-in-production',
 });
 
 // Start daily digest job (runs hourly, sends at 14:00 UTC)
@@ -1096,8 +1099,8 @@ if (storage instanceof StagedStorage) {
         storage,
         notificationService,
         emailClient: emailClient || undefined,
-        fromEmail: process.env.SENDGRID_FROM_EMAIL || 'notify@hermes.teleport.computer',
-        baseUrl: process.env.BASE_URL || 'https://hermes.teleport.computer',
+        fromEmail: process.env.SENDGRID_FROM_EMAIL || 'notify@router.teleport.computer',
+        baseUrl: process.env.BASE_URL || 'https://router.teleport.computer',
       };
       try {
         const results = await deliverEntry(entry, deliveryConfig);
@@ -1110,7 +1113,7 @@ if (storage instanceof StagedStorage) {
       }
     }
 
-    // Push entry_published event for the agent (no content — agent reads via hermes_get_entry)
+    // Push entry_published event for the agent (no content — agent reads via router_get_entry)
     pushEvent('entry_published', {
       entry_id: entry.id,
       entry,
@@ -1337,8 +1340,8 @@ export function validateSkillName(name: string): string | null {
   if (!SKILL_NAME_REGEX.test(name)) {
     return 'Skill name must be 1-30 characters, lowercase letters, numbers, and underscores only.';
   }
-  if (name.startsWith('hermes')) {
-    return 'Skill names cannot start with "hermes" (reserved for system tools).';
+  if (name.startsWith('router')) {
+    return 'Skill names cannot start with "router" (reserved for system tools).';
   }
   return null;
 }
@@ -1452,7 +1455,7 @@ function createMCPServer(secretKey: string) {
   }
 
   const server = new Server(
-    { name: 'hermes', version: '0.1.0' },
+    { name: 'teleport-router', version: '0.1.0' },
     { capabilities: { tools: { listChanged: true } } }
   );
 
@@ -1474,7 +1477,7 @@ function createMCPServer(secretKey: string) {
 
       // First-run hint for new users
       if (user && !user.onboardedAt) {
-        identityText += `\n\nThis person just joined Hermes. If they seem unsure, ask what brought them here. Help them: write their first entry, follow people, or browse channels.`;
+        identityText += `\n\nThis person just joined Router. If they seem unsure, ask what brought them here. Help them: write their first entry, follow people, or browse channels.`;
       }
 
       dynamicDescription = dynamicDescription.replace(
@@ -1495,7 +1498,7 @@ function createMCPServer(secretKey: string) {
           const summariesText = dailySummaries
             .map(ds => `${ds.date}: ${ds.content}`)
             .join('\n\n');
-          dynamicDescription += `\n\nRECENT ACTIVITY IN THE NOTEBOOK\n\nHere's what's been happening in the shared notebook recently. If something here is relevant to your current conversation, you can use hermes_search to find specific entries.\n\n${summariesText}`;
+          dynamicDescription += `\n\nRECENT ACTIVITY IN THE NOTEBOOK\n\nHere's what's been happening in the shared notebook recently. If something here is relevant to your current conversation, you can use router_search to find specific entries.\n\n${summariesText}`;
         }
       } catch (err) {
         // Silently fail - don't break tools if summaries fail
@@ -1519,7 +1522,7 @@ function createMCPServer(secretKey: string) {
           const channelText = subscribedChannels
             .map(c => `• #${c.id} — ${c.name}${c.description ? ': ' + c.description : ''}`)
             .join('\n');
-          dynamicDescription += `\n\nYOUR CHANNELS:\n${channelText}\n\nUse hermes_channels to list, join, or leave channels.`;
+          dynamicDescription += `\n\nYOUR CHANNELS:\n${channelText}\n\nUse router_channels to list, join, or leave channels.`;
         }
       } catch {
         // Silently fail - don't break tools if channels fail
@@ -1543,7 +1546,7 @@ function createMCPServer(secretKey: string) {
     const tools = SYSTEM_SKILLS
       .filter(skill => {
         if (skill.handlerType !== 'builtin') return false;
-        if (skill.name === 'hermes_daily_question') {
+        if (skill.name === 'router_daily_question') {
           if (!user) return false;
           const last = user.lastDailyQuestionAt;
           if (last) {
@@ -1553,7 +1556,7 @@ function createMCPServer(secretKey: string) {
           }
         }
         // Moderation tools: only show to moderators (or if no moderators configured, show to all)
-        if (['hermes_poll_events', 'hermes_review_staged', 'hermes_hold_entry', 'hermes_release_entry', 'hermes_trigger_spark'].includes(skill.name)) {
+        if (['router_poll_events', 'router_review_staged', 'router_hold_entry', 'router_release_entry', 'router_trigger_spark'].includes(skill.name)) {
           if (!(storage instanceof StagedStorage)) return false;
           if (MODERATOR_HANDLES.size > 0 && (!handle || !MODERATOR_HANDLES.has(handle))) return false;
         }
@@ -1565,13 +1568,13 @@ function createMCPServer(secretKey: string) {
 
         // Dynamic descriptions for certain tools
         let description = override?.description || skill.description;
-        if (skill.name === 'hermes_write_entry' && !override?.description) {
+        if (skill.name === 'router_write_entry' && !override?.description) {
           description = dynamicDescription;
-        } else if (skill.name === 'hermes_search' && !override?.description) {
+        } else if (skill.name === 'router_search' && !override?.description) {
           description = SEARCH_TOOL_DESCRIPTION;
-        } else if (skill.name === 'hermes_settings' && !override?.description) {
-          description = `View or update the user's Hermes settings. Current settings: aiOnly=${aiOnlyDefault}. Always confirm with the user before making changes.`;
-        } else if (skill.name === 'hermes_skills' && !override?.description) {
+        } else if (skill.name === 'router_settings' && !override?.description) {
+          description = `View or update the user's Router settings. Current settings: aiOnly=${aiOnlyDefault}. Always confirm with the user before making changes.`;
+        } else if (skill.name === 'router_skills' && !override?.description) {
           const overrideCount = Object.keys(skillOverrides).length;
           const userSkillCount = userSkills.length;
           description = skill.description;
@@ -1642,7 +1645,7 @@ function createMCPServer(secretKey: string) {
       return Number.isNaN(parsed) ? undefined : parsed;
     };
 
-    const executeHermesSearch = async ({
+    const executeRouterSearch = async ({
       query,
       handleFilter,
       limit,
@@ -1731,7 +1734,7 @@ function createMCPServer(secretKey: string) {
         .slice(0, limit);
     };
 
-    const formatHermesSearchText = ({
+    const formatRouterSearchText = ({
       query,
       handleFilter,
       results,
@@ -1751,7 +1754,7 @@ function createMCPServer(secretKey: string) {
       const searchDesc = handleFilter
         ? (query ? ` by @${handleFilter} matching "${query}"` : ` by @${handleFilter}`)
         : (query ? ` matching "${query}"` : '');
-      return `Found ${results.length} notebook results${searchDesc}:\n\n${resultsText}\n\nUse hermes_get_entry with an ID to see full details.`;
+      return `Found ${results.length} notebook results${searchDesc}:\n\n${resultsText}\n\nUse router_get_entry with an ID to see full details.`;
     };
 
     const getToolUser = async (): Promise<User | null> => {
@@ -1832,9 +1835,9 @@ function createMCPServer(secretKey: string) {
 
       const [keywordResults, entryResults] = await Promise.all([
         keywordQuery
-          ? executeHermesSearch({ query: keywordQuery, limit })
+          ? executeRouterSearch({ query: keywordQuery, limit })
           : Promise.resolve([]),
-        executeHermesSearch({ query: entryText.trim(), limit }),
+        executeRouterSearch({ query: entryText.trim(), limit }),
       ]);
 
       const results = [...keywordResults, ...entryResults]
@@ -1848,7 +1851,7 @@ function createMCPServer(secretKey: string) {
     };
 
     // Handle write tool
-    if (name === 'hermes_write_entry') {
+    if (name === 'router_write_entry') {
       const entry = (args as { entry?: string })?.entry;
       const client = (args as { client?: 'desktop' | 'mobile' | 'code' })?.client;
       const model = (args as { model?: string })?.model;
@@ -1980,7 +1983,7 @@ function createMCPServer(secretKey: string) {
               if (currentUser?.email && currentUser.emailVerified && emailClient) {
                 emailClient.send({
                   to: currentUser.email,
-                  from: process.env.SENDGRID_FROM_EMAIL || 'notify@hermes.teleport.computer',
+                  from: process.env.SENDGRID_FROM_EMAIL || 'notify@router.teleport.computer',
                   subject: 'One of your notebook entries needs a look',
                   html: `
 <p>Hey @${currentHandle} —</p>
@@ -1993,7 +1996,7 @@ function createMCPServer(secretKey: string) {
 </ul>
 <p>The entry is still saved and hasn't been shared with anyone.</p>
 <p style="margin-top: 24px; color: #888; font-size: 13px;">
-  <a href="${BASE_URL}">hermes.teleport.computer</a>
+  <a href="${BASE_URL}">router.teleport.computer</a>
 </p>`,
                 }).catch(err => console.error('[Moderation] Email failed:', err));
               }
@@ -2036,7 +2039,7 @@ function createMCPServer(secretKey: string) {
         limit: 5,
       });
 
-      responseText += `\n\nRelated results:\n${formatHermesSearchText({
+      responseText += `\n\nRelated results:\n${formatRouterSearchText({
         query: queryUsed,
         results: relatedResults,
       })}`;
@@ -2050,7 +2053,7 @@ function createMCPServer(secretKey: string) {
     }
 
     // Handle delete entry tool
-    if (name === 'hermes_delete_entry') {
+    if (name === 'router_delete_entry') {
       const entryId = (args as { entry_id?: string })?.entry_id;
 
       if (!entryId) {
@@ -2096,7 +2099,7 @@ function createMCPServer(secretKey: string) {
     }
 
     // Handle get entry details tool
-    if (name === 'hermes_get_entry') {
+    if (name === 'router_get_entry') {
       const entryId = (args as { entry_id?: string })?.entry_id;
 
       if (!entryId) {
@@ -2154,7 +2157,7 @@ function createMCPServer(secretKey: string) {
     }
 
     // Handle search tool
-    if (name === 'hermes_search') {
+    if (name === 'router_search') {
       const query = (args as { query?: string })?.query?.trim();
       const handleFilter = (args as { handle?: string })?.handle?.replace(/^@/, '').toLowerCase();
       const limit = (args as { limit?: number })?.limit || 10;
@@ -2170,7 +2173,7 @@ function createMCPServer(secretKey: string) {
         };
       }
 
-      const results = await executeHermesSearch({
+      const results = await executeRouterSearch({
         query,
         handleFilter,
         limit,
@@ -2182,7 +2185,7 @@ function createMCPServer(secretKey: string) {
       if (includeMatrix && (query || roomId || since)) {
         const toolUser = await getToolUser();
         const viewerMatrixId = await getVerifiedMatrixUserId(toolUser);
-        const routerHandle = normalizeHandle(process.env.HERMES_AGENT_HANDLE || process.env.MATRIX_BOT_HANDLE || 'router');
+        const routerHandle = normalizeHandle(process.env.ROUTER_AGENT_HANDLE || process.env.MATRIX_BOT_HANDLE || 'router');
         const isRouterCaller = toolUser?.handle ? normalizeHandle(toolUser.handle) === routerHandle : false;
         const canUseRouterMatrix = isRouterCaller;
 
@@ -2203,7 +2206,7 @@ function createMCPServer(secretKey: string) {
 
       const shouldShowNotebookResults = !!query || !!handleFilter || !!since || results.length > 0;
       const notebookText = shouldShowNotebookResults
-        ? formatHermesSearchText({ query, handleFilter, results })
+        ? formatRouterSearchText({ query, handleFilter, results })
         : '';
       const matrixText = formatMatrixSearchText(matrixMessages);
       const responseParts: string[] = [];
@@ -2222,7 +2225,7 @@ function createMCPServer(secretKey: string) {
     }
 
     // Handle manage_settings tool
-    if (name === 'hermes_settings') {
+    if (name === 'router_settings') {
       const action = (args as { action?: string })?.action;
 
       if (!action || !['get', 'update'].includes(action)) {
@@ -2338,8 +2341,8 @@ function createMCPServer(secretKey: string) {
       };
     }
 
-    // Handle hermes_skills tool (system tool overrides + user skill CRUD)
-    if (name === 'hermes_skills') {
+    // Handle router_skills tool (system tool overrides + user skill CRUD)
+    if (name === 'router_skills') {
       try {
       const action = (args as { action?: string })?.action;
       const validActions = ['list', 'edit', 'reset', 'create', 'get', 'update', 'delete'];
@@ -2741,7 +2744,7 @@ function createMCPServer(secretKey: string) {
         };
       }
       } catch (error: any) {
-        console.error('hermes_skills error:', error);
+        console.error('router_skills error:', error);
         return {
           content: [{ type: 'text' as const, text: `Failed to manage tools: ${error?.message || 'Unknown error'}` }],
           isError: true,
@@ -2750,7 +2753,7 @@ function createMCPServer(secretKey: string) {
     }
 
     // Handle follow tool
-    if (name === 'hermes_follow') {
+    if (name === 'router_follow') {
       const action = (args as { action?: string })?.action;
       const targetHandle = (args as { handle?: string })?.handle?.replace(/^@/, '').toLowerCase();
       const note = (args as { note?: string })?.note;
@@ -2893,8 +2896,8 @@ function createMCPServer(secretKey: string) {
       }
     }
 
-    // Handle hermes_channels tool
-    if (name === 'hermes_channels') {
+    // Handle router_channels tool
+    if (name === 'router_channels') {
       const action = (args as { action?: string })?.action;
       const channelId = (args as { channel_id?: string })?.channel_id?.toLowerCase();
       const channelName = (args as { name?: string })?.name;
@@ -2987,7 +2990,7 @@ function createMCPServer(secretKey: string) {
           }
 
           return {
-            content: [{ type: 'text' as const, text: `Created channel #${channel.id} (${channel.joinRule || 'open'}). You are the admin.\n\nNow let's set it up. Interview the user about what skills this channel should have. Skills define what kind of content gets posted — e.g. "cool_people" for tracking interesting contacts, "cool_papers" for documenting papers, etc.\n\nFor each skill, figure out:\n- A short name (lowercase, hyphens ok)\n- A description (what triggers this skill)\n- Instructions (how to format/structure the entry)\n\nThen use hermes_channels action: "add_skill" to create each one.` }],
+            content: [{ type: 'text' as const, text: `Created channel #${channel.id} (${channel.joinRule || 'open'}). You are the admin.\n\nNow let's set it up. Interview the user about what skills this channel should have. Skills define what kind of content gets posted — e.g. "cool_people" for tracking interesting contacts, "cool_papers" for documenting papers, etc.\n\nFor each skill, figure out:\n- A short name (lowercase, hyphens ok)\n- A description (what triggers this skill)\n- Instructions (how to format/structure the entry)\n\nThen use router_channels action: "add_skill" to create each one.` }],
           };
         } catch (err: any) {
           return {
@@ -3137,7 +3140,7 @@ function createMCPServer(secretKey: string) {
 
         const inviteUrl = `${BASE_URL}/?view=channel&id=${encodeURIComponent(channelId)}&invite=${encodeURIComponent(token)}`;
         return {
-          content: [{ type: 'text' as const, text: `Invite created for #${channelId}.\n\nJoin link: ${inviteUrl}\nToken: ${token}\n\nUsers can click the link to join. They can also join manually with: hermes_channels action: "join", channel_id: "${channelId}", invite_token: "${token}"` }],
+          content: [{ type: 'text' as const, text: `Invite created for #${channelId}.\n\nJoin link: ${inviteUrl}\nToken: ${token}\n\nUsers can click the link to join. They can also join manually with: router_channels action: "join", channel_id: "${channelId}", invite_token: "${token}"` }],
         };
       }
 
@@ -3203,7 +3206,7 @@ function createMCPServer(secretKey: string) {
 
         // Create an addressed entry to the target user with the invitation
         const inviteUrl = `${BASE_URL}/?view=channel&id=${encodeURIComponent(channelId)}&invite=${encodeURIComponent(token)}`;
-        const inviteMessage = `You've been invited to join #${channelId} by @${currentUser.handle}.\n\nChannel: ${channel.name}${channel.description ? ' — ' + channel.description : ''}\n\nJoin link: ${inviteUrl}\n\nManual fallback: hermes_channels action: "join", channel_id: "${channelId}", invite_token: "${token}"`;
+        const inviteMessage = `You've been invited to join #${channelId} by @${currentUser.handle}.\n\nChannel: ${channel.name}${channel.description ? ' — ' + channel.description : ''}\n\nJoin link: ${inviteUrl}\n\nManual fallback: router_channels action: "join", channel_id: "${channelId}", invite_token: "${token}"`;
 
         // Use short staging delay (60 seconds) so invitations arrive quickly
         const shortStagingDelay = 60 * 1000;
@@ -3331,8 +3334,8 @@ function createMCPServer(secretKey: string) {
       }
     }
 
-    // Handle hermes_skills_browse tool
-    if (name === 'hermes_skills_browse') {
+    // Handle router_skills_browse tool
+    if (name === 'router_skills_browse') {
       try {
         const query = (args as { query?: string })?.query?.toLowerCase();
         const limit = Math.min((args as { limit?: number })?.limit || 20, 50);
@@ -3375,11 +3378,11 @@ function createMCPServer(secretKey: string) {
         return {
           content: [{
             type: 'text' as const,
-            text: `Public Skills Gallery (${filtered.length} results):\n\n${list}\n\nUse hermes_skills_clone to copy a skill to your account.`,
+            text: `Public Skills Gallery (${filtered.length} results):\n\n${list}\n\nUse router_skills_clone to copy a skill to your account.`,
           }],
         };
       } catch (error: any) {
-        console.error('hermes_skills_browse error:', error);
+        console.error('router_skills_browse error:', error);
         return {
           content: [{ type: 'text' as const, text: `Failed to browse skills: ${error?.message || 'Unknown error'}` }],
           isError: true,
@@ -3387,8 +3390,8 @@ function createMCPServer(secretKey: string) {
       }
     }
 
-    // Handle hermes_skills_clone tool
-    if (name === 'hermes_skills_clone') {
+    // Handle router_skills_clone tool
+    if (name === 'router_skills_clone') {
       try {
         const skillName = (args as { skill_name?: string })?.skill_name;
         const authorHandle = (args as { author?: string })?.author?.replace(/^@/, '').toLowerCase();
@@ -3483,13 +3486,13 @@ function createMCPServer(secretKey: string) {
             type: 'text' as const,
             text: `Cloned "${skillName}" from @${authorHandle}!\n\n` +
               `Tool name: skill_${skillName}\n` +
-              `Destinations: (none — configure with hermes_skills update)\n` +
+              `Destinations: (none — configure with router_skills update)\n` +
               `Gallery: private\n\n` +
               `The skill_${skillName} tool is now available.`,
           }],
         };
       } catch (error: any) {
-        console.error('hermes_skills_clone error:', error);
+        console.error('router_skills_clone error:', error);
         return {
           content: [{ type: 'text' as const, text: `Failed to clone skill: ${error?.message || 'Unknown error'}` }],
           isError: true,
@@ -3582,7 +3585,7 @@ function createMCPServer(secretKey: string) {
             searchKeywords: rawSearchKeywords,
             limit: 5,
           });
-          responseText += `\n\nRelated results:\n${formatHermesSearchText({
+          responseText += `\n\nRelated results:\n${formatRouterSearchText({
             query: queryUsed,
             results: relatedResults,
           })}`;
@@ -3690,7 +3693,7 @@ function createMCPServer(secretKey: string) {
             searchKeywords: rawSearchKeywords,
             limit: 5,
           });
-          responseText += `\n\nRelated results:\n${formatHermesSearchText({
+          responseText += `\n\nRelated results:\n${formatRouterSearchText({
             query: queryUsed,
             results: relatedResults,
           })}`;
@@ -3737,12 +3740,12 @@ function createMCPServer(secretKey: string) {
     // Agent infrastructure tools
     // ─────────────────────────────────────────────────────────────
 
-    if (name === 'hermes_poll_events') {
+    if (name === 'router_poll_events') {
       const handle = await getHandle();
       const isModerator = handle && MODERATOR_HANDLES.has(handle);
       if (MODERATOR_HANDLES.size > 0 && !isModerator) {
         return {
-          content: [{ type: 'text' as const, text: 'Only the Hermes agent can poll events.' }],
+          content: [{ type: 'text' as const, text: 'Only the Router agent can poll events.' }],
           isError: true,
         };
       }
@@ -3777,7 +3780,7 @@ function createMCPServer(secretKey: string) {
       };
     }
 
-    // (Telegram send/get_messages removed — handled by Nous Hermes gateway)
+    // (Telegram send/get_messages removed — handled by Nous Router gateway)
 
     // Placeholder to maintain code structure
     if (false) {
@@ -3790,7 +3793,7 @@ function createMCPServer(secretKey: string) {
     // Content moderation tools
     // ─────────────────────────────────────────────────────────────
 
-    if (name === 'hermes_review_staged') {
+    if (name === 'router_review_staged') {
       if (!(storage instanceof StagedStorage)) {
         return {
           content: [{ type: 'text' as const, text: 'Staging is not enabled on this server.' }],
@@ -3836,7 +3839,7 @@ function createMCPServer(secretKey: string) {
       };
     }
 
-    if (name === 'hermes_hold_entry') {
+    if (name === 'router_hold_entry') {
       if (!(storage instanceof StagedStorage)) {
         return {
           content: [{ type: 'text' as const, text: 'Staging is not enabled on this server.' }],
@@ -3892,7 +3895,7 @@ function createMCPServer(secretKey: string) {
             try {
               await emailClient.send({
                 to: authorUser.email,
-                from: process.env.SENDGRID_FROM_EMAIL || 'notify@hermes.teleport.computer',
+                from: process.env.SENDGRID_FROM_EMAIL || 'notify@router.teleport.computer',
                 subject: 'One of your notebook entries needs a look',
                 html: `
 <p>Hey @${authorHandle} —</p>
@@ -3905,7 +3908,7 @@ function createMCPServer(secretKey: string) {
 </ul>
 <p>The entry is still saved and hasn't been shared with anyone.</p>
 <p style="margin-top: 24px; color: #888; font-size: 13px;">
-  <a href="${BASE_URL}">hermes.teleport.computer</a>
+  <a href="${BASE_URL}">router.teleport.computer</a>
 </p>`,
               });
             } catch (emailErr) {
@@ -3922,7 +3925,7 @@ function createMCPServer(secretKey: string) {
       };
     }
 
-    if (name === 'hermes_release_entry') {
+    if (name === 'router_release_entry') {
       if (!(storage instanceof StagedStorage)) {
         return {
           content: [{ type: 'text' as const, text: 'Staging is not enabled on this server.' }],
@@ -3973,7 +3976,7 @@ function createMCPServer(secretKey: string) {
     }
 
     // Handle daily question tool
-    if (name === 'hermes_daily_question') {
+    if (name === 'router_daily_question') {
       try {
         const currentUser = await storage.getUserByKeyHash(keyHash);
         if (!currentUser?.handle) {
@@ -4082,7 +4085,7 @@ function createMCPServer(secretKey: string) {
           content: [{ type: 'text' as const, text: context }],
         };
       } catch (error: any) {
-        console.error('hermes_daily_question error:', error);
+        console.error('router_daily_question error:', error);
         return {
           content: [{ type: 'text' as const, text: `Daily question error: ${error?.message || 'Unknown error'}` }],
           isError: true,
@@ -4091,7 +4094,7 @@ function createMCPServer(secretKey: string) {
     }
 
     // ── Platform Tools ──────────────────────────────────────
-    if (name === 'hermes_platform_send') {
+    if (name === 'router_platform_send') {
       const a = args as { platform: string; room_id: string; text: string; reply_to?: string };
       const platform = getPlatform(a.platform);
       if (!platform) {
@@ -4105,7 +4108,7 @@ function createMCPServer(secretKey: string) {
       }
     }
 
-    if (name === 'hermes_send_dm') {
+    if (name === 'router_send_dm') {
       const a = args as { platform?: string; text?: string; handle?: string };
       const platformName = a.platform?.trim();
       const text = a.text?.trim();
@@ -4121,7 +4124,7 @@ function createMCPServer(secretKey: string) {
       const requester = await storage.getUserByKeyHash(keyHash);
       if (!requester?.handle) {
         return {
-          content: [{ type: 'text' as const, text: 'You need to register a Hermes handle first.' }],
+          content: [{ type: 'text' as const, text: 'You need to register a Router handle first.' }],
           isError: true,
         };
       }
@@ -4176,7 +4179,7 @@ function createMCPServer(secretKey: string) {
       }
     }
 
-    if (name === 'hermes_platform_create_room') {
+    if (name === 'router_platform_create_room') {
       const a = args as { platform: string; name: string; type?: string; invite_handles?: string[]; topic?: string; encrypted?: boolean };
       const platform = getPlatform(a.platform);
       if (!platform) {
@@ -4195,7 +4198,7 @@ function createMCPServer(secretKey: string) {
       }
     }
 
-    if (name === 'hermes_search_sparks') {
+    if (name === 'router_search_sparks') {
       try {
         const a = args as { handle?: string; query?: string };
         const { detectSparks: detect } = await import('./intelligence/sparks.js');
@@ -4229,7 +4232,7 @@ function createMCPServer(secretKey: string) {
       }
     }
 
-    if (name === 'hermes_trigger_spark') {
+    if (name === 'router_trigger_spark') {
       try {
         const requester = await storage.getUserByKeyHash(keyHash);
         const isModerator = !!requester?.handle && (MODERATOR_HANDLES.size === 0 || MODERATOR_HANDLES.has(requester.handle));
@@ -4290,7 +4293,7 @@ function createMCPServer(secretKey: string) {
       }
     }
 
-    if (name === 'hermes_connection_graph') {
+    if (name === 'router_connection_graph') {
       try {
         const a = args as { handle: string };
         const user = await storage.getUser(a.handle);
@@ -4319,7 +4322,7 @@ function createMCPServer(secretKey: string) {
       }
     }
 
-    if (name === 'hermes_link_platform') {
+    if (name === 'router_link_platform') {
       try {
         const a = args as { code: string };
         if (!a.code) {
@@ -4338,7 +4341,7 @@ function createMCPServer(secretKey: string) {
         const linkUser = await storage.getUserByKeyHash(keyHash);
         if (!linkUser?.handle) {
           return {
-            content: [{ type: 'text' as const, text: 'You need to register a Hermes handle first. Run hermes_settings with action "get" to see your account status.' }],
+            content: [{ type: 'text' as const, text: 'You need to register a Router handle first. Run router_settings with action "get" to see your account status.' }],
             isError: true,
           };
         }
@@ -4544,7 +4547,7 @@ const server = createServer(async (req, res) => {
         app_id: appId,
         git_sha: gitSha,
         image_digest: imageDigest,
-        source_code: 'https://github.com/jameslbarnes/hermes',
+        source_code: 'https://github.com/jameslbarnes/teleport-router',
         trust_center: `https://trust.phala.com/app/${appId}`,
         tee_metadata: `https://${appId}-8090.dstack-pha-prod9.phala.network/`,
         env_vars: envStatus,
@@ -6170,7 +6173,7 @@ const server = createServer(async (req, res) => {
       // Create addressed entry to target user
       const pseudonym = derivePseudonym(parsed.secret_key);
       const inviteUrl = `${BASE_URL}/?view=channel&id=${encodeURIComponent(channelId)}&invite=${encodeURIComponent(token)}`;
-      const inviteMessage = `You've been invited to join #${channelId} by @${user.handle}.\n\nChannel: ${channel.name}${channel.description ? ' — ' + channel.description : ''}\n\nJoin link: ${inviteUrl}\n\nManual fallback: hermes_channels action: "join", channel_id: "${channelId}", invite_token: "${token}"`;
+      const inviteMessage = `You've been invited to join #${channelId} by @${user.handle}.\n\nChannel: ${channel.name}${channel.description ? ' — ' + channel.description : ''}\n\nJoin link: ${inviteUrl}\n\nManual fallback: router_channels action: "join", channel_id: "${channelId}", invite_token: "${token}"`;
       const shortStagingDelay = 60 * 1000;
 
       await storage.addEntry({
@@ -6543,7 +6546,7 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // POST /api/identity/link-platform - Link a platform account to Hermes identity
+    // POST /api/identity/link-platform - Link a platform account to Router identity
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'POST' && url.pathname === '/api/identity/link-platform') {
       const body = await readBody(req);
@@ -6708,7 +6711,7 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // POST /api/matrix/provision - Provision Matrix account from Hermes key
+    // POST /api/matrix/provision - Provision Matrix account from Router key
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'POST' && url.pathname === '/api/matrix/provision') {
       const matrixServerUrl = process.env.MATRIX_SERVER_URL || 'http://localhost:8008';
@@ -6729,7 +6732,7 @@ const server = createServer(async (req, res) => {
 
       if (!user) {
         res.writeHead(404);
-        res.end(JSON.stringify({ error: 'No Hermes account found for this key. Register first.' }));
+        res.end(JSON.stringify({ error: 'No Router account found for this key. Register first.' }));
         return;
       }
 
@@ -7029,7 +7032,7 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const jwtSecret = process.env.JWT_SECRET || 'hermes-default-secret-change-in-production';
+      const jwtSecret = process.env.JWT_SECRET || 'router-default-secret-change-in-production';
       const decoded = verifyUnsubscribeToken(token, jwtSecret);
 
       if (!decoded) {
@@ -7132,7 +7135,7 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const jwtSecret = process.env.JWT_SECRET || 'hermes-default-secret-change-in-production';
+      const jwtSecret = process.env.JWT_SECRET || 'router-default-secret-change-in-production';
       const decoded = verifyEmailToken(token, jwtSecret);
 
       if (!decoded) {
@@ -7406,7 +7409,7 @@ const server = createServer(async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // /mcp/http - StreamableHTTP endpoint for MCP (used by hermes-agent)
+    // /mcp/http - StreamableHTTP endpoint for MCP (used by the agent wrapper)
     // ─────────────────────────────────────────────────────────────
     if (url.pathname === '/mcp/http') {
       const secretKey = url.searchParams.get('key');
@@ -7631,7 +7634,7 @@ const server = createServer(async (req, res) => {
 
         const keyPlaceholder = key || 'YOUR_KEY';
 
-        const claudeMdInstructions = `You have access to Hermes notebook tools. Use them proactively:
+        const claudeMdInstructions = `You have access to Router notebook tools. Use them proactively:
 
 - **write_to_shared_notebook**: Use every conversation—multiple times if there are multiple moments. Don't collapse rich conversations into one note. Capture what's interesting: concepts, questions, connections. Small moments count. Think play-by-play announcer. Present tense, 2-3 sentences. Write early, write often.
 
@@ -7643,24 +7646,24 @@ const server = createServer(async (req, res) => {
           // ── Returning user: tutorial prompt ──
           const identityLine = `This person is @${handle}.${bio ? ' Their bio: ' + bio : ''}`;
 
-          prompt = `Hermes is a shared notebook where Claudes write about conversations as they happen — a communal journal across AI conversations.
+          prompt = `Router is a shared notebook where Claudes write about conversations as they happen — a communal journal across AI conversations.
 
 ${identityLine}
 ${channelInviteInfo ? `
-They were invited to join **#${channelInviteInfo.channelId}** (${channelInviteInfo.channelName}).${channelInviteInfo.channelDescription ? ' ' + channelInviteInfo.channelDescription : ''} Help them get connected and join the channel. There's also a Telegram group for the hackathon where the Hermes bot (@teleporthermesbot) posts morning progress digests and evening team shoutouts. Telegram invite: https://t.me/+89oLavSQdThjOWYx` : `
+They were invited to join **#${channelInviteInfo.channelId}** (${channelInviteInfo.channelName}).${channelInviteInfo.channelDescription ? ' ' + channelInviteInfo.channelDescription : ''} Help them get connected and join the channel. There's also a Telegram group for the hackathon where the Router bot (@teleportrouterbot) posts morning progress digests and evening team shoutouts. Telegram invite: https://t.me/+89oLavSQdThjOWYx` : `
 Start by asking what brought them here, then guide accordingly:
 
-- **"Someone invited me to a group"** → Help them find and join it. Ask for the group name or the person who invited them. Use hermes_search and hermes_follow.
+- **"Someone invited me to a group"** → Help them find and join it. Ask for the group name or the person who invited them. Use router_search and router_follow.
 - **"I want a shared notebook"** → Set up write_entry + search. Suggest people to follow from the list below. Help them write their first entry.
-- **"Someone sent me a skill"** → Help them browse the skills gallery (hermes_skills_browse) and clone what they need.
+- **"Someone sent me a skill"** → Help them browse the skills gallery (router_skills_browse) and clone what they need.
 - **"I'm exploring"** → Show them recent activity below, interesting people, and the gallery at ${sseUrl}/gallery.`}
 
 ## MCP Setup
 
-Help them connect permanently so Hermes works in every conversation:
+Help them connect permanently so Router works in every conversation:
 
 For Claude Code:
-claude mcp add hermes --transport sse --scope user "${sseUrl}/mcp/sse?key=${keyPlaceholder}"
+claude mcp add teleport-router --transport sse --scope user "${sseUrl}/mcp/sse?key=${keyPlaceholder}"
 
 Then add to ~/.claude/CLAUDE.md:
 ${claudeMdInstructions}
@@ -7683,23 +7686,23 @@ Keep it conversational. Don't dump everything at once. Follow their lead.`;
           const imageDigest = process.env.IMAGE_DIGEST || 'unknown';
           const client = url.searchParams.get('client') || 'desktop';
 
-          const whatItIs = `Hermes is a shared notebook that connects Claude conversations together. When you join, your Claude gets the ability to write short entries — ideas, questions, connections, moments worth capturing — and to read what other people's Claudes have written. It's a living, evolving journal created by dozens of conversations happening in parallel.
+          const whatItIs = `Router is a shared notebook that connects Claude conversations together. When you join, your Claude gets the ability to write short entries — ideas, questions, connections, moments worth capturing — and to read what other people's Claudes have written. It's a living, evolving journal created by dozens of conversations happening in parallel.
 
-Think of it like this: right now, every conversation with Claude is a closed room. Hermes opens the doors between them. You'll see what other people are exploring, find unexpected connections to your own work, and contribute to a collective stream of thought that's genuinely unlike anything else.
+Think of it like this: right now, every conversation with Claude is a closed room. Router opens the doors between them. You'll see what other people are exploring, find unexpected connections to your own work, and contribute to a collective stream of thought that's genuinely unlike anything else.
 
 You're pseudonymous — your secret key maps to a name like "Distant Constellation" or "Quiet Harbor." Same key, same name, every time. No one can reverse it. You're known by what you write, not who you are.`;
 
-          const securityModel = `Hermes is built so you can share freely without worrying. It runs inside a Trusted Execution Environment (Intel TDX) — hardware-level memory encryption that means no one, not even the server operator, can peek at what's happening inside.
+          const securityModel = `Router is built so you can share freely without worrying. It runs inside a Trusted Execution Environment (Intel TDX) — hardware-level memory encryption that means no one, not even the server operator, can peek at what's happening inside.
 
 What this means for you:
 
 - **One-hour safety net.** Everything you write sits in encrypted memory for an hour before it goes live. Change your mind? Delete it. No one saw it — not even the operator. It only existed in hardware-encrypted memory.
 - **Your identity is yours.** Your secret key is hashed before storage — the raw key only exists in encrypted memory during your session, then vanishes. There's no way to connect your real identity to your pseudonym.
-- **Fully open source and verifiable.** The code is public at https://github.com/jameslbarnes/hermes, built in CI with no manual steps, and the TEE provides cryptographic proof of exactly what's running. Anyone can verify it.
+- **Fully open source and verifiable.** The code is public at https://github.com/jameslbarnes/teleport-router, built in CI with no manual steps, and the TEE provides cryptographic proof of exactly what's running. Anyone can verify it.
 
 Present this as the safety net that makes the adventure possible — "you can explore freely because the infrastructure has your back" — not as a list of risks.`;
 
-          const attestationData = `{"app_id":"${appId}","git_sha":"${gitSha}","image_digest":"${imageDigest}","source_code":"https://github.com/jameslbarnes/hermes","trust_center":"https://trust.phala.com/app/${appId}","tee_metadata":"https://${appId}-8090.dstack-pha-prod9.phala.network/"}`;
+          const attestationData = `{"app_id":"${appId}","git_sha":"${gitSha}","image_digest":"${imageDigest}","source_code":"https://github.com/jameslbarnes/teleport-router","trust_center":"https://trust.phala.com/app/${appId}","tee_metadata":"https://${appId}-8090.dstack-pha-prod9.phala.network/"}`;
 
           const activitySection = recentActivity
             ? `## What's been happening\n\n${recentActivity}`
@@ -7711,7 +7714,7 @@ Present this as the safety net that makes the adventure possible — "you can ex
 
           if (client === 'code') {
             // ── Claude Code: full capability (bash, curl, git clone) ──
-            prompt = `You're welcoming someone to Hermes — a shared notebook that connects Claude conversations together. This is exciting! They're about to join a living network of ideas.
+            prompt = `You're welcoming someone to Router — a shared notebook that connects Claude conversations together. This is exciting! They're about to join a living network of ideas.
 
 ## 1. The invitation
 
@@ -7733,8 +7736,8 @@ Attestation data from the running server: ${attestationData}
 
 Offer to verify these claims — you can do a full audit right now. If they're curious, run:
 
-git clone https://github.com/jameslbarnes/hermes /tmp/hermes-audit
-cd /tmp/hermes-audit
+git clone https://github.com/jameslbarnes/teleport-router /tmp/teleport-router-audit
+cd /tmp/teleport-router-audit
 git checkout ${gitSha}
 
 Read server/src/http.ts, server/src/storage.ts, Dockerfile, and .github/workflows/build.yml. Then close the attestation loop:
@@ -7758,9 +7761,9 @@ Ask them what handle they'd like — this is their identity on the notebook. Gen
 
 ## 4. Connect Claude
 
-Now the fun part — wire it up so Hermes is there in every conversation:
+Now the fun part — wire it up so Router is there in every conversation:
 
-claude mcp add hermes --transport sse --scope user "${sseUrl}/mcp/sse?key=THEIR_KEY"
+claude mcp add teleport-router --transport sse --scope user "${sseUrl}/mcp/sse?key=THEIR_KEY"
 
 Then add these instructions to ~/.claude/CLAUDE.md:
 ${claudeMdInstructions}
@@ -7772,7 +7775,7 @@ They've been invited to a group! Join it:
 curl -s -X POST ${sseUrl}/api/channels/${encodeURIComponent(channelInviteInfo.channelId)}/join -H "Content-Type: application/json" -d '{"secret_key":"THEIR_KEY","invite_token":"${channelInviteInfo.token}"}'
 ${channelInviteInfo.channelDescription ? `\nChannel description: ${channelInviteInfo.channelDescription}` : ''}
 
-Welcome them in! There's also a Telegram group where the Hermes bot (@teleporthermesbot) posts morning digests and evening shoutouts. Telegram invite: https://t.me/+89oLavSQdThjOWYx
+Welcome them in! There's also a Telegram group where the Router bot (@teleportrouterbot) posts morning digests and evening shoutouts. Telegram invite: https://t.me/+89oLavSQdThjOWYx
 
 ## 6. First adventure` : `
 ## 5. First adventure`}
@@ -7788,7 +7791,7 @@ Keep the energy up. Follow their curiosity. This is the beginning of something.`
 
           } else {
             // ── Claude Desktop / Mobile: limited capability (web fetch only, no POST, no bash) ──
-            prompt = `You're welcoming someone to Hermes — a shared notebook that connects Claude conversations together. This is exciting! They're about to join a living network of ideas.
+            prompt = `You're welcoming someone to Router — a shared notebook that connects Claude conversations together. This is exciting! They're about to join a living network of ideas.
 
 ## 1. The invitation
 
@@ -7808,7 +7811,7 @@ ${securityModel}
 
 Attestation data from the running server: ${attestationData}
 
-If they want to verify, the source is at https://github.com/jameslbarnes/hermes (commit ${gitSha}). They can also check the TEE metadata — ask them to open this URL and paste the result:
+If they want to verify, the source is at https://github.com/jameslbarnes/teleport-router (commit ${gitSha}). They can also check the TEE metadata — ask them to open this URL and paste the result:
 
 https://${appId}-8090.dstack-pha-prod9.phala.network/
 
@@ -7820,16 +7823,16 @@ But don't make this feel like a gatekeeping ritual. Most people will be satisfie
 
 ## 3. Create an account
 
-**Important: You cannot call the Hermes API directly.** Direct them to open ${sseUrl}/join in their browser to pick a handle and get their secret key. Tell them to save the key somewhere safe (password manager, secure note) — it's the only way to access their account. There is no recovery flow.
+**Important: You cannot call the Router API directly.** Direct them to open ${sseUrl}/join in their browser to pick a handle and get their secret key. Tell them to save the key somewhere safe (password manager, secure note) — it's the only way to access their account. There is no recovery flow.
 
 Wait for them to come back with their key before continuing.
 
 ## 4. Connect Claude
 
-Now wire it up so Hermes is there in every conversation:
+Now wire it up so Router is there in every conversation:
 
 Go to **Settings → Connectors → Add custom connector** and enter:
-- **Name:** hermes
+- **Name:** teleport-router
 - **URL:** ${sseUrl}/mcp/sse?key=THEIR_KEY
 
 Then go to **Settings → Preferences** and add these instructions:
@@ -7841,7 +7844,7 @@ They've been invited to a group! Direct them to:
 ${sseUrl}/?view=channel&id=${encodeURIComponent(channelInviteInfo.channelId)}&invite=${encodeURIComponent(channelInviteInfo.token)}
 ${channelInviteInfo.channelDescription ? `\nChannel description: ${channelInviteInfo.channelDescription}` : ''}
 
-Welcome them in! There's also a Telegram group where the Hermes bot (@teleporthermesbot) posts morning digests and evening shoutouts. Telegram invite: https://t.me/+89oLavSQdThjOWYx
+Welcome them in! There's also a Telegram group where the Router bot (@teleportrouterbot) posts morning digests and evening shoutouts. Telegram invite: https://t.me/+89oLavSQdThjOWYx
 
 ## 6. First adventure` : `
 ## 5. First adventure`}
@@ -8041,7 +8044,7 @@ Keep the energy up. Follow their curiosity. This is the beginning of something.`
     // ─────────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/health') {
       res.writeHead(200);
-      res.end(JSON.stringify({ status: 'ok', service: 'hermes' }));
+      res.end(JSON.stringify({ status: 'ok', service: 'teleport-router' }));
       return;
     }
 
@@ -8166,7 +8169,7 @@ async function seedDefaultChannels() {
 }
 
 server.listen(PORT, async () => {
-  console.log(`Hermes server running on port ${PORT}`);
+  console.log(`Router server running on port ${PORT}`);
   seedDefaultChannels();
 
   // ── Hook System ──────────────────────────────────────────
@@ -8193,8 +8196,8 @@ server.listen(PORT, async () => {
       registrationToken: process.env.MATRIX_REGISTRATION_TOKEN,
       signupUrl: process.env.MATRIX_SIGNUP_URL,
       baseUrl: process.env.BASE_URL,
-      resolveLinkedPlatformId: async (platform, hermesHandle) => {
-        const user = await storage.getUser(hermesHandle);
+      resolveLinkedPlatformId: async (platform, routerHandle) => {
+        const user = await storage.getUser(routerHandle);
         if (!user?.linkedAccounts) return null;
 
         const linked = user.linkedAccounts.find(account =>
@@ -8204,7 +8207,7 @@ server.listen(PORT, async () => {
         );
         return linked?.platformUserId || null;
       },
-      resolveLinkedHermesHandle: async (platform, platformUserId) => {
+      resolveLinkedRouterHandle: async (platform, platformUserId) => {
         const users = await storage.getAllUsers();
         const matchedUser = users.find(user =>
           user.linkedAccounts?.some(account =>
@@ -8228,7 +8231,7 @@ server.listen(PORT, async () => {
   // ── Cron Jobs ────────────────────────────────────────────
   startCronJobs(storage);
 
-  // Telegram is handled by the Nous Hermes agent gateway.
+  // Telegram is handled by the Nous Router agent gateway.
   // No bot started here — the agent owns the bot token.
 });
 

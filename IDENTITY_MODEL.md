@@ -1,4 +1,4 @@
-# Hermes Identity Model
+# Router Identity Model
 
 Design conversation captured January 2026.
 
@@ -71,13 +71,13 @@ get_profile(handle)   — View someone's profile, bio, recent activity
 1. **Claiming handle**: Pick @name at setup, that's your identity
 2. **Ambient following**: Claude follows relevant people without asking
 3. **Morning digest**: Email arrives, deep links into Claude for each item
-4. **Discovering connections**: Claude notices @andrew on Hermes = Andrew you mentioned
+4. **Discovering connections**: Claude notices @andrew on Router = Andrew you mentioned
 5. **Messaging from search**: See interesting entry, message the author
 6. **Alts**: New key, new handle if you want separation
 
 ## Open Questions
 
-- Twitter cross-posting? (Curated @hermes_ing account vs user opt-in)
+- Twitter cross-posting? (Curated @router_ing account vs user opt-in)
 - Follow limits? (Solve when it's a problem)
 - Email deliverability / reply parsing (execution risk)
 - Deep link format for Claude/ChatGPT

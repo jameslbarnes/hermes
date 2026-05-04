@@ -1,8 +1,8 @@
 /**
- * Event queue for the Hermes agent.
+ * Event queue for the Router agent.
  *
  * The server pushes events (entry staged, entry published, chat message,
- * mention, etc.) and the agent polls them via the hermes_poll_events MCP tool.
+ * mention, etc.) and the agent polls them via the router_poll_events MCP tool.
  * Events are held in memory with a rolling window.
  */
 
@@ -13,7 +13,7 @@ export type EventType =
   | 'platform_message'
   | 'platform_mention';
 
-export interface HermesEvent {
+export interface RouterEvent {
   id: number;
   type: EventType;
   timestamp: number;
@@ -23,10 +23,10 @@ export interface HermesEvent {
 const MAX_EVENTS = 1000;
 
 let nextId = 1;
-const events: HermesEvent[] = [];
+const events: RouterEvent[] = [];
 
 // Hook dispatcher integration — set by server startup
-type DispatchFn = (event: HermesEvent) => Promise<void>;
+type DispatchFn = (event: RouterEvent) => Promise<void>;
 let dispatchToHooks: DispatchFn | null = null;
 
 /**
@@ -39,8 +39,8 @@ export function setDispatcher(fn: DispatchFn): void {
 /**
  * Push a new event to the queue.
  */
-export function pushEvent(type: EventType, data: Record<string, any>): HermesEvent {
-  const event: HermesEvent = {
+export function pushEvent(type: EventType, data: Record<string, any>): RouterEvent {
+  const event: RouterEvent = {
     id: nextId++,
     type,
     timestamp: Date.now(),
@@ -67,7 +67,7 @@ export function pushEvent(type: EventType, data: Record<string, any>): HermesEve
  * Get events since a cursor (event ID). Returns events with id > cursor.
  * If cursor is 0 or omitted, returns recent events (last 50).
  */
-export function getEventsSince(cursor = 0, limit = 50): HermesEvent[] {
+export function getEventsSince(cursor = 0, limit = 50): RouterEvent[] {
   if (cursor === 0) {
     return events.slice(-limit);
   }

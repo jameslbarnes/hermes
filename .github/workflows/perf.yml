@@ -6,7 +6,7 @@ on:
       base_url:
         description: 'Base URL to benchmark'
         required: false
-        default: 'https://hermes.teleport.computer'
+        default: 'https://router.teleport.computer'
   schedule:
     - cron: '0 */6 * * *'
 
@@ -32,7 +32,7 @@ jobs:
       - name: Run perf budget checks
         working-directory: server
         env:
-          PERF_BASE_URL: ${{ github.event.inputs.base_url || 'https://hermes.teleport.computer' }}
+          PERF_BASE_URL: ${{ github.event.inputs.base_url || 'https://router.teleport.computer' }}
           PERF_RUNS: '7'
           BUDGET_HOME_P50_MS: '120'
           BUDGET_API_P50_MS: '320'

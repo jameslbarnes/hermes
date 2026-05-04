@@ -133,7 +133,7 @@ async function runAgentChat(event) {
     return;
   }
 
-  const prompt = `You are Router, the Hermes platform-facing agent.
+  const prompt = `You are Router, the platform-facing agent.
 
 You received a notebook event from the real-time event queue.
 
@@ -142,29 +142,30 @@ ${JSON.stringify(event, null, 2)}
 
 This event is directed at Router. If it is a human platform_mention, you must send exactly one reply in the originating platform room.
 This applies to channel mentions as well as direct DMs.
-Use Hermes notebook tools as needed. Your reply must be sent by calling hermes_platform_send with:
+Use Router notebook tools as needed. Your reply must be sent by calling router_platform_send with:
 - platform = event.data.platform
 - room_id = event.data.room_id
 - reply_to = event.data.message_id
 
 Matrix context:
-- For "this room", "recently here", or "summarize this conversation" requests, call hermes_search with room_id = event.data.room_id, include_matrix = true, a since window like "24h" or "7d", and no query if a broad summary is needed.
-- For cross-room Matrix questions, call hermes_search with include_matrix = true and a query or since window. Router can search non-DM Matrix rooms it has joined.
+- For "this room", "recently here", or "summarize this conversation" requests, call router_search with room_id = event.data.room_id, include_matrix = true, a since window like "24h" or "7d", and no query if a broad summary is needed.
+- For cross-room Matrix questions, call router_search with include_matrix = true and a query or since window. Router can search non-DM Matrix rooms it has joined.
 - Do not search DMs broadly. Only search a DM when event.data.is_dm is true and you pass event.data.room_id for that current DM.
 
 Hard rules:
-- Do not ask the user to manually invoke Hermes tools.
+- Do not ask the user to manually invoke Router tools.
 - link/help commands are already handled upstream; do nothing for those.
 - Keep replies concise and natural.
 - Do not silently choose not to answer a human platform_mention.
-- If you truly cannot answer, send a brief apology or clarification via hermes_platform_send.
+- If you truly cannot answer, send a brief apology or clarification via router_platform_send.
 
 After acting, return a one-line summary of what you did.`;
 
   const env = {
     ...process.env,
-    HERMES_HOME: process.env.HERMES_HOME || '/data/hermes-agent',
+    ROUTER_HOME: process.env.ROUTER_HOME || process.env.HERMES_HOME || '/data/router-agent',
   };
+  env.HERMES_HOME = env.ROUTER_HOME;
 
   let stdout;
   let stderr;
@@ -187,17 +188,17 @@ After acting, return a one-line summary of what you did.`;
 }
 
 async function main() {
-  const hermesHome = process.env.HERMES_HOME || '/data/hermes-agent';
-  const secretKey = (process.env.HERMES_SECRET_KEY || '').trim();
-  const mcpUrl = process.env.HERMES_MCP_URL || 'http://hermes:3000/mcp/http';
-  const pollIntervalMs = Number.parseInt(process.env.HERMES_EVENT_POLL_INTERVAL_MS || '2000', 10);
-  const pollLimit = Number.parseInt(process.env.HERMES_EVENT_LIMIT || '20', 10);
-  const maxEventAgeMs = Number.parseInt(process.env.HERMES_EVENT_MAX_AGE_MS || '300000', 10);
-  const handledMatrixMessageLimit = Number.parseInt(process.env.HERMES_HANDLED_MATRIX_MESSAGE_IDS_LIMIT || '2000', 10);
-  const statePath = join(hermesHome, 'router-event-worker-state.json');
+  const routerHome = process.env.ROUTER_HOME || process.env.HERMES_HOME || '/data/router-agent';
+  const secretKey = (process.env.ROUTER_SECRET_KEY || process.env.HERMES_SECRET_KEY || '').trim();
+  const mcpUrl = process.env.ROUTER_MCP_URL || process.env.HERMES_MCP_URL || 'http://router:3000/mcp/http';
+  const pollIntervalMs = Number.parseInt(process.env.ROUTER_EVENT_POLL_INTERVAL_MS || '2000', 10);
+  const pollLimit = Number.parseInt(process.env.ROUTER_EVENT_LIMIT || '20', 10);
+  const maxEventAgeMs = Number.parseInt(process.env.ROUTER_EVENT_MAX_AGE_MS || '300000', 10);
+  const handledMatrixMessageLimit = Number.parseInt(process.env.ROUTER_HANDLED_MATRIX_MESSAGE_IDS_LIMIT || '2000', 10);
+  const statePath = join(routerHome, 'router-event-worker-state.json');
 
   if (!secretKey) {
-    throw new Error('HERMES_SECRET_KEY is required');
+    throw new Error('ROUTER_SECRET_KEY is required');
   }
 
   let client;
@@ -214,8 +215,8 @@ async function main() {
 
     const tools = await client.listTools();
     const toolNames = new Set((tools.tools || []).map((tool) => tool.name));
-    if (!toolNames.has('hermes_poll_events')) {
-      throw new Error('hermes_poll_events not available to this identity');
+    if (!toolNames.has('router_poll_events')) {
+      throw new Error('router_poll_events not available to this identity');
     }
 
     log(`Connected to MCP with ${tools.tools.length} tools`);
@@ -228,7 +229,7 @@ async function main() {
   if (!state.initialized) {
     try {
       const result = await client.callTool({
-        name: 'hermes_poll_events',
+        name: 'router_poll_events',
         arguments: { cursor: Number.MAX_SAFE_INTEGER, limit: 1 },
       });
       const structured = result.structuredContent || {};
@@ -254,7 +255,7 @@ async function main() {
     let events;
     try {
       const result = await client.callTool({
-        name: 'hermes_poll_events',
+        name: 'router_poll_events',
         arguments: { cursor, limit: pollLimit },
       });
 

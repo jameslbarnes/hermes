@@ -49,7 +49,7 @@ describe('shouldPostToTelegram', () => {
 });
 
 describe('formatEntryForTelegram', () => {
-  const baseUrl = 'https://hermes.teleport.computer';
+  const baseUrl = 'https://router.teleport.computer';
 
   it('formats public entry with pseudonym', () => {
     const entry = makeEntry();
@@ -112,7 +112,7 @@ describe('formatEntryForTelegram', () => {
 // ─── Curated post tests ─────────────────────────────────────
 
 describe('formatCuratedPost', () => {
-  const baseUrl = 'https://hermes.teleport.computer';
+  const baseUrl = 'https://router.teleport.computer';
 
   it('escapes hook text for MarkdownV2', () => {
     const entry = makeEntry({ handle: 'alice' });

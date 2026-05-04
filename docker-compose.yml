@@ -1,8 +1,8 @@
 version: '3.8'
 
 services:
-  hermes:
-    image: docker.io/generalsemantics/hermes:901f3c0
+  router:
+    image: docker.io/generalsemantics/teleport-router:901f3c0
     ports:
       - "3000:3000"
     environment:
@@ -15,8 +15,8 @@ services:
       - NAMECHEAP_API_KEY=${NAMECHEAP_API_KEY}
       - NAMECHEAP_CLIENT_IP=${NAMECHEAP_CLIENT_IP}
     volumes:
-      - hermes-data:/data
+      - router-data:/data
     restart: unless-stopped
 
 volumes:
-  hermes-data:
+  router-data:

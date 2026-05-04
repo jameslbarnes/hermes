@@ -329,7 +329,7 @@ export async function getConnectionInfo(
   const sharedRoomIds: string[] = [];
   let recentInteractions = 0;
 
-  // Check Hermes: do they follow each other?
+  // Check Router: do they follow each other?
   if (storage) {
     try {
       const userA = await storage.getUser(handleA);
@@ -341,7 +341,7 @@ export async function getConnectionInfo(
       // Non-fatal
     }
 
-    // Check Hermes: have they addressed entries to each other?
+    // Check Router: have they addressed entries to each other?
     try {
       const entriesA = await storage.getEntriesByHandle(handleA);
       const entriesB = await storage.getEntriesByHandle(handleB);
@@ -352,7 +352,7 @@ export async function getConnectionInfo(
       // Non-fatal
     }
 
-    // Check Hermes: do they already have a dedicated private spark room?
+    // Check Router: do they already have a dedicated private spark room?
     try {
       const pairRoomId = await storage.getSparkPairRoom(handleA, handleB);
       if (pairRoomId) {

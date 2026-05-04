@@ -20,7 +20,7 @@ export interface TelegramConfig {
   baseUrl: string;
   /** Group chat ID to watch for proactive features. */
   groupChatId?: string;
-  /** Bot's Hermes secret key (auto-generated if unset). */
+  /** Bot's Router secret key (auto-generated if unset). */
   botSecretKey?: string;
   /** Bot's @handle in the notebook. */
   botHandle?: string;
@@ -30,7 +30,7 @@ export interface TelegramConfig {
   maxPerHour?: number;
   /** Cooldown between proactive posts in ms. */
   cooldownMs?: number;
-  /** Map Hermes channel IDs to Telegram chat IDs for cross-posting. */
+  /** Map Router channel IDs to Telegram chat IDs for cross-posting. */
   channelChatMapping?: Record<string, string>;
 }
 
@@ -42,9 +42,9 @@ export interface BotContext {
   sendToChannel: (text: string) => Promise<void>;
   /** Send a plain text message to the group chat. */
   sendToGroup: (text: string, replyToMessageId?: number) => Promise<void>;
-  /** The bot's Hermes pseudonym. */
+  /** The bot's Router pseudonym. */
   botPseudonym: string;
-  /** The bot's Hermes handle. */
+  /** The bot's Router handle. */
   botHandle: string;
 }
 

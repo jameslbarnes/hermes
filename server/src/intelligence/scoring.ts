@@ -98,7 +98,7 @@ export async function writeHook(
   relatedEntries: JournalEntry[],
   recentPosts: RecentPost[],
   anthropic: Anthropic,
-  baseUrl = 'https://hermes.teleport.computer',
+  baseUrl = 'https://router.teleport.computer',
 ): Promise<string | null> {
   try {
     const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;

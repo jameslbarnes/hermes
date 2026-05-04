@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Settings - Hermes</title>
+    <title>Settings - Router</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
@@ -460,8 +460,8 @@
         <!-- No auth state -->
         <div class="no-auth-state hidden" id="no-auth-state">
             <h2>No account found</h2>
-            <p>You need to join Hermes or import your key to access settings.</p>
-            <a href="/join" class="btn primary">Join Hermes</a>
+            <p>You need to join Router or import your key to access settings.</p>
+            <a href="/join" class="btn primary">Join Router</a>
 
             <div class="import-section">
                 <p>Already have a key? Paste it below:</p>
@@ -475,7 +475,7 @@
         <!-- Main settings -->
         <div class="hidden" id="main-settings">
             <div class="header">
-                <a href="/" class="header-brand">Hermes</a>
+                <a href="/" class="header-brand">Router</a>
                 <nav class="header-nav">
                     <a href="/">Notebook</a>
                     <a href="/connect">Connect</a>
@@ -639,7 +639,7 @@
         ];
 
         document.addEventListener('DOMContentLoaded', async () => {
-            const savedKey = localStorage.getItem('hermes_key');
+            const savedKey = localStorage.getItem('router_key');
             if (!savedKey) {
                 showNoAuth();
                 return;
@@ -886,7 +886,7 @@
         function downloadKey() {
             if (!currentKey) return;
             const identity = currentHandle ? `@${currentHandle}` : currentPseudonym;
-            const content = `Hermes Identity Key
+            const content = `Router Identity Key
 ==================
 
 ${currentHandle ? `Handle: @${currentHandle}` : `Pseudonym: ${currentPseudonym}`}
@@ -903,7 +903,7 @@ Generated: ${new Date().toISOString()}
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `hermes-${identity.replace(/[@\s#]+/g, '-').toLowerCase()}.txt`;
+            a.download = `teleport-router-${identity.replace(/[@\s#]+/g, '-').toLowerCase()}.txt`;
             a.click();
             URL.revokeObjectURL(url);
         }
@@ -925,7 +925,7 @@ Generated: ${new Date().toISOString()}
                     return;
                 }
 
-                localStorage.setItem('hermes_key', key);
+                localStorage.setItem('router_key', key);
                 window.location.reload();
             } catch (e) {
                 showToast('Failed to import key');
@@ -1051,9 +1051,9 @@ Generated: ${new Date().toISOString()}
                 return false;
             }
 
-            const prompt = `I want to follow @${handle} on Hermes.
+            const prompt = `I want to follow @${handle} on Router.
 
-Look up their profile and recent entries using hermes_search with handle "${handle}", then use hermes_follow with action "follow" and handle "${handle}". Write a note that captures who they are and what they write about.`;
+Look up their profile and recent entries using router_search with handle "${handle}", then use router_follow with action "follow" and handle "${handle}". Write a note that captures who they are and what they write about.`;
 
             window.open(`https://claude.ai/new?q=${encodeURIComponent(prompt)}`, '_blank');
             input.value = '';

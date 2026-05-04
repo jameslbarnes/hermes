@@ -204,8 +204,8 @@ function getAnthropic(): Anthropic | null {
   return new Anthropic({ apiKey: key });
 }
 
-function matrixMentionsHandledByHermesAgent(): boolean {
-  const raw = process.env.HERMES_AGENT_HANDLES_MATRIX;
+function matrixMentionsHandledByRouterAgent(): boolean {
+  const raw = process.env.ROUTER_AGENT_HANDLES_MATRIX;
   if (!raw) return false;
   return ['1', 'true', 'yes', 'remote'].includes(raw.trim().toLowerCase());
 }
@@ -354,7 +354,7 @@ export async function notifyLinkedMatrixPendingEntry(ctx: HookContext, entry: Jo
     : '';
   const preview = truncateForMatrix(entry.content, 1800);
   const message = [
-    `Review this Hermes post before it publishes.`,
+    `Review this Router post before it publishes.`,
     ``,
     `Entry: \`${entry.id}\``,
     `Automatic publish: ${formatRelativePublishTime(entry.publishAt)}${destinationLine}${visibilityLine}`,
@@ -390,12 +390,12 @@ async function executePendingEntryAction(params: {
 
   const user = await findUserByLinkedAccount(params.storage, params.platformName, params.senderId);
   if (!user) {
-    await reply('Link this Matrix account first by sending `link`, then run the Hermes linking tool with the code.');
+    await reply('Link this Matrix account first by sending `link`, then run the Router linking tool with the code.');
     return true;
   }
 
   if (!hasPendingEntryApi(params.storage)) {
-    await reply('This Hermes deployment does not have a pending-post buffer enabled.');
+    await reply('This Router deployment does not have a pending-post buffer enabled.');
     return true;
   }
 
@@ -421,7 +421,7 @@ async function executePendingEntryAction(params: {
     return true;
   }
 
-  const url = `${process.env.BASE_URL || 'https://hermes.teleport.computer'}/entry.html?id=${encodeURIComponent(published.id)}`;
+  const url = `${process.env.BASE_URL || 'https://router.teleport.computer'}/entry.html?id=${encodeURIComponent(published.id)}`;
   const publishedLabel = published.id === entry.id ? published.id : `${entry.id} as ${published.id}`;
   await reply(`Published entry ${publishedLabel}.\n\n${url}`);
   return true;
@@ -697,17 +697,17 @@ async function onPlatformMention(ctx: HookContext): Promise<void> {
 
   // ── Link command ──────────────────────────────────────────
   // User DMs "link" to get a code that ties their platform account
-  // to their Hermes identity (completed via MCP tool).
+  // to their Router identity (completed via MCP tool).
   if ((firstWord === 'link' || firstWord === '/link') && sender_id) {
     const code = generateLinkToken(platformName, sender_id);
     const reply = [
       `Your one-time link code: **${code}**`,
       '',
-      `In the Hermes notebook, tell Claude:`,
+      `In the Router notebook, tell Claude:`,
       `"Link my ${platformName} account with code ${code}"`,
       '',
-      `Claude should use the \`hermes_link_platform\` tool automatically.`,
-      `If you haven't created a Hermes handle yet, do that first, then run the link step again.`,
+      `Claude should use the \`router_link_platform\` tool automatically.`,
+      `If you haven't created a Router handle yet, do that first, then run the link step again.`,
       '',
       `(expires in 10 minutes)`,
     ].join('\n');
@@ -722,7 +722,7 @@ async function onPlatformMention(ctx: HookContext): Promise<void> {
       `I'm the Router — I connect people and ideas from the notebook.`,
       ``,
       `Commands:`,
-      `• **link** — get a code to connect this ${platformName} account to your Hermes identity`,
+      `• **link** — get a code to connect this ${platformName} account to your Router identity`,
       `• Reply **publish** to a post review message to publish it now`,
       `• Reply **delete** to a post review message to delete it`,
       `• **help** — show this message`,
@@ -747,12 +747,12 @@ async function onPlatformMention(ctx: HookContext): Promise<void> {
     if (handled) return;
   }
 
-  // Matrix DMs/@mentions should be handled by the external Hermes agent
+  // Matrix DMs/@mentions should be handled by the external Router agent
   // when that path is enabled. Keep link/help local, but otherwise let the
   // event queue be the handoff boundary.
-  if (platformName === 'matrix' && matrixMentionsHandledByHermesAgent()) {
+  if (platformName === 'matrix' && matrixMentionsHandledByRouterAgent()) {
     console.log(
-      `[Agent] Deferring Matrix ${is_dm ? 'DM' : 'mention'} in ${room_id} to hermes-agent`,
+      `[Agent] Deferring Matrix ${is_dm ? 'DM' : 'mention'} in ${room_id} to router-agent`,
     );
     return;
   }

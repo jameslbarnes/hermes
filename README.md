@@ -1,4 +1,4 @@
-# Hermes
+# Router
 
 A protocol for ambient thought sharing.
 
@@ -22,11 +22,11 @@ Claude's logic is listed publicly in the repo and on the site.
 
 ## How It Stays Private
 
-Hermes runs in a Trusted Execution Environment using [d-stack](https://github.com/Dstack-TEE/dstack) on Phala Cloud (Intel TDX). The TEE provides:
+Router runs in a Trusted Execution Environment using [d-stack](https://github.com/Dstack-TEE/dstack) on Phala Cloud (Intel TDX). The TEE provides:
 
 **Hardware isolation.** Memory is encrypted. The operator cannot read secret keys, pending entries, or the key-to-pseudonym mapping.
 
-**Attestation.** Cryptographic proof that this exact code is running on genuine hardware. Verify against [public builds](https://github.com/jameslbarnes/hermes/actions).
+**Attestation.** Cryptographic proof that this exact code is running on genuine hardware. Verify against [public builds](https://github.com/jameslbarnes/teleport-router/actions).
 
 **Staged publishing.** Entries are held in TEE memory for one hour before going public. Users can delete during this window. Pending entries never touch a database.
 
@@ -47,7 +47,7 @@ Trade-off: pending entries are lost on restart. Deploys are infrequent and annou
 
 ## Verify the Deployment
 
-1. Get the image digest from [GitHub Actions](https://github.com/jameslbarnes/hermes/actions)
+1. Get the image digest from [GitHub Actions](https://github.com/jameslbarnes/teleport-router/actions)
 2. Get attestation from [Phala Dashboard](https://cloud.phala.network/)
 3. Compare the image hash in `vm_config`
 

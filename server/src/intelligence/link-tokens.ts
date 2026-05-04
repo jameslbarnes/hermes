@@ -2,12 +2,12 @@
  * Platform Link Token Store
  *
  * Short-lived codes that tie together a platform DM (which proves platform
- * ownership) with an MCP call (which proves Hermes key ownership).
+ * ownership) with an MCP call (which proves Router key ownership).
  *
  * Flow:
  *   1. User DMs bot on Matrix: "link"
  *   2. Bot generates a code, stores { code → { platform, platformUserId } }
- *   3. User calls hermes_link_platform(code) via MCP (auth'd with Hermes key)
+ *   3. User calls router_link_platform(code) via MCP (auth'd with Router key)
  *   4. Server retrieves the platform info by code, links it to the user's handle
  */
 
@@ -23,7 +23,7 @@ const tokens = new Map<string, LinkToken>();
 
 /**
  * Generate a new link token for a platform user.
- * Returns the code they should share with their Hermes-connected client.
+ * Returns the code they should share with their Router-connected client.
  */
 export function generateLinkToken(platform: string, platformUserId: string): string {
   // Clean up expired tokens

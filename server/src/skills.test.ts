@@ -15,31 +15,31 @@ describe('Skills System', () => {
   // ═══════════════════════════════════════════════════════════════
 
   describe('System Skills', () => {
-    it('should have hermes_write_entry as a system skill', () => {
-      const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_write_entry');
+    it('should have router_write_entry as a system skill', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'router_write_entry');
       expect(skill).toBeDefined();
       expect(skill!.handlerType).toBe('builtin');
-      expect(skill!.id).toBe('system_hermes_write_entry');
+      expect(skill!.id).toBe('system_router_write_entry');
     });
 
-    it('should have hermes_search as a system skill', () => {
-      const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_search');
+    it('should have router_search as a system skill', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'router_search');
       expect(skill).toBeDefined();
       expect(skill!.handlerType).toBe('builtin');
       expect(skill!.inputSchema?.properties?.room_id).toBeDefined();
       expect(skill!.inputSchema?.properties?.include_matrix).toBeDefined();
     });
 
-    it('should have hermes_send_dm as a system skill', () => {
-      const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_send_dm');
+    it('should have router_send_dm as a system skill', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'router_send_dm');
       expect(skill).toBeDefined();
       expect(skill!.handlerType).toBe('builtin');
       expect(skill!.inputSchema?.required).toEqual(['platform', 'text']);
       expect(skill!.inputSchema?.properties?.handle).toBeDefined();
     });
 
-    it('should have hermes_skills with expanded action enum', () => {
-      const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_skills');
+    it('should have router_skills with expanded action enum', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'router_skills');
       expect(skill).toBeDefined();
       expect(skill!.handlerType).toBe('builtin');
       expect(skill!.inputSchema?.properties?.action?.enum).toEqual(
@@ -47,23 +47,23 @@ describe('Skills System', () => {
       );
     });
 
-    it('should have hermes_skills_browse as a system skill', () => {
-      const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_skills_browse');
+    it('should have router_skills_browse as a system skill', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'router_skills_browse');
       expect(skill).toBeDefined();
       expect(skill!.handlerType).toBe('builtin');
       expect(skill!.inputSchema?.properties?.query).toBeDefined();
       expect(skill!.inputSchema?.properties?.limit).toBeDefined();
     });
 
-    it('should have hermes_skills_clone as a system skill', () => {
-      const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_skills_clone');
+    it('should have router_skills_clone as a system skill', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'router_skills_clone');
       expect(skill).toBeDefined();
       expect(skill!.handlerType).toBe('builtin');
       expect(skill!.inputSchema?.required).toEqual(['skill_name', 'author']);
     });
 
-    it('should have hermes_follow as a system skill', () => {
-      const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_follow');
+    it('should have router_follow as a system skill', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'router_follow');
       expect(skill).toBeDefined();
       expect(skill!.handlerType).toBe('builtin');
     });
@@ -76,13 +76,13 @@ describe('Skills System', () => {
       }
     });
 
-    it('should NOT have hermes_broadcast as a system skill', () => {
-      const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_broadcast');
+    it('should NOT have router_broadcast as a system skill', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'router_broadcast');
       expect(skill).toBeUndefined();
     });
 
-    it('should have create/update fields in hermes_skills schema', () => {
-      const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_skills');
+    it('should have create/update fields in router_skills schema', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'router_skills');
       const props = skill!.inputSchema?.properties;
       expect(props.name).toBeDefined();
       expect(props.skill_id).toBeDefined();
@@ -94,8 +94,8 @@ describe('Skills System', () => {
       expect(props.is_public).toBeDefined();
     });
 
-    it('should have ai_only param in hermes_write_entry schema', () => {
-      const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_write_entry');
+    it('should have ai_only param in router_write_entry schema', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'router_write_entry');
       const props = skill!.inputSchema?.properties;
       const required = skill!.inputSchema?.required;
       expect(props.ai_only).toBeDefined();
@@ -105,15 +105,15 @@ describe('Skills System', () => {
       expect(required).toContain('search_keywords');
     });
 
-    it('should have defaultAiOnly param in hermes_settings schema', () => {
-      const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_settings');
+    it('should have defaultAiOnly param in router_settings schema', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'router_settings');
       const props = skill!.inputSchema?.properties;
       expect(props.defaultAiOnly).toBeDefined();
       expect(props.defaultAiOnly.type).toBe('boolean');
     });
 
-    it('should have join_rule param in hermes_channels schema', () => {
-      const skill = SYSTEM_SKILLS.find(s => s.name === 'hermes_channels');
+    it('should have join_rule param in router_channels schema', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'router_channels');
       const props = skill!.inputSchema?.properties;
       expect(props.join_rule).toBeDefined();
       expect(props.join_rule.enum).toEqual(['open', 'invite']);
@@ -133,9 +133,9 @@ describe('Skills System', () => {
       expect(validateSkillName('my_skill_v2')).toBeNull();
     });
 
-    it('should reject names starting with hermes', () => {
-      expect(validateSkillName('hermes_foo')).not.toBeNull();
-      expect(validateSkillName('hermes')).not.toBeNull();
+    it('should reject names starting with router', () => {
+      expect(validateSkillName('router_foo')).not.toBeNull();
+      expect(validateSkillName('router')).not.toBeNull();
     });
 
     it('should reject invalid characters', () => {
@@ -327,7 +327,7 @@ describe('Skills System', () => {
       await storage.createUser(testUser);
 
       const overrides = {
-        hermes_write_entry: {
+        router_write_entry: {
           instructions: 'Keep entries under 100 characters',
         },
       };
@@ -337,15 +337,15 @@ describe('Skills System', () => {
       });
 
       expect(updated!.skillOverrides).toBeDefined();
-      expect(updated!.skillOverrides!.hermes_write_entry).toBeDefined();
-      expect(updated!.skillOverrides!.hermes_write_entry.instructions).toBe('Keep entries under 100 characters');
+      expect(updated!.skillOverrides!.router_write_entry).toBeDefined();
+      expect(updated!.skillOverrides!.router_write_entry.instructions).toBe('Keep entries under 100 characters');
     });
 
     it('should store description override', async () => {
       await storage.createUser(testUser);
 
       const overrides = {
-        hermes_search: {
+        router_search: {
           description: 'Custom search description',
         },
       };
@@ -354,15 +354,15 @@ describe('Skills System', () => {
         skillOverrides: overrides,
       });
 
-      expect(updated!.skillOverrides!.hermes_search!.description).toBe('Custom search description');
+      expect(updated!.skillOverrides!.router_search!.description).toBe('Custom search description');
     });
 
     it('should store multiple overrides', async () => {
       await storage.createUser(testUser);
 
       const overrides = {
-        hermes_write_entry: { instructions: 'Be brief' },
-        hermes_search: { instructions: 'Search broadly' },
+        router_write_entry: { instructions: 'Be brief' },
+        router_search: { instructions: 'Search broadly' },
       };
 
       const updated = await storage.updateUser('customizer', {
@@ -376,7 +376,7 @@ describe('Skills System', () => {
       await storage.createUser(testUser);
 
       await storage.updateUser('customizer', {
-        skillOverrides: { hermes_write_entry: { instructions: 'Be brief' } },
+        skillOverrides: { router_write_entry: { instructions: 'Be brief' } },
       });
 
       const updated = await storage.updateUser('customizer', {

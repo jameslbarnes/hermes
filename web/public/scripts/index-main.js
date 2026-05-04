@@ -13,7 +13,7 @@
         // Handle ?channelinvite=TOKEN shorthand
         const channelInviteToken = params.get('channelinvite');
         if (channelInviteToken) {
-            const existingKey = localStorage.getItem('hermes_key') || userKey;
+            const existingKey = localStorage.getItem('router_key') || userKey;
             if (existingKey) {
                 // Existing user: resolve and redirect to channel join flow
                 fetch(`/api/invites/${encodeURIComponent(channelInviteToken)}/resolve`)
@@ -30,7 +30,7 @@
 
         // Save URL key to localStorage for persistence across pages
         if (userKey) {
-            localStorage.setItem('hermes_key', userKey);
+            localStorage.setItem('router_key', userKey);
         }
 
         // Map pseudonym -> handle (built from entries that have handles)
@@ -451,7 +451,7 @@
                 if (!res.ok) return;
                 const data = await res.json();
                 const received = data.received || data.entries || [];
-                const lastSeen = parseInt(localStorage.getItem('hermes_inbox_seen') || '0');
+                const lastSeen = parseInt(localStorage.getItem('router_inbox_seen') || '0');
                 const unseen = received.filter(e => e.timestamp > lastSeen).length;
                 const badge = document.getElementById('inbox-badge');
                 if (badge) {
@@ -466,14 +466,14 @@
         }
 
         function markInboxSeen() {
-            localStorage.setItem('hermes_inbox_seen', String(Date.now()));
+            localStorage.setItem('router_inbox_seen', String(Date.now()));
             const badge = document.getElementById('inbox-badge');
             if (badge) badge.style.display = 'none';
         }
 
         // Simple filtered view (when filtering by pseudonym)
         async function loadInboxFeed(feed) {
-            const key = userKey || localStorage.getItem('hermes_key');
+            const key = userKey || localStorage.getItem('router_key');
             if (!key) {
                 feed.innerHTML = `
                     <div class="filter-header">
@@ -1020,7 +1020,7 @@
 
                 if (res.ok) {
                     // Open Claude with a channel setup prompt
-                    const setupPrompt = `I just created a channel called #${id} ("${name}") on Hermes.${description ? ' Description: ' + description : ''}\n\nHelp me set it up. Interview me about what skills this channel should have. Skills define the types of content that get posted to the channel — for example a channel might have skills like "cool-people" for tracking interesting contacts, "papers" for documenting research, "updates" for project updates.\n\nFor each skill I want, figure out:\n- A short name (lowercase, hyphens)\n- A description (what triggers this skill / when to use it)\n- Instructions (how to format the entry)\n\nThen create each one using hermes_channels with action: "add_skill".`;
+                    const setupPrompt = `I just created a channel called #${id} ("${name}") on Router.${description ? ' Description: ' + description : ''}\n\nHelp me set it up. Interview me about what skills this channel should have. Skills define the types of content that get posted to the channel — for example a channel might have skills like "cool-people" for tracking interesting contacts, "papers" for documenting research, "updates" for project updates.\n\nFor each skill I want, figure out:\n- A short name (lowercase, hyphens)\n- A description (what triggers this skill / when to use it)\n- Instructions (how to format the entry)\n\nThen create each one using router_channels with action: "add_skill".`;
                     window.open(`https://claude.ai/new?q=${encodeURIComponent(setupPrompt)}`, '_blank');
                     // Also navigate to the channel page
                     window.location.href = `?view=channel&id=${encodeURIComponent(id)}`;
@@ -1184,7 +1184,7 @@
             const isOwner = (userPseudonym && conversation.pseudonym === userPseudonym) || (userHandle && conversation.handle === userHandle);
             if (isOwner) meta.push(`<button class="delete-btn" onclick="deleteConversation('${conversation.id}')">delete</button>`);
             // For AI-only, emphasize the discuss link
-            const discussUrl = `https://claude.ai/new?q=${encodeURIComponent(`Search the Hermes notebook for more about: ${conversation.title || 'this conversation'}`)}`;
+            const discussUrl = `https://claude.ai/new?q=${encodeURIComponent(`Search the Router notebook for more about: ${conversation.title || 'this conversation'}`)}`;
             meta.push(`<a href="${discussUrl}" target="_blank" class="discuss-link">${isAiOnly ? 'discuss with claude →' : 'discuss with claude'}</a>`);
 
             // For AI-only, add a note about visibility
@@ -1693,7 +1693,7 @@
         }
 
         function generateDiscussUrl(entry) {
-            const prompt = `I want to discuss a Hermes notebook entry.
+            const prompt = `I want to discuss a Router notebook entry.
 
 Entry ID: ${entry.id}
 
@@ -1703,7 +1703,7 @@ Use get_notebook_entry to fetch it, then let's talk about it. If I want to respo
         }
 
         function generateSessionDiscussUrl(entryIds) {
-            const prompt = `I want to discuss a Hermes notebook session.
+            const prompt = `I want to discuss a Router notebook session.
 
 Entry IDs: ${entryIds.join(', ')}
 
@@ -1840,11 +1840,11 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
         // ─────────────────────────────────────────────────────────────
 
         function getSavedKey() {
-            return localStorage.getItem('hermes_key');
+            return localStorage.getItem('router_key');
         }
 
         function saveKey(key) {
-            localStorage.setItem('hermes_key', key);
+            localStorage.setItem('router_key', key);
         }
 
         function getEffectiveKey() {
@@ -1853,7 +1853,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
         }
 
         function signOut() {
-            localStorage.removeItem('hermes_key');
+            localStorage.removeItem('router_key');
             window.location.href = '/';
         }
 
@@ -2077,7 +2077,7 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             try {
                 const res = await fetch('/api/attestation');
                 const data = await res.json();
-                const prompt = `I want you to audit Hermes, a shared notebook for AI conversations. The operator claims they can't see anything except public posts — no secret keys, no unpublished entries, no identity mappings. Verify this claim.
+                const prompt = `I want you to audit Router, a shared notebook for AI conversations. The operator claims they can't see anything except public posts — no secret keys, no unpublished entries, no identity mappings. Verify this claim.
 
 Attestation data from the running server (self-reported): ${JSON.stringify(data)}
 
@@ -2085,8 +2085,8 @@ The attestation data above is served by the application itself. Self-reported da
 
 Steps:
 1. Clone the source code and read it — do NOT try to fetch individual files from GitHub URLs, they will fail:
-   git clone https://github.com/jameslbarnes/hermes /tmp/hermes-audit
-   cd /tmp/hermes-audit && git checkout ${data.git_sha}
+   git clone https://github.com/jameslbarnes/teleport-router /tmp/teleport-router-audit
+   cd /tmp/teleport-router-audit && git checkout ${data.git_sha}
    Focus on server/src/http.ts and server/src/storage.ts — check how secret keys are handled, whether there are any logging or exfiltration paths for keys or pending entries, and whether the operator has any backdoor access.
 2. Check the Dockerfile and .github/workflows/build.yml to verify the deployed image is built from this source with no extra steps. Also check docker-compose.template.yml — confirm secrets are bare variable names with no baked-in values.
 3. Close the attestation loop — ask the user to open this URL in their browser and paste the result back to you:

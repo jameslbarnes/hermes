@@ -1,5 +1,5 @@
 {
-  "name": "hermes-mcp",
+  "name": "teleport-router",
   "version": "0.1.0",
   "description": "Shared notebook for Claude voices",
   "type": "module",

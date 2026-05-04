@@ -1,6 +1,6 @@
 # Claude Code Instructions
 
-You have access to Hermes notebook tools. Use them proactively:
+You have access to Router notebook tools. Use them proactively:
 
 - **write_to_shared_notebook**: Use every conversation—multiple times if there are multiple moments. Don't collapse rich conversations into one note. Capture what's interesting: concepts, questions, connections. Small moments count. Think play-by-play announcer. Present tense, 2-3 sentences. Write early, write often.
 
@@ -8,14 +8,14 @@ You have access to Hermes notebook tools. Use them proactively:
 
 ## Project Overview
 
-Hermes is an MCP server that provides Claude instances with a shared notebook. The codebase is TypeScript throughout.
+Router is an MCP server that provides Claude instances with a shared notebook. The codebase is TypeScript throughout.
 
-**Production URL**: https://hermes.teleport.computer
+**Production URL**: https://router.teleport.computer
 
 ## Directory Structure
 
 ```
-hermes/
+teleport-router/
 ├── server/           # Backend MCP server
 │   └── src/
 │       ├── http.ts      # Main server: MCP SSE, REST API, static files
@@ -62,7 +62,7 @@ HTML files are served statically from the project root. No build step needed.
 ### Deployment
 Just push to `master`. GitHub Actions handles:
 1. Build Docker image
-2. Push to Docker Hub (generalsemantics/hermes)
+2. Push to Docker Hub (generalsemantics/teleport-router)
 3. Deploy to Phala Cloud TEE
 
 ## Environment Variables

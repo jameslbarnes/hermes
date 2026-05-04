@@ -1,4 +1,4 @@
-const BASE_URL = process.env.PERF_BASE_URL || 'https://hermes.teleport.computer';
+const BASE_URL = process.env.PERF_BASE_URL || 'https://router.teleport.computer';
 const RUNS = parseInt(process.env.PERF_RUNS || '7', 10);
 
 const BUDGET_HOME_P50_MS = parseInt(process.env.BUDGET_HOME_P50_MS || '120', 10);

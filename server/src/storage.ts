@@ -1,5 +1,5 @@
 /**
- * Hermes Storage Layer
+ * Router Storage Layer
  *
  * Simple interface for storing journal entries.
  * Implementations can be swapped (in-memory, SQLite, Postgres, etc.)
@@ -96,7 +96,7 @@ export interface SkillParameter {
 // Skill definition (used for MCP tool definitions)
 export interface Skill {
   id: string;                // Unique ID for the skill
-  name: string;              // Tool name (e.g., "hermes_write_entry")
+  name: string;              // Tool name (e.g., "router_write_entry")
   description: string;       // What this skill does
   instructions: string;      // Detailed instructions for Claude to follow
   inputSchema?: Record<string, any>;  // For builtin skills (complex schemas)
@@ -151,7 +151,7 @@ export interface User {
 
 /**
  * A linked platform account.
- * Maps a Hermes identity to an identity on an external platform.
+ * Maps a Router identity to an identity on an external platform.
  */
 export interface LinkedAccount {
   platform: string;          // "matrix", "telegram", "discord", etc.
@@ -1673,14 +1673,14 @@ export class FirestoreStorage implements Storage {
 export class StagedStorage implements Storage {
   private pending: Map<string, JournalEntry> = new Map();
   private pendingConversations: Map<string, Conversation> = new Map();
-  private published: FirestoreStorage;
+  private published: Storage & Record<string, any>;
   private publishDelayMs: number;
   private publishInterval: NodeJS.Timeout | null = null;
   private onStageCallback: ((entry: JournalEntry) => void) | null = null;
   private onPublishCallback: ((entry: JournalEntry) => void) | null = null;
 
-  constructor(publishDelayMs = 60 * 60 * 1000) { // Default 1 hour
-    this.published = new FirestoreStorage();
+  constructor(publishDelayMs = 60 * 60 * 1000, publishedStorage?: Storage) { // Default 1 hour
+    this.published = (publishedStorage || new FirestoreStorage()) as Storage & Record<string, any>;
     this.publishDelayMs = publishDelayMs;
     this.startPublishLoop();
   }

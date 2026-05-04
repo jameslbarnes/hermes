@@ -511,7 +511,7 @@ export async function sendPersonalizedDigests(
 // ── Channel Room Initialization ──────────────────────────────
 
 /**
- * Ensure all existing Hermes channels have corresponding Matrix rooms.
+ * Ensure all existing Router channels have corresponding Matrix rooms.
  * Called on server startup.
  */
 export async function initializeChannelRooms(storage: Storage): Promise<void> {

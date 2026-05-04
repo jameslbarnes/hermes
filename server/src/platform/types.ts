@@ -9,7 +9,7 @@
 export interface PlatformIdentity {
   platformUserId: string;
   platformUsername?: string;
-  hermesHandle?: string;
+  routerHandle?: string;
 }
 
 export type RoomType = 'dm' | 'group' | 'channel';
@@ -40,7 +40,7 @@ export interface SendMessageOptions {
 
 export interface CreateRoomOptions {
   type: RoomType;
-  invite?: string[];    // Hermes handles to invite
+  invite?: string[];    // Router handles to invite
   topic?: string;
   encrypted?: boolean;
   attachToSpace?: boolean;
@@ -66,11 +66,11 @@ export interface Platform {
   deleteMessage(roomId: string, messageId: string): Promise<void>;
 
   // ── Identity ───────────────────────────────────────────────
-  /** Given a platform-native user ID, return the Hermes handle (if known) */
-  resolveHermesHandle(platformUserId: string): Promise<string | null>;
-  /** Given a Hermes handle, return the platform-native user ID (if known).
+  /** Given a platform-native user ID, return the Router handle (if known) */
+  resolveRouterHandle(platformUserId: string): Promise<string | null>;
+  /** Given a Router handle, return the platform-native user ID (if known).
    *  Checks linkedAccounts in storage first, falls back to convention. */
-  resolvePlatformId(hermesHandle: string): Promise<string | null>;
+  resolvePlatformId(routerHandle: string): Promise<string | null>;
 
   // ── Formatting ─────────────────────────────────────────────
   /** Convert markdown to platform-native format */

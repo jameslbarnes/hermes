@@ -1,4 +1,4 @@
-# Hermes TEE Verification Report
+# Router TEE Verification Report
 
 ## Deployment Identity
 
@@ -7,10 +7,10 @@
 | App ID | `db82f581256a3c9244c4d7129a67336990d08cdf` |
 | Trust Center | https://trust.phala.com/app/db82f581256a3c9244c4d7129a67336990d08cdf |
 | TEE Metadata | https://db82f581256a3c9244c4d7129a67336990d08cdf-8090.dstack-pha-prod9.phala.network/ |
-| Production URL | https://hermes.teleport.computer |
-| Source Code | https://github.com/jameslbarnes/hermes |
-| Docker Image | `docker.io/generalsemantics/hermes` |
-| KMS | Pha (cloud) — migration to Base on-chain KMS pending ([#4](https://github.com/jameslbarnes/hermes/issues/4)) |
+| Production URL | https://router.teleport.computer |
+| Source Code | https://github.com/jameslbarnes/teleport-router |
+| Docker Image | `docker.io/generalsemantics/teleport-router` |
+| KMS | Pha (cloud) — migration to Base on-chain KMS pending ([#4](https://github.com/jameslbarnes/teleport-router/issues/4)) |
 
 ## Verification Steps
 
@@ -38,14 +38,14 @@ Compare this hash with `compose_hash` from step 1.
 
 ### 3. Verify Image Digest
 
-The docker-compose file pins the Hermes image by digest:
+The docker-compose file pins the Router image by digest:
 
 ```yaml
-image: docker.io/generalsemantics/hermes:<git-sha>@sha256:<digest>
+image: docker.io/generalsemantics/teleport-router:<git-sha>@sha256:<digest>
 ```
 
 Verify the digest matches what was built by GitHub Actions:
-- Go to the [Actions tab](https://github.com/jameslbarnes/hermes/actions)
+- Go to the [Actions tab](https://github.com/jameslbarnes/teleport-router/actions)
 - Find the workflow run for the deployed commit
 - Check the "Docker Image Attestation" in the job summary for the digest
 
@@ -64,7 +64,7 @@ Each deploy records a full chain:
 
 **Current:** Pha KMS (cloud) — no public upgrade log. Deployment history is tracked via `evidences/` snapshots committed to this repo.
 
-**Target:** Base on-chain KMS, where every upgrade emits an on-chain event. This requires recreating the CVM with on-chain KMS via the Phala dashboard. See [issue #4](https://github.com/jameslbarnes/hermes/issues/4).
+**Target:** Base on-chain KMS, where every upgrade emits an on-chain event. This requires recreating the CVM with on-chain KMS via the Phala dashboard. See [issue #4](https://github.com/jameslbarnes/teleport-router/issues/4).
 
 ### 6. Inspect Archived Evidences
 
@@ -104,7 +104,7 @@ evidences/
 
 | Gap | Status | Mitigation |
 |-----|--------|------------|
-| Pha KMS (no public upgrade log) | Open | Requires CVM recreation with on-chain KMS ([#4](https://github.com/jameslbarnes/hermes/issues/4)). Evidences archived to git as interim measure. |
+| Pha KMS (no public upgrade log) | Open | Requires CVM recreation with on-chain KMS ([#4](https://github.com/jameslbarnes/teleport-router/issues/4)). Evidences archived to git as interim measure. |
 | Non-reproducible builds | Open | Base images pinned by digest; full reproducibility requires Nix or apko |
 | Docker Hub hosting | Open | Consider migrating to GHCR for Sigstore signatures and SLSA provenance |
 | No rate limiting on API | Open | Tracked separately from TEE concerns |

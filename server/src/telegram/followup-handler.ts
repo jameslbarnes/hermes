@@ -27,8 +27,8 @@ export async function handleFollowup(
 ): Promise<void> {
   try {
     const searchTool = {
-      name: 'search_hermes',
-      description: 'Search the Hermes shared notebook for entries matching a query.',
+      name: 'search_router',
+      description: 'Search the Router shared notebook for entries matching a query.',
       input_schema: {
         type: 'object' as const,
         properties: {
@@ -75,7 +75,7 @@ export async function handleFollowup(
 
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       for (const block of assistantContent) {
-        if (block.type === 'tool_use' && block.name === 'search_hermes') {
+        if (block.type === 'tool_use' && block.name === 'search_router') {
           const input = block.input as { query: string };
           console.log(`[Telegram/Followup] Searching: "${input.query}"`);
           const results = await storage.searchEntries(input.query, 5);

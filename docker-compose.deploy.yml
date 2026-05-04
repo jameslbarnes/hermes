@@ -1,8 +1,8 @@
 version: '3.8'
 
 services:
-  hermes:
-    image: docker.io/generalsemantics/hermes:9081484@sha256:ed09f91306096b769d90f2dc59f1b17673235defa379b5fde8ce039b74ef0a93
+  router:
+    image: docker.io/generalsemantics/teleport-router:9081484@sha256:ed09f91306096b769d90f2dc59f1b17673235defa379b5fde8ce039b74ef0a93
     ports:
       - "3000:3000"
     environment:
@@ -10,31 +10,35 @@ services:
       - STAGING_DELAY_MS=3600000
       - GIT_SHA=9081484
       - IMAGE_DIGEST=sha256:ed09f91306096b769d90f2dc59f1b17673235defa379b5fde8ce039b74ef0a93
-      - MODERATOR_HANDLES=hermes
+      - MODERATOR_HANDLES=router
       # Names only — values injected via encrypted --env-file at deploy time
       - BASE_URL
       - FIREBASE_SERVICE_ACCOUNT_BASE64
       - ANTHROPIC_API_KEY
       - SENDGRID_API_KEY
       - SENDGRID_FROM_EMAIL
-      - HERMES_AGENT_HANDLES_MATRIX=1
+      - ROUTER_AGENT_HANDLES_MATRIX=1
     volumes:
-      - hermes-data:/data
+      - router-data:/data
     restart: unless-stopped
 
-  hermes-agent:
-    image: docker.io/generalsemantics/hermes-agent:latest
+  router-agent:
+    image: docker.io/generalsemantics/teleport-router-agent:latest
     environment:
       # Names only — values injected via encrypted --env-file at deploy time
       - ANTHROPIC_API_KEY
-      - HERMES_MCP_URL=http://hermes:3000/mcp/http
+      - ROUTER_MCP_URL=http://router:3000/mcp/http
+      - ROUTER_SECRET_KEY
+      # Temporary compatibility with persisted encrypted env from the old deployment name.
       - HERMES_SECRET_KEY
+      - ROUTER_HANDLE=router
+      - ROUTER_ENABLE_GATEWAY=0
       - TELEGRAM_BOT_TOKEN
       - GITHUB_TOKEN
     volumes:
-      - agent-data:/root/.hermes
+      - router-data:/data
     depends_on:
-      - hermes
+      - router
     restart: unless-stopped
 
   dstack-ingress:
@@ -42,21 +46,20 @@ services:
     ports:
       - "443:443"
     environment:
-      - DOMAIN=hermes.teleport.computer
+      - DOMAIN=router.teleport.computer
       - DNS_PROVIDER=cloudflare
       - CLOUDFLARE_API_TOKEN
       - GATEWAY_DOMAIN=_.dstack-pha-prod9.phala.network
       - CERTBOT_EMAIL=james@generalsemantics.nyc
       - SET_CAA=true
-      - TARGET_ENDPOINT=http://hermes:3000
+      - TARGET_ENDPOINT=http://router:3000
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
       - cert-data-cf:/etc/letsencrypt
     depends_on:
-      - hermes
+      - router
     restart: unless-stopped
 
 volumes:
-  hermes-data:
-  agent-data:
+  router-data:
   cert-data-cf:

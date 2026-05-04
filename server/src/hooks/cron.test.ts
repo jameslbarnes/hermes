@@ -21,9 +21,8 @@ import { registerPlatform } from '../platform/registry.js';
 import { generateDailyDigest, GLOBAL_DIGEST_MODEL, PERSONALIZED_DIGEST_MODEL, sendPersonalizedDigests } from './cron.js';
 
 function yesterdayAtNoon(): number {
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  return new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 12).getTime();
+  const now = new Date();
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1, 12);
 }
 
 function makeUser(overrides: Partial<User> = {}): User {
@@ -75,7 +74,7 @@ function registerMatrixPlatform() {
     setRoomTopic: vi.fn(async () => {}),
     setUserRole: vi.fn(async () => {}),
     deleteMessage: vi.fn(async () => {}),
-    resolveHermesHandle: vi.fn(async () => null),
+    resolveRouterHandle: vi.fn(async () => null),
     resolvePlatformId: vi.fn(async handle => `@${handle}:matrix.test`),
     formatContent: text => text,
     ensureChannelRoom,

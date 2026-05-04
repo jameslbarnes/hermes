@@ -62,7 +62,7 @@ def post_json(base_url: str, path: str, payload: dict, retries: int = 20, delay_
         if attempt < retries:
             time.sleep(delay_s)
 
-    fail(f"Failed contacting Hermes server at {url} after {retries} attempts ({last_error})")
+    fail(f"Failed contacting Router server at {url} after {retries} attempts ({last_error})")
 
 
 def normalize_handle(raw_handle: str) -> str:
@@ -70,20 +70,20 @@ def normalize_handle(raw_handle: str) -> str:
 
 
 def main() -> None:
-    hermes_home = Path(os.environ["HERMES_HOME"])
-    hermes_home.mkdir(parents=True, exist_ok=True)
+    router_home = Path(os.environ.get("ROUTER_HOME") or os.environ.get("HERMES_HOME") or "/data/router-agent")
+    router_home.mkdir(parents=True, exist_ok=True)
 
-    key_file = hermes_home / "secret_key"
-    explicit_key = os.environ.get("HERMES_SECRET_KEY", "").strip()
-    desired_handle = normalize_handle(os.environ.get("HERMES_HANDLE", "router"))
-    mcp_url = os.environ.get("HERMES_MCP_URL", "http://hermes:3000/mcp/http")
+    key_file = router_home / "secret_key"
+    explicit_key = (os.environ.get("ROUTER_SECRET_KEY") or os.environ.get("HERMES_SECRET_KEY") or "").strip()
+    desired_handle = normalize_handle(os.environ.get("ROUTER_HANDLE") or os.environ.get("HERMES_HANDLE") or "router")
+    mcp_url = os.environ.get("ROUTER_MCP_URL") or os.environ.get("HERMES_MCP_URL") or "http://router:3000/mcp/http"
 
     if not HANDLE_RE.fullmatch(desired_handle):
-        fail(f"Invalid HERMES_HANDLE '{desired_handle}'")
+        fail(f"Invalid ROUTER_HANDLE '{desired_handle}'")
 
     parsed = urlparse(mcp_url)
     if not parsed.scheme or not parsed.netloc:
-        fail(f"Invalid HERMES_MCP_URL '{mcp_url}'")
+        fail(f"Invalid ROUTER_MCP_URL '{mcp_url}'")
     base_url = f"{parsed.scheme}://{parsed.netloc}"
 
     key = ""
@@ -100,10 +100,10 @@ def main() -> None:
     if not key:
         key = secrets.token_urlsafe(32)
         source = "generated"
-        log("Generated new Hermes notebook key")
+        log("Generated new Router notebook key")
 
     if not KEY_RE.fullmatch(key):
-        fail("Resolved HERMES secret key is not a valid Hermes identity key")
+        fail("Resolved Router secret key is not a valid Router identity key")
 
     key_file.write_text(f"{key}\n", encoding="utf-8")
     os.chmod(key_file, 0o600)
@@ -126,7 +126,7 @@ def main() -> None:
         if status == 201:
             handle = registration.get("handle") or desired_handle
             pseudonym = registration.get("pseudonym") or pseudonym
-            log(f"Registered Hermes identity @{handle}")
+            log(f"Registered Router identity @{handle}")
         else:
             if source == "generated":
                 try:
@@ -144,12 +144,15 @@ def main() -> None:
             f"Moderator-gated tools may be unavailable unless server MODERATOR_HANDLES includes @{handle}."
         )
     elif handle:
-        log(f"Using Hermes identity @{handle} from {source}")
+        log(f"Using Router identity @{handle} from {source}")
 
+    print(f"export ROUTER_SECRET_KEY={shlex.quote(key)}")
+    print(f"export ROUTER_SECRET_KEY_SOURCE={shlex.quote(source)}")
+    print(f"export ROUTER_AGENT_HANDLE={shlex.quote(handle or desired_handle)}")
+    print(f"export ROUTER_IDENTITY_PSEUDONYM={shlex.quote(pseudonym)}")
+    # The upstream agent CLI still reads these names.
     print(f"export HERMES_SECRET_KEY={shlex.quote(key)}")
-    print(f"export HERMES_SECRET_KEY_SOURCE={shlex.quote(source)}")
-    print(f"export HERMES_AGENT_HANDLE={shlex.quote(handle or desired_handle)}")
-    print(f"export HERMES_IDENTITY_PSEUDONYM={shlex.quote(pseudonym)}")
+    print(f"export HERMES_HOME={shlex.quote(str(router_home))}")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 /**
- * Integration tests for Hermes MCP tools.
+ * Integration tests for Router MCP tools.
  *
  * Spawns the server as a child process on a random port,
  * connects via SSE as an MCP client, and exercises the agent tools.
@@ -57,6 +57,7 @@ describe('MCP Tool Integration Tests', () => {
         ...process.env,
         PORT: String(TEST_PORT),
         STAGING_DELAY_MS: '3600000',
+        STAGED_STORAGE: 'memory',
         MODERATOR_HANDLES: MODERATOR_HANDLE,
       },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -110,34 +111,34 @@ describe('MCP Tool Integration Tests', () => {
     it('moderator sees agent tools', async () => {
       const { tools } = await modClient.listTools();
       const names = tools.map(t => t.name);
-      expect(names).toContain('hermes_poll_events');
-      expect(names).toContain('hermes_review_staged');
-      expect(names).toContain('hermes_hold_entry');
-      expect(names).toContain('hermes_release_entry');
+      expect(names).toContain('router_poll_events');
+      expect(names).toContain('router_review_staged');
+      expect(names).toContain('router_hold_entry');
+      expect(names).toContain('router_release_entry');
     });
 
     it('regular user does NOT see agent tools', async () => {
       const { tools } = await regularClient.listTools();
       const names = tools.map(t => t.name);
-      expect(names).not.toContain('hermes_poll_events');
-      expect(names).not.toContain('hermes_hold_entry');
+      expect(names).not.toContain('router_poll_events');
+      expect(names).not.toContain('router_hold_entry');
     });
 
     it('both see standard tools', async () => {
       for (const client of [modClient, regularClient]) {
         const { tools } = await client.listTools();
         const names = tools.map(t => t.name);
-        expect(names).toContain('hermes_write_entry');
-        expect(names).toContain('hermes_search');
+        expect(names).toContain('router_write_entry');
+        expect(names).toContain('router_search');
       }
     });
   });
 
   // ── Event Queue ──────────────────────────────────────────
 
-  describe('hermes_poll_events', () => {
+  describe('router_poll_events', () => {
     it('returns no events initially', async () => {
-      const result = await modClient.callTool({ name: 'hermes_poll_events', arguments: { cursor: 0 } });
+      const result = await modClient.callTool({ name: 'router_poll_events', arguments: { cursor: 0 } });
       const textBlock = (result.content as any[])?.find((b: any) => b.type === 'text');
       const text = textBlock?.text || '';
       expect(text).toContain('No new events');
@@ -149,55 +150,55 @@ describe('MCP Tool Integration Tests', () => {
     });
 
     it('sees entry_staged after write', async () => {
-      await callTool(regularClient, 'hermes_write_entry', {
+      await callTool(regularClient, 'router_write_entry', {
         sensitivity_check: 'No sensitive content. I, Claude, certify I am completing this check.',
         client: 'code',
         entry: 'Event polling test entry',
       });
-      const text = await callTool(modClient, 'hermes_poll_events', { cursor: 0 });
+      const text = await callTool(modClient, 'router_poll_events', { cursor: 0 });
       expect(text).toContain('entry_staged');
       // Content should NOT be in events (privacy)
       expect(text).not.toContain('Event polling test');
     });
 
     it('cursor-based pagination works', async () => {
-      const first = await callTool(modClient, 'hermes_poll_events', { cursor: 0 });
+      const first = await callTool(modClient, 'router_poll_events', { cursor: 0 });
       const cursor = parseInt(first.match(/cursor (\d+)/)![1]);
 
-      await callTool(regularClient, 'hermes_write_entry', {
+      await callTool(regularClient, 'router_write_entry', {
         sensitivity_check: 'No sensitive content. I, Claude, certify I am completing this check.',
         client: 'code',
         entry: 'Cursor pagination test',
       });
 
       // Should see a new event with higher cursor
-      const second = await callTool(modClient, 'hermes_poll_events', { cursor });
+      const second = await callTool(modClient, 'router_poll_events', { cursor });
       expect(second).toContain('entry_staged');
     });
   });
 
   // ── Content Moderation ──────────────────────────────────
 
-  describe('hermes_review_staged', () => {
+  describe('router_review_staged', () => {
     it('lists pending entries', async () => {
-      const text = await callTool(modClient, 'hermes_review_staged', {});
+      const text = await callTool(modClient, 'router_review_staged', {});
       expect(text).toContain('pending entries');
       expect(text).toContain('publishes in');
     });
   });
 
-  describe('hermes_hold_entry', () => {
+  describe('router_hold_entry', () => {
     let heldEntryId: string;
 
     it('holds a staged entry', async () => {
-      const wr = await callTool(regularClient, 'hermes_write_entry', {
+      const wr = await callTool(regularClient, 'router_write_entry', {
         sensitivity_check: 'No sensitive content. I, Claude, certify I am completing this check.',
         client: 'code',
         entry: 'I hate my cofounder, they never shut up',
       });
       heldEntryId = wr.match(/Entry ID: (\S+)/)![1];
 
-      const hold = await callTool(modClient, 'hermes_hold_entry', {
+      const hold = await callTool(modClient, 'router_hold_entry', {
         entry_id: heldEntryId,
         reason: 'Interpersonal complaint.',
       });
@@ -205,25 +206,25 @@ describe('MCP Tool Integration Tests', () => {
     });
 
     it('shows HELD in review', async () => {
-      const text = await callTool(modClient, 'hermes_review_staged', {});
+      const text = await callTool(modClient, 'router_review_staged', {});
       expect(text).toContain('HELD (indefinite)');
       expect(text).toContain(heldEntryId);
     });
 
     it('rejects non-existent entry', async () => {
-      const text = await callTool(modClient, 'hermes_hold_entry', { entry_id: 'fake-id' });
+      const text = await callTool(modClient, 'router_hold_entry', { entry_id: 'fake-id' });
       expect(text).toContain('not in the staging buffer');
     });
 
     it('requires entry_id', async () => {
-      const text = await callTool(modClient, 'hermes_hold_entry', {});
+      const text = await callTool(modClient, 'router_hold_entry', {});
       expect(text).toContain('Entry ID is required');
     });
   });
 
-  describe('hermes_release_entry', () => {
+  describe('router_release_entry', () => {
     it('allows self-publish for an ordinary pending entry', async () => {
-      const wr = await callTool(regularClient, 'hermes_write_entry', {
+      const wr = await callTool(regularClient, 'router_write_entry', {
         sensitivity_check: 'No sensitive content. I, Claude, certify I am completing this check.',
         client: 'code',
         entry: 'Ordinary pending entry for self-publish test',
@@ -240,14 +241,14 @@ describe('MCP Tool Integration Tests', () => {
     });
 
     it('allows self-publish for a moderator-held entry', async () => {
-      const wr = await callTool(regularClient, 'hermes_write_entry', {
+      const wr = await callTool(regularClient, 'router_write_entry', {
         sensitivity_check: 'No sensitive content. I, Claude, certify I am completing this check.',
         client: 'code',
         entry: 'Held pending entry for self-publish test',
       });
       const entryId = wr.match(/Entry ID: (\S+)/)![1];
 
-      await callTool(modClient, 'hermes_hold_entry', { entry_id: entryId, reason: 'test' });
+      await callTool(modClient, 'router_hold_entry', { entry_id: entryId, reason: 'test' });
 
       const res = await fetch(`http://localhost:${TEST_PORT}/api/entries/${entryId}/publish?key=${REGULAR_KEY}`, {
         method: 'POST',
@@ -259,23 +260,23 @@ describe('MCP Tool Integration Tests', () => {
     });
 
     it('releases a held entry', async () => {
-      const wr = await callTool(regularClient, 'hermes_write_entry', {
+      const wr = await callTool(regularClient, 'router_write_entry', {
         sensitivity_check: 'No sensitive content. I, Claude, certify I am completing this check.',
         client: 'code',
         entry: 'Safe entry for release test',
       });
       const entryId = wr.match(/Entry ID: (\S+)/)![1];
 
-      await callTool(modClient, 'hermes_hold_entry', { entry_id: entryId, reason: 'test' });
-      const release = await callTool(modClient, 'hermes_release_entry', { entry_id: entryId });
+      await callTool(modClient, 'router_hold_entry', { entry_id: entryId, reason: 'test' });
+      const release = await callTool(modClient, 'router_release_entry', { entry_id: entryId });
       expect(release).toContain('released and published');
 
-      const review = await callTool(modClient, 'hermes_review_staged', {});
+      const review = await callTool(modClient, 'router_review_staged', {});
       expect(review).not.toContain(entryId);
     });
 
     it('rejects non-existent entry', async () => {
-      const text = await callTool(modClient, 'hermes_release_entry', { entry_id: 'fake-id' });
+      const text = await callTool(modClient, 'router_release_entry', { entry_id: 'fake-id' });
       expect(text).toContain('not in the staging buffer');
     });
   });
@@ -285,7 +286,7 @@ describe('MCP Tool Integration Tests', () => {
   describe('Full moderation lifecycle', () => {
     it('write → stage event → review → hold → release', async () => {
       // 1. Write
-      const wr = await callTool(regularClient, 'hermes_write_entry', {
+      const wr = await callTool(regularClient, 'router_write_entry', {
         sensitivity_check: 'No sensitive content. I, Claude, certify I am completing this check.',
         client: 'code',
         entry: 'TEE attestation observation for lifecycle test',
@@ -293,25 +294,25 @@ describe('MCP Tool Integration Tests', () => {
       const entryId = wr.match(/Entry ID: (\S+)/)![1];
 
       // 2. Poll → entry_staged
-      const events = await callTool(modClient, 'hermes_poll_events', { cursor: 0, limit: 100 });
+      const events = await callTool(modClient, 'router_poll_events', { cursor: 0, limit: 100 });
       expect(events).toContain('entry_staged');
       expect(events).not.toContain('TEE attestation'); // content not leaked in events
 
       // 3. Review
-      const staged = await callTool(modClient, 'hermes_review_staged', {});
+      const staged = await callTool(modClient, 'router_review_staged', {});
       expect(staged).toContain(entryId);
 
       // 4. Hold
-      await callTool(modClient, 'hermes_hold_entry', { entry_id: entryId, reason: 'review' });
-      const held = await callTool(modClient, 'hermes_review_staged', {});
+      await callTool(modClient, 'router_hold_entry', { entry_id: entryId, reason: 'review' });
+      const held = await callTool(modClient, 'router_review_staged', {});
       expect(held).toContain('HELD');
 
       // 5. Release
-      const release = await callTool(modClient, 'hermes_release_entry', { entry_id: entryId });
+      const release = await callTool(modClient, 'router_release_entry', { entry_id: entryId });
       expect(release).toContain('released and published');
 
       // 6. Gone from staging
-      const final = await callTool(modClient, 'hermes_review_staged', {});
+      const final = await callTool(modClient, 'router_review_staged', {});
       expect(final).not.toContain(entryId);
     });
   });

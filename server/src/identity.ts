@@ -1,5 +1,5 @@
 /**
- * Hermes Identity System
+ * Router Identity System
  *
  * Tripcode-style identity: secret_key → pseudonym
  * The secret_key never leaves the client (ideally) or is only used for auth

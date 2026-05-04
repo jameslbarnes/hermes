@@ -25,8 +25,8 @@ describe('NotificationService', () => {
       storage,
       emailClient,
       anthropic: null,
-      fromEmail: 'notify@hermes.test',
-      baseUrl: 'https://hermes.test',
+      fromEmail: 'notify@router.test',
+      baseUrl: 'https://router.test',
       jwtSecret: 'test-secret',
     });
   });
@@ -113,8 +113,8 @@ describe('NotificationService', () => {
         storage,
         emailClient,
         anthropic: mockAnthropic as any,
-        fromEmail: 'notify@hermes.test',
-        baseUrl: 'https://hermes.test',
+        fromEmail: 'notify@router.test',
+        baseUrl: 'https://router.test',
         jwtSecret: 'test-secret',
       });
 
@@ -160,8 +160,8 @@ describe('NotificationService', () => {
         storage,
         emailClient,
         anthropic: mockAnthropic as any,
-        fromEmail: 'notify@hermes.test',
-        baseUrl: 'https://hermes.test',
+        fromEmail: 'notify@router.test',
+        baseUrl: 'https://router.test',
         jwtSecret: 'test-secret',
       });
 
@@ -220,8 +220,8 @@ describe('NotificationService', () => {
         storage,
         emailClient,
         anthropic: mockAnthropic as any,
-        fromEmail: 'notify@hermes.test',
-        baseUrl: 'https://hermes.test',
+        fromEmail: 'notify@router.test',
+        baseUrl: 'https://router.test',
         jwtSecret: 'test-secret',
       });
 
@@ -243,7 +243,7 @@ describe('NotificationService', () => {
 
       const result = await serviceWithAI.sendDailyDigests();
       expect(result.sent).toBe(1);
-      expect(emailClient.calls[0].subject).toBe("What's happening on Hermes");
+      expect(emailClient.calls[0].subject).toBe("What's happening on Router");
     });
 
     it('should render question box and Claude deep link in digest email', async () => {
@@ -261,8 +261,8 @@ describe('NotificationService', () => {
         storage,
         emailClient,
         anthropic: mockAnthropic as any,
-        fromEmail: 'notify@hermes.test',
-        baseUrl: 'https://hermes.test',
+        fromEmail: 'notify@router.test',
+        baseUrl: 'https://router.test',
         jwtSecret: 'test-secret',
       });
 
@@ -308,8 +308,8 @@ describe('NotificationService', () => {
         storage,
         emailClient,
         anthropic: mockAnthropic as any,
-        fromEmail: 'notify@hermes.test',
-        baseUrl: 'https://hermes.test',
+        fromEmail: 'notify@router.test',
+        baseUrl: 'https://router.test',
         jwtSecret: 'test-secret',
       });
 
@@ -387,8 +387,8 @@ describe('NotificationService', () => {
         storage,
         emailClient,
         anthropic: mockAnthropic as any,
-        fromEmail: 'notify@hermes.test',
-        baseUrl: 'https://hermes.test',
+        fromEmail: 'notify@router.test',
+        baseUrl: 'https://router.test',
         jwtSecret: 'test-secret',
       });
 
@@ -655,7 +655,7 @@ describe('NotificationService', () => {
       expect(html).toContain('Hey,');
       expect(html).toContain('wrote this for you');
       expect(html).toContain('class="quote"');
-      expect(html).toContain('hermes.teleport.computer');
+      expect(html).toContain('router.teleport.computer');
       // Should NOT have old platform-style copy
       expect(html).not.toContain("You're receiving this because");
     });
@@ -674,7 +674,7 @@ describe('NotificationService', () => {
       const html = emailClient.calls[0].html;
       expect(html).toContain('Hey @alice');
       expect(html).toContain('verify your email');
-      expect(html).toContain('hermes.teleport.computer');
+      expect(html).toContain('router.teleport.computer');
       // Should NOT have old style
       expect(html).not.toContain("If you didn't request this");
     });

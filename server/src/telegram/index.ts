@@ -1,12 +1,12 @@
 /**
- * Telegram Bot for Hermes — thin relay.
+ * Telegram Bot for Router — thin relay.
  *
- * All intelligence has been moved to the Nous Hermes agent.
+ * All intelligence has been moved to the Nous Router agent.
  * This module only:
  * 1. Initializes the Telegraf bot
  * 2. Pushes incoming messages to the event queue
  * 3. Exposes the bot instance for MCP tools to send messages
- * 4. Sets up the bot's Hermes identity
+ * 4. Sets up the bot's Router identity
  */
 
 import { Telegraf } from 'telegraf';
@@ -29,7 +29,7 @@ export function getTelegramBot(): Telegraf | null {
 
 /**
  * Post a single entry to the Telegram channel.
- * @deprecated — The agent now handles posting via hermes_telegram_send.
+ * @deprecated — The agent now handles posting via router_telegram_send.
  * Kept for backward compatibility during migration.
  */
 export async function postToTelegram(entry: JournalEntry): Promise<void> {
@@ -65,7 +65,7 @@ export function formatEntryForTelegram(entry: JournalEntry, baseUrl: string): st
 }
 
 /**
- * Ensure the bot has a Hermes identity (user record + handle).
+ * Ensure the bot has a Router identity (user record + handle).
  */
 async function ensureBotIdentity(
   storage: Storage,
@@ -82,7 +82,7 @@ async function ensureBotIdentity(
 
   const available = await storage.isHandleAvailable(handle);
   if (!available) {
-    const fallback = `hermes_bot_${keyHash.slice(0, 6)}`;
+    const fallback = `router_bot_${keyHash.slice(0, 6)}`;
     console.log(`[Telegram] Handle @${handle} taken, using @${fallback}`);
     handle = fallback;
   }
@@ -91,8 +91,8 @@ async function ensureBotIdentity(
     await storage.createUser({
       handle,
       secretKeyHash: keyHash,
-      displayName: 'Hermes',
-      bio: 'The Hermes agent — central routing intelligence for the shared notebook.',
+      displayName: 'Router',
+      bio: 'The Router agent — central routing intelligence for the shared notebook.',
       legacyPseudonym: pseudonym,
     });
     console.log(`[Telegram] Created bot identity: @${handle} (${pseudonym})`);
@@ -110,7 +110,7 @@ async function ensureBotIdentity(
  *
  * The bot only listens for messages and pushes them to the event queue.
  * All intelligence (responding, interjecting, posting) is handled by the
- * Nous Hermes agent via MCP tools.
+ * Nous Router agent via MCP tools.
  */
 export function startTelegramBot(
   storage: Storage,
@@ -120,7 +120,7 @@ export function startTelegramBot(
 
   // Set up bot identity
   const botSecretKey = config.botSecretKey || generateSecretKey();
-  const botHandle = config.botHandle || 'hermes';
+  const botHandle = config.botHandle || 'router';
 
   ensureBotIdentity(storage, botSecretKey, botHandle).catch((err) => {
     console.error('[Telegram] Failed to set up bot identity:', err);

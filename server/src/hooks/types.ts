@@ -5,7 +5,7 @@
  * and platforms are dispatched to registered handlers in real time.
  */
 
-import type { HermesEvent } from '../events.js';
+import type { RouterEvent } from '../events.js';
 import type { Storage } from '../storage.js';
 import type { Platform } from '../platform/types.js';
 
@@ -19,7 +19,7 @@ export type HookTrigger =
 
 export interface HookContext {
   trigger: HookTrigger;
-  event: HermesEvent;
+  event: RouterEvent;
   storage: Storage;
   platforms: Platform[];
 }

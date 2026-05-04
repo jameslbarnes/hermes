@@ -101,14 +101,14 @@ describe('MatrixPlatform identity resolution', () => {
     await expect(platform.resolvePlatformId('alice')).resolves.toBe('@alice:mtrx.example.test');
   });
 
-  it('resolves Hermes handles from linked Matrix accounts before parsing MXIDs', async () => {
+  it('resolves Router handles from linked Matrix accounts before parsing MXIDs', async () => {
     const platform = createPlatform({
-      resolveLinkedHermesHandle: async (name, userId) =>
+      resolveLinkedRouterHandle: async (name, userId) =>
         name === 'matrix' && userId === '@specularist:matrix.org' ? 'james' : null,
     });
 
-    await expect(platform.resolveHermesHandle('@specularist:matrix.org')).resolves.toBe('james');
-    await expect(platform.resolveHermesHandle('@alice:mtrx.example.test')).resolves.toBe('alice');
+    await expect(platform.resolveRouterHandle('@specularist:matrix.org')).resolves.toBe('james');
+    await expect(platform.resolveRouterHandle('@alice:mtrx.example.test')).resolves.toBe('alice');
   });
 });
 
@@ -693,7 +693,7 @@ describe('MatrixPlatform history queries', () => {
 
   it('searches joined Shape Rotator space rooms and excludes unrelated rooms', async () => {
     const platform = createPlatform({
-      resolveLinkedHermesHandle: async (_platform, userId) =>
+      resolveLinkedRouterHandle: async (_platform, userId) =>
         userId === '@alice:mtrx.example.test' ? 'alice' : null,
     });
     const now = Date.now();
@@ -1146,7 +1146,7 @@ describe('MatrixPlatform post rendering', () => {
     serverName: 'mtrx.example.test',
     botSecretKey: 'test-secret',
     botHandle: 'router',
-    baseUrl: 'https://hermes.example.test',
+    baseUrl: 'https://router.example.test',
     ...overrides,
   });
 
@@ -1262,7 +1262,7 @@ describe('MatrixPlatform post rendering', () => {
     }));
   });
 
-  it('leaves Hermes handles untouched when no linked Matrix ID exists', async () => {
+  it('leaves Router handles untouched when no linked Matrix ID exists', async () => {
     const sendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
     const platform = createPlatform({
       resolveLinkedPlatformId: async () => null,

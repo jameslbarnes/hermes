@@ -4,7 +4,7 @@ Compose a daily digest of notebook activity for the group chat.
 
 ## Instructions
 
-1. Search the notebook for entries from the past 24 hours: `hermes_search` with `since: "24h"`
+1. Search the notebook for entries from the past 24 hours: `router_search` with `since: "24h"`
 2. Use web search to find news relevant to what people are working on
 3. Write the digest following the format and constraints below
 4. Post it to the group chat

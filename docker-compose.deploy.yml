@@ -10,7 +10,7 @@ services:
       - STAGING_DELAY_MS=3600000
       - GIT_SHA=9081484
       - IMAGE_DIGEST=sha256:ed09f91306096b769d90f2dc59f1b17673235defa379b5fde8ce039b74ef0a93
-      - MODERATOR_HANDLES=router
+      - MODERATOR_HANDLES=router,router_agent,james,socrates1024
       # Names only — values injected via encrypted --env-file at deploy time
       - BASE_URL
       - FIREBASE_SERVICE_ACCOUNT_BASE64

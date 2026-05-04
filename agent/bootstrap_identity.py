@@ -121,26 +121,37 @@ def main() -> None:
     handle = lookup.get("handle")
 
     if not lookup.get("hasAccount"):
-        log(f"Key from {source} is unregistered; attempting to claim @{desired_handle}")
-        status, registration = post_json(
-            base_url,
-            "/api/identity/register",
-            {"secret_key": key, "handle": desired_handle},
-        )
+        candidate_handles = [desired_handle]
+        if desired_handle == "router":
+            candidate_handles.append("router_agent")
 
-        if status == 201:
-            handle = registration.get("handle") or desired_handle
-            pseudonym = registration.get("pseudonym") or pseudonym
-            log(f"Registered Router identity @{handle}")
-        else:
+        last_error = {}
+        for candidate in candidate_handles:
+            log(f"Key from {source} is unregistered; attempting to claim @{candidate}")
+            status, registration = post_json(
+                base_url,
+                "/api/identity/register",
+                {"secret_key": key, "handle": candidate},
+            )
+            if status == 201:
+                handle = registration.get("handle") or candidate
+                pseudonym = registration.get("pseudonym") or pseudonym
+                log(f"Registered Router identity @{handle}")
+                break
+            last_error = registration
+            error_text = str(registration.get("error") or registration).lower()
+            if "taken" not in error_text:
+                break
+
+        if not handle:
             if source == "generated":
                 try:
                     key_file.unlink()
                 except FileNotFoundError:
                     pass
             fail(
-                f"Unable to register @{desired_handle}: "
-                f"{registration.get('error') or registration}"
+                f"Unable to register @{candidate_handles[-1]}: "
+                f"{last_error.get('error') or last_error}"
             )
 
     if handle and handle != desired_handle:

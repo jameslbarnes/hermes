@@ -189,7 +189,12 @@ After acting, return a one-line summary of what you did.`;
 
 async function main() {
   const routerHome = process.env.ROUTER_HOME || process.env.HERMES_HOME || '/data/router-agent';
-  const secretKey = (process.env.ROUTER_SECRET_KEY || process.env.HERMES_SECRET_KEY || '').trim();
+  const secretKey = (
+    process.env.ROUTER_SECRET_KEY ||
+    process.env.HERMES_SECRET_KEY ||
+    process.env.HERMES_AGENT_SECRET_KEY ||
+    ''
+  ).trim();
   const mcpUrl = process.env.ROUTER_MCP_URL || process.env.HERMES_MCP_URL || 'http://router:3000/mcp/http';
   const pollIntervalMs = Number.parseInt(process.env.ROUTER_EVENT_POLL_INTERVAL_MS || '2000', 10);
   const pollLimit = Number.parseInt(process.env.ROUTER_EVENT_LIMIT || '20', 10);

@@ -31,6 +31,7 @@ services:
       - ROUTER_SECRET_KEY
       # Temporary compatibility with persisted encrypted env from the old deployment name.
       - HERMES_SECRET_KEY
+      - HERMES_AGENT_SECRET_KEY
       - ROUTER_HANDLE=router
       - ROUTER_ENABLE_GATEWAY=0
       - TELEGRAM_BOT_TOKEN

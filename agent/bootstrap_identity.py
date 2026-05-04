@@ -74,7 +74,12 @@ def main() -> None:
     router_home.mkdir(parents=True, exist_ok=True)
 
     key_file = router_home / "secret_key"
-    explicit_key = (os.environ.get("ROUTER_SECRET_KEY") or os.environ.get("HERMES_SECRET_KEY") or "").strip()
+    explicit_key = (
+        os.environ.get("ROUTER_SECRET_KEY")
+        or os.environ.get("HERMES_SECRET_KEY")
+        or os.environ.get("HERMES_AGENT_SECRET_KEY")
+        or ""
+    ).strip()
     desired_handle = normalize_handle(os.environ.get("ROUTER_HANDLE") or os.environ.get("HERMES_HANDLE") or "router")
     mcp_url = os.environ.get("ROUTER_MCP_URL") or os.environ.get("HERMES_MCP_URL") or "http://router:3000/mcp/http"
 
@@ -152,6 +157,7 @@ def main() -> None:
     print(f"export ROUTER_IDENTITY_PSEUDONYM={shlex.quote(pseudonym)}")
     # The upstream agent CLI still reads these names.
     print(f"export HERMES_SECRET_KEY={shlex.quote(key)}")
+    print(f"export HERMES_AGENT_SECRET_KEY={shlex.quote(key)}")
     print(f"export HERMES_HOME={shlex.quote(str(router_home))}")
 
 

@@ -76,6 +76,27 @@ services:
       - router
     restart: unless-stopped
 
+  hermes-ingress:
+    image: dstacktee/dstack-ingress:20250929@sha256:2b47b3e538df0b3e7724255b89369194c8c83a7cfba64d2faf0115ad0a586458
+    ports:
+      - "444:444"
+    environment:
+      - DOMAIN=hermes.teleport.computer
+      - DNS_PROVIDER=cloudflare
+      - CLOUDFLARE_API_TOKEN
+      - GATEWAY_DOMAIN=_.dstack-pha-prod9.phala.network
+      - CERTBOT_EMAIL=james@generalsemantics.nyc
+      - SET_CAA=true
+      - TARGET_ENDPOINT=http://router:3000
+      - PORT=444
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - hermes-cert-data-cf:/etc/letsencrypt
+    depends_on:
+      - router
+    restart: unless-stopped
+
 volumes:
   router-data:
   cert-data-cf:
+  hermes-cert-data-cf:

@@ -589,6 +589,10 @@ export class MatrixPlatform implements Platform {
     } else {
       if (!password) throw new Error('Matrix botSecretKey or accessToken is required');
       const existingCreds = this.loadCredentials(credsPath);
+      if (existingCreds && !this.credentialsMatchExpectedBot(existingCreds)) {
+        console.log(`[Matrix] Ignoring persisted credentials for ${existingCreds.user_id}; expected ${this.expectedBotUserId()}`);
+      }
+
       if (existingCreds && await this.validateCredentials(existingCreds)) {
         console.log(`[Matrix] Reusing persisted credentials, device=${existingCreds.device_id}`);
         accessToken = existingCreds.access_token;
@@ -771,8 +775,21 @@ export class MatrixPlatform implements Platform {
     writeFileSync(path, JSON.stringify(creds), 'utf8');
   }
 
+  private expectedBotUserId(): string {
+    const configured = this.config.userId?.trim();
+    if (configured) return configured;
+    const localpart = this.config.botHandle.replace(/^@/, '').trim();
+    return `@${localpart}:${this.config.serverName}`;
+  }
+
+  private credentialsMatchExpectedBot(creds: { user_id: string }): boolean {
+    return creds.user_id === this.expectedBotUserId();
+  }
+
   /** Verify an access token is still valid by hitting /account/whoami. */
   private async validateCredentials(creds: { access_token: string; user_id: string; device_id: string }): Promise<boolean> {
+    if (!this.credentialsMatchExpectedBot(creds)) return false;
+
     try {
       const resp = await fetch(`${this.config.serverUrl}/_matrix/client/v3/account/whoami`, {
         headers: { 'Authorization': `Bearer ${creds.access_token}` },

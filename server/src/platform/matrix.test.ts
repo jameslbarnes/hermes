@@ -157,6 +157,31 @@ describe('MatrixPlatform identity resolution', () => {
     );
     vi.unstubAllGlobals();
   });
+
+  it('does not reuse persisted credentials for a different bot account', async () => {
+    const platform = createPlatform({ botHandle: 'router' });
+
+    expect((platform as any).credentialsMatchExpectedBot({
+      user_id: '@router:mtrx.example.test',
+    })).toBe(true);
+    expect((platform as any).credentialsMatchExpectedBot({
+      user_id: '@shape-router-bridge-20260517:mtrx.example.test',
+    })).toBe(false);
+  });
+
+  it('lets an explicit Matrix user ID define the expected persisted account', async () => {
+    const platform = createPlatform({
+      botHandle: 'router',
+      userId: '@router-prod:mtrx.example.test',
+    });
+
+    expect((platform as any).credentialsMatchExpectedBot({
+      user_id: '@router:mtrx.example.test',
+    })).toBe(false);
+    expect((platform as any).credentialsMatchExpectedBot({
+      user_id: '@router-prod:mtrx.example.test',
+    })).toBe(true);
+  });
 });
 
 describe('MatrixPlatform channel rooms', () => {

@@ -193,6 +193,9 @@ jobs:
           ROUTER_AGENT_GITHUB_TOKEN: ${{ secrets.ROUTER_AGENT_GITHUB_TOKEN }}
           SHAPE_ROUTER_SECRET_KEY: ${{ secrets.SHAPE_ROUTER_SECRET_KEY }}
           MATRIX_BOT_SECRET_KEY: ${{ secrets.MATRIX_BOT_SECRET_KEY }}
+          MATRIX_ACCESS_TOKEN: ${{ secrets.MATRIX_ACCESS_TOKEN }}
+          MATRIX_USER_ID: ${{ secrets.MATRIX_USER_ID }}
+          MATRIX_DEVICE_ID: ${{ secrets.MATRIX_DEVICE_ID }}
           MATRIX_BOT_HANDLE: ${{ secrets.MATRIX_BOT_HANDLE }}
           MATRIX_REGISTRATION_TOKEN: ${{ secrets.MATRIX_REGISTRATION_TOKEN }}
         run: |
@@ -222,6 +225,9 @@ jobs:
           write_env NAMECHEAP_CLIENT_IP
           write_env SHAPE_ROUTER_SECRET_KEY
           write_env MATRIX_BOT_SECRET_KEY
+          write_env MATRIX_ACCESS_TOKEN
+          write_env MATRIX_USER_ID
+          write_env MATRIX_DEVICE_ID
           write_env MATRIX_BOT_HANDLE
           write_env MATRIX_REGISTRATION_TOKEN
 

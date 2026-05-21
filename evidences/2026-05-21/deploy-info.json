@@ -1,9 +1,9 @@
 {
-"git_sha": "b26673c5d312fad126540c9a0788b0d918a7fefc",
-"git_sha_short": "b26673c",
-"image_digest": "sha256:c69d0bfe294ae2f2f80fd86ec454681ab09861a12a6d6b758fe99206f24e8a1b",
-"agent_image_digest": "sha256:c19b692a67f0fee8efc24bce00a1fa88d26de029c76aabe4dcca7952f6691c92",
+"git_sha": "6bfd7cd3275302da781511634e6ca0f4b004ed8e",
+"git_sha_short": "6bfd7cd",
+"image_digest": "sha256:c6ef1b2481519a2d0bd03b62d45ef2d2983a6036018e860400cac583834bae8b",
+"agent_image_digest": "sha256:95bffe6bfd89a65926b94068d524dde9ab2cadc9fde4b98acb337c4608f3601e",
 "app_id": "db82f581256a3c9244c4d7129a67336990d08cdf",
-"deployed_at": "2026-05-21T16:34:48Z",
-"workflow_run": "https://github.com/jameslbarnes/teleport-router/actions/runs/26239140273"
+"deployed_at": "2026-05-21T17:15:37Z",
+"workflow_run": "https://github.com/jameslbarnes/teleport-router/actions/runs/26241289949"
 }

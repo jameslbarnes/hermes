@@ -696,7 +696,7 @@ async function handleAccountCommand(matrix: MatrixPlatform, event: RouterEvent, 
     return true;
   }
 
-  const wantsExisting = normalized.includes('existing') || normalized.includes('code') || command === 'connect';
+  const wantsExisting = command === 'link' || normalized.includes('existing') || normalized.includes('code') || command === 'connect';
   const wantsCreate = command === 'create' || command === 'new' || command === 'provision' || normalized.includes('create new');
 
   if (wantsExisting) {

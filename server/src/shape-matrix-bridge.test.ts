@@ -252,13 +252,43 @@ describe('Shape Matrix bridge helpers', () => {
       sendDM: vi.fn(async () => '$dm'),
     };
 
-    await handleMention(matrix as any, null, matrixMentionEvent('link existing', true));
+    await handleMention(matrix as any, null, matrixMentionEvent('link', true));
 
     expect(fetchCalls.some(call => call.url === 'https://shape.test/api/matrix/link-code?key=shape-key')).toBe(true);
     expect(fetchCalls.find(call => call.url.includes('/api/matrix/link-code'))?.body.matrix_user_id).toBe('@alice:matrix.test');
     expect(matrix.sendMessage).toHaveBeenCalledWith(
       '!room:matrix.test',
       expect.stringContaining('MATRIX-ABC123'),
+      expect.anything(),
+    );
+  });
+
+  it('also creates a private Matrix link code for the explicit link existing command', async () => {
+    process.env.SHAPE_ROUTER_BASE_URL = 'https://shape.test';
+    process.env.SHAPE_ROUTER_SECRET_KEY = 'shape-key';
+
+    const fetchCalls: Array<{ url: string; body?: any }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      fetchCalls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.includes('/api/matrix/link-status')) {
+        return new Response(JSON.stringify({ linked: false }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ code: 'MATRIX-XYZ789', expiresAt: Date.now() + 600_000 }), { status: 201, headers: { 'Content-Type': 'application/json' } });
+    }));
+
+    const matrix = {
+      maxMessageLength: 65536,
+      sendMessage: vi.fn(async () => '$reply'),
+      sendDM: vi.fn(async () => '$dm'),
+    };
+
+    await handleMention(matrix as any, null, matrixMentionEvent('link existing', true));
+
+    expect(fetchCalls.some(call => call.url === 'https://shape.test/api/matrix/link-code?key=shape-key')).toBe(true);
+    expect(matrix.sendMessage).toHaveBeenCalledWith(
+      '!room:matrix.test',
+      expect.stringContaining('MATRIX-XYZ789'),
       expect.anything(),
     );
   });

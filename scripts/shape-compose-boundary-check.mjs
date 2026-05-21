@@ -189,11 +189,14 @@ function checkFile(file) {
     const routerAgentEnv = envOf(routerAgent);
     assertNoEnv(file, 'router-agent', routerAgentEnv, [
       /^MATRIX_/,
-      /^SHAPE_MATRIX_/,
       'SHAPE_ROUTER_BASE_URL',
-      'SHAPE_ROUTER_SECRET_KEY',
       'ROUTER_AGENT_HANDLES_MATRIX',
     ]);
+    assertEnv(file, 'router-agent', routerAgentEnv, 'ROUTER_MCP_URL', `${privateShapeUrl}/mcp/`);
+    assertEnv(file, 'router-agent', routerAgentEnv, 'SHAPE_ROUTER_SECRET_KEY');
+    assertEnv(file, 'router-agent', routerAgentEnv, 'ROUTER_AGENT_HTTP_MODE', '1');
+    assertEnv(file, 'router-agent', routerAgentEnv, 'ROUTER_AGENT_HTTP_PORT', '8091');
+    assertEnv(file, 'router-agent', routerAgentEnv, 'SHAPE_MATRIX_AGENT_SECRET');
     assertEnv(file, 'router-agent', routerAgentEnv, 'ROUTER_ENABLE_GATEWAY', '0');
   }
 
@@ -205,6 +208,8 @@ function checkFile(file) {
   assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'SHAPE_ROUTER_SECRET_KEY');
   assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'SHAPE_MATRIX_BRIDGE_TAGS', 'shape-rotator,matrix');
   assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'SHAPE_MATRIX_ENABLE_ONBOARDING', '0');
+  assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'SHAPE_MATRIX_AGENT_URL', 'http://router-agent:8091/matrix/event');
+  assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'SHAPE_MATRIX_AGENT_SECRET');
   assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'MATRIX_SERVER_URL', matrixUrl);
   assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'MATRIX_SERVER_NAME', 'mtrx.shaperotator.xyz');
   assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'MATRIX_SPACE_ROOM_ID', matrixSpace);

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createServer } from 'node:http';
 import { promisify } from 'node:util';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -42,6 +43,11 @@ function parseEnvInt(names, fallback) {
 function matrixHandlingEnabled() {
   const raw = process.env.ROUTER_AGENT_HANDLES_MATRIX || '';
   return ['1', 'true', 'yes', 'remote'].includes(raw.trim().toLowerCase());
+}
+
+function httpAgentModeEnabled() {
+  const raw = process.env.ROUTER_AGENT_HTTP_MODE || process.env.SHAPE_MATRIX_AGENT_HTTP_MODE || '';
+  return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase());
 }
 
 function buildMcpUrl(baseUrl, secretKey) {
@@ -194,6 +200,7 @@ async function runHermesPrompt(event, prompt, label, options = {}) {
 
   const summary = String(stdout || stderr || '').trim().split('\n').filter(Boolean).at(-1);
   log(`${label} ${event.id} handled${summary ? `: ${summary.slice(0, 300)}` : ''}`);
+  return String(stdout || '').trim();
 }
 
 async function runOnboardingChat(event) {
@@ -271,12 +278,146 @@ After acting, return a one-line summary of what you did.`;
   await runHermesPrompt(event, prompt, 'Event');
 }
 
+function bearerToken(req) {
+  const header = req.headers.authorization || '';
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
+
+function configuredHttpSecret() {
+  return (
+    process.env.ROUTER_AGENT_HTTP_SECRET ||
+    process.env.SHAPE_MATRIX_AGENT_SECRET ||
+    process.env.SHAPE_MATRIX_AGENT_SHARED_SECRET ||
+    ''
+  ).trim();
+}
+
+async function readJsonBody(req, maxBytes = 1024 * 1024) {
+  let size = 0;
+  const chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) {
+      throw new Error(`Request body too large; max ${maxBytes} bytes`);
+    }
+    chunks.push(chunk);
+  }
+  const raw = Buffer.concat(chunks).toString('utf8').trim();
+  return raw ? JSON.parse(raw) : {};
+}
+
+function sendJson(res, status, body) {
+  const text = `${JSON.stringify(body)}\n`;
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(text),
+  });
+  res.end(text);
+}
+
+function cleanHermesReply(output) {
+  const text = String(output || '').trim();
+  if (!text) return '';
+
+  const fenced = text.match(/```(?:text|markdown)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : text;
+  return candidate
+    .replace(/^final reply:\s*/i, '')
+    .replace(/^reply:\s*/i, '')
+    .trim();
+}
+
+async function runMatrixBridgeReply(event) {
+  const data = event?.data || {};
+  const text = String(data.text || '').trim();
+  const prompt = `You are Shape Router, the Matrix-facing Hermes agent for the private Shape Rotator Router notebook.
+
+You received a Matrix message from the private Matrix bridge. The bridge owns Matrix transport and will send your final answer back to the room. You own the notebook reasoning.
+
+Event:
+${JSON.stringify(event, null, 2)}
+
+Behavior:
+- Answer ordinary greetings and questions naturally.
+- For questions about the private Shape Router notebook, use the Router MCP tools available to you, especially router_search.
+- If the user explicitly asks to search, call router_search instead of relying on memory.
+- If router_search has no useful hits, say that plainly and offer a better query.
+- Keep replies concise enough for Matrix.
+
+Hard rules:
+- Do not call router_platform_send or any platform-send tool in this mode; the bridge will deliver your final text.
+- Do not ask the user to invoke Router tools manually.
+- Do not expose secret keys, bearer tokens, or internal environment values.
+- Return only the exact Matrix reply text. No JSON envelope. No tool log. No code fence.
+
+User message:
+${text}`;
+
+  const output = await runHermesPrompt(event, prompt, 'Shape Matrix HTTP event', {
+    timeoutMs: parseEnvInt(['SHAPE_MATRIX_AGENT_TIMEOUT_MS', 'ROUTER_HERMES_CHAT_TIMEOUT_MS', 'HERMES_CHAT_TIMEOUT_MS'], 180_000),
+  });
+  return cleanHermesReply(output);
+}
+
+async function startHttpAgentServer() {
+  const port = parseEnvInt(['ROUTER_AGENT_HTTP_PORT', 'SHAPE_MATRIX_AGENT_PORT'], 8091);
+  const host = process.env.ROUTER_AGENT_HTTP_HOST || '0.0.0.0';
+  const secret = configuredHttpSecret();
+
+  const server = createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+
+      if (req.method === 'GET' && url.pathname === '/health') {
+        sendJson(res, 200, { status: 'ok', mode: 'http-agent' });
+        return;
+      }
+
+      if (req.method !== 'POST' || url.pathname !== '/matrix/event') {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+
+      if (secret && bearerToken(req) !== secret) {
+        sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
+
+      const body = await readJsonBody(req);
+      const event = body.event;
+      if (!event || event.type !== 'platform_mention' || event.data?.platform !== 'matrix') {
+        sendJson(res, 400, { error: 'expected Matrix platform_mention event' });
+        return;
+      }
+
+      const reply = await runMatrixBridgeReply(event);
+      sendJson(res, 200, { reply: reply || "I couldn't produce a reply." });
+    } catch (error) {
+      log(`HTTP Matrix event error: ${formatError(error)}`);
+      sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, host, () => {
+      server.off('error', reject);
+      log(`HTTP Matrix agent listening on ${host}:${port}`);
+      resolve();
+    });
+  });
+
+  await new Promise(() => {});
+}
+
 async function main() {
   const routerHome = process.env.ROUTER_HOME || process.env.HERMES_HOME || '/data/router-agent';
   const secretKey = (
     process.env.ROUTER_SECRET_KEY ||
     process.env.HERMES_SECRET_KEY ||
     process.env.HERMES_AGENT_SECRET_KEY ||
+    process.env.SHAPE_ROUTER_SECRET_KEY ||
     ''
   ).trim();
   const mcpUrl = process.env.ROUTER_MCP_URL || process.env.HERMES_MCP_URL || 'http://router:3000/mcp/http';
@@ -290,6 +431,11 @@ async function main() {
 
   if (!secretKey) {
     throw new Error('ROUTER_SECRET_KEY is required');
+  }
+
+  if (httpAgentModeEnabled()) {
+    await startHttpAgentServer();
+    return;
   }
 
   let client;

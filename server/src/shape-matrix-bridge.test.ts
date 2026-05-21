@@ -37,6 +37,9 @@ describe('Shape Matrix bridge helpers', () => {
     delete process.env.SHAPE_MATRIX_REQUIRE_SPACE_MEMBERSHIP_FOR_PROVISION;
     delete process.env.SHAPE_ROUTER_SECRET_KEY;
     delete process.env.SHAPE_ROUTER_BASE_URL;
+    delete process.env.SHAPE_MATRIX_AGENT_URL;
+    delete process.env.SHAPE_MATRIX_AGENT_SECRET;
+    delete process.env.SHAPE_MATRIX_AGENT_TIMEOUT_MS;
     anthropicCreateMock.mockReset();
     vi.unstubAllGlobals();
   });
@@ -537,6 +540,68 @@ describe('Shape Matrix bridge helpers', () => {
       '!room:matrix.test',
       expect.stringContaining('[entry-search] Private Router migration notes'),
       expect.anything(),
+    );
+  });
+
+  it('routes ordinary Matrix questions to the private Hermes agent when configured', async () => {
+    process.env.SHAPE_MATRIX_AGENT_URL = 'http://shape-agent.test/matrix/event';
+    process.env.SHAPE_MATRIX_AGENT_SECRET = 'agent-shared-secret';
+
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('http://shape-agent.test/matrix/event');
+      expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer agent-shared-secret');
+      const body = JSON.parse(String(init?.body));
+      expect(body.event.type).toBe('platform_mention');
+      expect(body.event.data.text).toBe('do you hear me');
+      expect(body.event.data.original_text).toBe('do you hear me');
+      return new Response(JSON.stringify({ reply: 'Yes. I can hear you and I will use the private notebook when needed.' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const matrix = {
+      maxMessageLength: 65536,
+      sendMessage: vi.fn(async () => '$reply'),
+    };
+
+    await handleMention(matrix as any, null, matrixMentionEvent('do you hear me', true));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(matrix.sendMessage).toHaveBeenCalledWith(
+      '!room:matrix.test',
+      'Yes. I can hear you and I will use the private notebook when needed.',
+      expect.objectContaining({ replyTo: '$mention' }),
+    );
+  });
+
+  it('lets the private Hermes agent handle notebook-summary requests', async () => {
+    process.env.SHAPE_MATRIX_AGENT_URL = 'http://shape-agent.test/matrix/event';
+
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(String(input)).toBe('http://shape-agent.test/matrix/event');
+      expect(body.event.data.text).toBe('summarize the notebook so far');
+      return new Response(JSON.stringify({ reply: 'Notebook summary from Hermes.' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }));
+
+    const matrix = {
+      maxMessageLength: 65536,
+      queryRecentMessages: vi.fn(),
+      sendMessage: vi.fn(async () => '$reply'),
+    };
+
+    await handleMention(matrix as any, null, matrixMentionEvent('summarize the notebook so far', true));
+
+    expect(matrix.queryRecentMessages).not.toHaveBeenCalled();
+    expect(matrix.sendMessage).toHaveBeenCalledWith(
+      '!room:matrix.test',
+      'Notebook summary from Hermes.',
+      expect.objectContaining({ replyTo: '$mention' }),
     );
   });
 

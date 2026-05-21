@@ -97,6 +97,19 @@ function matrixSignupUrl(serverUrl = matrixServerUrl()): string | undefined {
   return process.env.MATRIX_REGISTRATION_TOKEN?.trim() ? `${serverUrl}/signup/api` : undefined;
 }
 
+function shapeMatrixAgentUrl(): string | null {
+  const raw = process.env.SHAPE_MATRIX_AGENT_URL?.trim();
+  return raw || null;
+}
+
+function shapeMatrixAgentSecret(): string | undefined {
+  return (
+    process.env.SHAPE_MATRIX_AGENT_SECRET?.trim()
+    || process.env.SHAPE_MATRIX_AGENT_SHARED_SECRET?.trim()
+    || undefined
+  );
+}
+
 export function matrixBotSecretKey(): string | undefined {
   if (process.env.MATRIX_ACCESS_TOKEN?.trim()) return undefined;
   const secret = process.env.MATRIX_BOT_SECRET_KEY?.trim();
@@ -159,6 +172,10 @@ export function relativeSinceMs(text: string): number {
   if (lower.includes('week')) return 7 * 24 * 60 * 60 * 1000;
   if (lower.includes('today')) return 18 * 60 * 60 * 1000;
   return parsePositiveInt('SHAPE_MATRIX_SUMMARY_WINDOW_MS', 24 * 60 * 60 * 1000);
+}
+
+function isMatrixRoomSummaryRequest(text: string): boolean {
+  return /\b(room|conversation|chat|thread|here)\b/i.test(text);
 }
 
 async function loadState(path: string): Promise<BridgeState> {
@@ -444,6 +461,56 @@ async function searchShapeRouter(mcpClient: Client | null, query: string, limit 
     .slice(0, limit)
     .map(entry => `[${entry.id}] ${entry.summary}\nTags: ${entry.tags.map(tag => `#${tag}`).join(' ')}`)
     .join('\n\n');
+}
+
+async function askShapeMatrixAgent(event: RouterEvent, text: string): Promise<string | null> {
+  const agentUrl = shapeMatrixAgentUrl();
+  if (!agentUrl) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    parsePositiveInt('SHAPE_MATRIX_AGENT_TIMEOUT_MS', 180_000),
+  );
+
+  const agentEvent: RouterEvent = {
+    ...event,
+    data: {
+      ...(event.data || {}),
+      text,
+      original_text: event.data?.text,
+      handled_by: 'shape-matrix-agent',
+    },
+  };
+
+  try {
+    const secret = shapeMatrixAgentSecret();
+    const response = await fetch(agentUrl, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'shape-matrix-bridge/1.0',
+        'Content-Type': 'application/json',
+        ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
+      },
+      body: JSON.stringify({ event: agentEvent }),
+    });
+    const bodyText = await response.text();
+    let body: any = null;
+    try {
+      body = bodyText ? JSON.parse(bodyText) : null;
+    } catch {
+      body = { reply: bodyText };
+    }
+    if (!response.ok) {
+      const detail = typeof body === 'string' ? body : JSON.stringify(body);
+      throw new Error(`Shape Matrix agent failed ${response.status}: ${detail}`);
+    }
+    const reply = String(body?.reply || body?.text || '').trim();
+    return reply || "I couldn't produce a reply.";
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function matrixMessageLine(message: MatrixHistoryMessage): string {
@@ -748,7 +815,7 @@ export async function handleMention(matrix: MatrixPlatform, mcpClient: Client | 
     return;
   }
 
-  if (command === 'summarize' || command === 'summary') {
+  if ((command === 'summarize' || command === 'summary') && isMatrixRoomSummaryRequest(text)) {
     const windowMs = relativeSinceMs(text);
     const messages = await matrix.queryRecentMessages({
       roomIds: [roomId],
@@ -768,6 +835,12 @@ export async function handleMention(matrix: MatrixPlatform, mcpClient: Client | 
       oneliner: 'Matrix summary',
     });
     await sendReply(matrix, event, `Saved Matrix room context to private Shape Router: ${shapeBaseUrl()}/entry?id=${entry.id}`);
+    return;
+  }
+
+  const agentReply = await askShapeMatrixAgent(attributionEvent, text);
+  if (agentReply !== null) {
+    await sendReply(matrix, event, agentReply);
     return;
   }
 

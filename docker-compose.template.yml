@@ -35,6 +35,8 @@ services:
       - SHAPE_MATRIX_BRIDGE_TAGS=shape-rotator,matrix
       - SHAPE_MATRIX_PUBLISH_IMMEDIATELY=1
       - SHAPE_MATRIX_ENABLE_ONBOARDING=0
+      - SHAPE_MATRIX_AGENT_URL=http://router-agent:8091/matrix/event
+      - SHAPE_MATRIX_AGENT_SECRET
       - SHAPE_MATRIX_STARTUP_EVENT_GRACE_MS=5000
       - ANTHROPIC_API_KEY
       - MATRIX_SERVER_URL=https://mtrx.shaperotator.xyz
@@ -50,20 +52,23 @@ services:
       - MATRIX_SIGNUP_URL=https://mtrx.shaperotator.xyz/signup/api
     volumes:
       - shape-matrix-bridge-data:/data
+    depends_on:
+      - router-agent
     restart: unless-stopped
 
   router-agent:
     image: docker.io/generalsemantics/teleport-router-agent:${GIT_SHA}@${AGENT_IMAGE_DIGEST}
     environment:
-      # Names only — values injected via encrypted --env-file at deploy time
+      # Repurposed for Shape Router in this CVM. Matrix/E2EE transport stays in
+      # shape-matrix-bridge; Hermes uses the private Shape Router MCP key.
       - ANTHROPIC_API_KEY
-      - ROUTER_MCP_URL=http://router:3000/mcp/http
-      - ROUTER_SECRET_KEY
-      # Temporary compatibility with persisted encrypted env from the old deployment name.
-      - HERMES_SECRET_KEY
-      - HERMES_AGENT_SECRET_KEY
+      - ROUTER_MCP_URL=https://shaperotator.teleport.computer/mcp/
+      - SHAPE_ROUTER_SECRET_KEY
       - ROUTER_HANDLE=router
       - ROUTER_ENABLE_GATEWAY=0
+      - ROUTER_AGENT_HTTP_MODE=1
+      - ROUTER_AGENT_HTTP_PORT=8091
+      - SHAPE_MATRIX_AGENT_SECRET
       - TELEGRAM_BOT_TOKEN
       - GITHUB_TOKEN
     volumes:

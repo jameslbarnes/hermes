@@ -25,6 +25,7 @@ const bridgeLogPath = process.env.SHAPE_MATRIX_SMOKE_BRIDGE_LOG || `${workdir}/b
 const sentinel = process.env.SHAPE_MATRIX_SMOKE_SENTINEL || `shape-matrix-live-smoke-${Date.now().toString(36)}`;
 const useRunningBridge = process.env.SHAPE_MATRIX_SMOKE_RUNNING_BRIDGE === '1';
 const matrixSpaceRoomId = process.env.MATRIX_SPACE_ROOM_ID || '!4FL8uL5OEYLATG1VH4wC2CD3pfIV6BMFId9VT7rmm-g';
+const matrixBotNoiseRoomId = process.env.MATRIX_BOT_NOISE_ROOM_ID || '!a8L-8zCDgQZhddUWkb4FYkCVjPBu0lY6QwtLVBXIRXc';
 const verifySparks = process.env.SHAPE_MATRIX_SMOKE_VERIFY_SPARKS === '1';
 
 function log(message) {
@@ -252,6 +253,72 @@ async function verifyMatrixSparkRoomReuse() {
     throw new Error(`spark room reuse failed: ${first.roomId} -> ${second.roomId || '(none)'}`);
   }
   log(`Matrix spark room create/reuse ok room=${first.roomId}`);
+}
+
+async function waitForPrivateEntryMirror(entryId, timeoutMs = 45_000) {
+  const started = Date.now();
+  let entry;
+  while (Date.now() - started < timeoutMs) {
+    const detail = await shapeRequest(`/api/entries/${encodeURIComponent(entryId)}`);
+    entry = detail.entry || detail;
+    if (entry.matrixMirrorRoomId || entry.matrixMirrorEventId || entry.matrixMirroredAt) return entry;
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  throw new Error(`private entry ${entryId} did not record Matrix mirror metadata`);
+}
+
+async function matrixRoomMessages(creds, roomId, limit = 200) {
+  const body = await matrixRequest(
+    creds,
+    'GET',
+    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=${limit}`,
+  );
+  return body.chunk || [];
+}
+
+async function waitForBotNoiseMirror(sender, expectedText, timeoutMs = 45_000) {
+  const started = Date.now();
+  let matches = [];
+  while (Date.now() - started < timeoutMs) {
+    const events = await matrixRoomMessages(sender, matrixBotNoiseRoomId);
+    matches = events.filter(event =>
+      event.type === 'm.room.message'
+      && typeof event.content?.body === 'string'
+      && event.content.body.includes(expectedText)
+    );
+    if (matches.length > 0) break;
+    await new Promise(resolve => setTimeout(resolve, 1500));
+  }
+  if (matches.length !== 1) {
+    throw new Error(`expected exactly one Bot Noise mirror for ${expectedText}, found ${matches.length}`);
+  }
+  const [event] = matches;
+  if (event.sender !== botMxid) {
+    throw new Error(`Bot Noise mirror came from ${event.sender}, expected ${botMxid}`);
+  }
+  return event;
+}
+
+async function verifyBotNoiseEntryMirror(sender) {
+  const marker = `${sentinel} bot-noise-entry-mirror`;
+  const created = await shapeRequest('/api/entries', {
+    method: 'POST',
+    body: {
+      summary: `Bot Noise entry mirror smoke ${marker}`,
+      content: `Sanitized private Router Bot Noise mirror smoke. Sentinel: ${marker}`,
+      tags: ['matrix-smoke', 'private-router'],
+      client: 'codex-live-smoke',
+    },
+  });
+  const entry = created.entry;
+  if (!entry?.id) throw new Error('private Router entry create did not return an id');
+
+  const mirrored = await waitForPrivateEntryMirror(entry.id);
+  if (mirrored.matrixMirrorRoomId !== matrixBotNoiseRoomId) {
+    throw new Error(`private entry mirrored to ${mirrored.matrixMirrorRoomId || '(none)'}, expected ${matrixBotNoiseRoomId}`);
+  }
+  const event = await waitForBotNoiseMirror(sender, marker);
+  log(`Bot Noise entry mirror ok entry=${entry.id} event=${event.event_id}`);
 }
 
 async function resolveBotMxid() {
@@ -520,6 +587,7 @@ async function main() {
   const sender = await ensureSenderCredentials();
   await verifyMatrixLinkStatus(sender);
   await verifyMatrixSparkRoomReuse();
+  await verifyBotNoiseEntryMirror(sender);
 
   const bridge = useRunningBridge ? null : startBridge('initial');
   try {

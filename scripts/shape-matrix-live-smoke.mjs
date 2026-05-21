@@ -19,10 +19,13 @@ const botHandle = process.env.MATRIX_BOT_HANDLE || 'router';
 let botMxid = process.env.MATRIX_USER_ID || process.env.MATRIX_BOT_USER_ID || `@${botHandle}:${matrixServerName}`;
 const workdir = process.env.SHAPE_MATRIX_SMOKE_WORKDIR || '/tmp/shape-matrix-live-smoke';
 const senderCredsPath = process.env.MATRIX_SMOKE_SENDER_CREDS_PATH || `${workdir}/sender-credentials.json`;
+const sparkACredsPath = process.env.MATRIX_SMOKE_SPARK_A_CREDS_PATH || `${workdir}/spark-a-credentials.json`;
+const sparkBCredsPath = process.env.MATRIX_SMOKE_SPARK_B_CREDS_PATH || `${workdir}/spark-b-credentials.json`;
 const bridgeLogPath = process.env.SHAPE_MATRIX_SMOKE_BRIDGE_LOG || `${workdir}/bridge.log`;
 const sentinel = process.env.SHAPE_MATRIX_SMOKE_SENTINEL || `shape-matrix-live-smoke-${Date.now().toString(36)}`;
 const useRunningBridge = process.env.SHAPE_MATRIX_SMOKE_RUNNING_BRIDGE === '1';
 const matrixSpaceRoomId = process.env.MATRIX_SPACE_ROOM_ID || '!4FL8uL5OEYLATG1VH4wC2CD3pfIV6BMFId9VT7rmm-g';
+const verifySparks = process.env.SHAPE_MATRIX_SMOKE_VERIFY_SPARKS === '1';
 
 function log(message) {
   console.log(`[shape-matrix-live-smoke] ${message}`);
@@ -60,10 +63,17 @@ async function matrixRequest(creds, method, path, body) {
   return parsed;
 }
 
-async function shapeRequest(path) {
+async function shapeRequest(path, options = {}) {
   const url = new URL(path, `${shapeBase}/`);
   url.searchParams.set('key', shapeKey);
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    method: options.method || 'GET',
+    headers: {
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {}),
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
   const text = await response.text();
   let parsed;
   try {
@@ -72,28 +82,28 @@ async function shapeRequest(path) {
     parsed = text;
   }
   if (!response.ok) {
-    throw new Error(`GET ${url.pathname} failed ${response.status}: ${typeof parsed === 'string' ? parsed : JSON.stringify(parsed)}`);
+    throw new Error(`${options.method || 'GET'} ${url.pathname} failed ${response.status}: ${typeof parsed === 'string' ? parsed : JSON.stringify(parsed)}`);
   }
   return parsed;
 }
 
-async function ensureSenderCredentials() {
-  if (process.env.MATRIX_SMOKE_SENDER_ACCESS_TOKEN) {
+async function ensureMatrixCredentials({ accessTokenEnv, userIdEnv, deviceIdEnv, credsPath, label, displayName }) {
+  if (process.env[accessTokenEnv]) {
     return {
-      access_token: process.env.MATRIX_SMOKE_SENDER_ACCESS_TOKEN,
-      user_id: requiredEnv('MATRIX_SMOKE_SENDER_USER_ID'),
-      device_id: process.env.MATRIX_SMOKE_SENDER_DEVICE_ID || 'SMOKE',
+      access_token: process.env[accessTokenEnv],
+      user_id: requiredEnv(userIdEnv),
+      device_id: process.env[deviceIdEnv] || 'SMOKE',
     };
   }
 
-  if (existsSync(senderCredsPath)) {
-    const creds = JSON.parse(readFileSync(senderCredsPath, 'utf8'));
+  if (existsSync(credsPath)) {
+    const creds = JSON.parse(readFileSync(credsPath, 'utf8'));
     const whoami = await matrixRequest(creds, 'GET', '/_matrix/client/v3/account/whoami');
     if (whoami.user_id === creds.user_id) return creds;
   }
 
   const code = requiredEnv('MATRIX_SMOKE_SIGNUP_CODE');
-  const username = `shape-router-smoke-${Date.now().toString(36)}`.slice(0, 32);
+  const username = `shape-router-${label}-${Date.now().toString(36)}`.slice(0, 32);
   const password = randomPassword();
   const response = await fetch(`${matrixBase}/signup/api`, {
     method: 'POST',
@@ -102,23 +112,146 @@ async function ensureSenderCredentials() {
       code,
       username,
       password,
-      display_name: 'Shape Router smoke sender',
-      intro: `Shape Router smoke sender for ${sentinel}`,
+      display_name: displayName,
+      intro: `Shape Router ${label} smoke account for ${sentinel}`,
     }),
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(`sender signup failed ${response.status}: ${JSON.stringify(body)}`);
+    throw new Error(`${label} signup failed ${response.status}: ${JSON.stringify(body)}`);
   }
   const creds = {
     access_token: body.access_token,
     user_id: body.user_id,
     device_id: body.device_id,
   };
-  mkdirSync(dirname(senderCredsPath), { recursive: true });
-  writeFileSync(senderCredsPath, `${JSON.stringify(creds)}\n`, 'utf8');
-  log(`sender=${creds.user_id}`);
+  mkdirSync(dirname(credsPath), { recursive: true });
+  writeFileSync(credsPath, `${JSON.stringify(creds)}\n`, 'utf8');
+  log(`${label}=${creds.user_id}`);
   return creds;
+}
+
+async function ensureSenderCredentials() {
+  return ensureMatrixCredentials({
+    accessTokenEnv: 'MATRIX_SMOKE_SENDER_ACCESS_TOKEN',
+    userIdEnv: 'MATRIX_SMOKE_SENDER_USER_ID',
+    deviceIdEnv: 'MATRIX_SMOKE_SENDER_DEVICE_ID',
+    credsPath: senderCredsPath,
+    label: 'smoke-sender',
+    displayName: 'Shape Router smoke sender',
+  });
+}
+
+function smokeHandle(prefix, value) {
+  const suffix = value
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '')
+    .slice(-8);
+  return `${prefix}${suffix}`.slice(0, 15);
+}
+
+async function matrixLinkStatusByUserId(matrixUserId) {
+  return shapeRequest(`/api/matrix/link-status?matrix_user_id=${encodeURIComponent(matrixUserId)}`);
+}
+
+async function ensureRouterLinkForMatrixUser(matrixUserId, { handlePrefix, provisionIfMissing }) {
+  const status = await matrixLinkStatusByUserId(matrixUserId);
+  if (status.linked && status.handle) {
+    return { handle: status.handle, linked: true, provisioned: false };
+  }
+  if (!provisionIfMissing) {
+    throw new Error(`Matrix user ${matrixUserId} is not linked to a private Router account`);
+  }
+  const handle = smokeHandle(handlePrefix, matrixUserId);
+  const provisioned = await shapeRequest('/api/matrix/provision', {
+    method: 'POST',
+    body: {
+      matrix_user_id: matrixUserId,
+      handle,
+      display_name: `Shape Matrix smoke ${handle}`,
+    },
+  });
+  if (provisioned?.user?.matrixBinding?.userId !== matrixUserId) {
+    throw new Error(`provisioned Router user did not bind ${matrixUserId}`);
+  }
+  return { handle: provisioned.user.handle, linked: true, provisioned: true };
+}
+
+async function verifyMatrixLinkStatus(sender) {
+  const link = await ensureRouterLinkForMatrixUser(sender.user_id, {
+    handlePrefix: 'mxsmoke',
+    provisionIfMissing: process.env.SHAPE_MATRIX_SMOKE_PROVISION_SENDER === '1',
+  });
+  const byHandle = await shapeRequest(`/api/matrix/link-status?handle=${encodeURIComponent(link.handle)}`);
+  if (!byHandle.linked || byHandle.matrixBinding?.userId !== sender.user_id) {
+    throw new Error(`Matrix link-status by handle did not resolve ${sender.user_id}`);
+  }
+  log(`Matrix account-link status ok handle=@${link.handle}`);
+  return link;
+}
+
+async function ensureSparkSmokeAccount(slot, credsPath, handlePrefix) {
+  const creds = await ensureMatrixCredentials({
+    accessTokenEnv: `MATRIX_SMOKE_SPARK_${slot}_ACCESS_TOKEN`,
+    userIdEnv: `MATRIX_SMOKE_SPARK_${slot}_USER_ID`,
+    deviceIdEnv: `MATRIX_SMOKE_SPARK_${slot}_DEVICE_ID`,
+    credsPath,
+    label: `spark-${slot.toLowerCase()}`,
+    displayName: `Shape Router spark ${slot} smoke`,
+  });
+  const before = await matrixLinkStatusByUserId(creds.user_id);
+  if (!before.linked) {
+    const linkCode = await shapeRequest('/api/matrix/link-code', {
+      method: 'POST',
+      body: { matrix_user_id: creds.user_id },
+    });
+    if (!linkCode?.code || linkCode.matrixUserId !== creds.user_id) {
+      throw new Error(`Matrix link-code issuance failed for spark ${slot}`);
+    }
+    log(`Matrix link-code issuance ok for spark ${slot}`);
+  }
+  const link = await ensureRouterLinkForMatrixUser(creds.user_id, {
+    handlePrefix,
+    provisionIfMissing: true,
+  });
+  log(`Matrix provision/link ok for spark ${slot} handle=@${link.handle}`);
+  return { creds, link };
+}
+
+async function verifyMatrixSparkRoomReuse() {
+  if (!verifySparks) return;
+  const a = await ensureSparkSmokeAccount('A', sparkACredsPath, 'mxsparka');
+  const b = await ensureSparkSmokeAccount('B', sparkBCredsPath, 'mxsparkb');
+  if (a.link.handle === b.link.handle) {
+    throw new Error('spark smoke accounts resolved to the same private Router handle');
+  }
+  const reason = `Matrix spark room smoke ${sentinel}`;
+  const message = `@${a.link.handle} and @${b.link.handle}, smoke-test private Matrix spark room reuse for ${sentinel}.`;
+  const first = await shapeRequest('/api/sparks/trigger', {
+    method: 'POST',
+    body: {
+      source_handle: a.link.handle,
+      target_handle: b.link.handle,
+      reason,
+      message,
+    },
+  });
+  if (!first.roomId || first.status === 'skipped') {
+    throw new Error(`first spark trigger did not create a room: ${JSON.stringify(first)}`);
+  }
+  const second = await shapeRequest('/api/sparks/trigger', {
+    method: 'POST',
+    body: {
+      source_handle: a.link.handle,
+      target_handle: b.link.handle,
+      reason,
+      message,
+    },
+  });
+  if (second.roomId !== first.roomId) {
+    throw new Error(`spark room reuse failed: ${first.roomId} -> ${second.roomId || '(none)'}`);
+  }
+  log(`Matrix spark room create/reuse ok room=${first.roomId}`);
 }
 
 async function resolveBotMxid() {
@@ -385,6 +518,8 @@ async function main() {
   log(`bot=${botMxid}`);
   log(`bridge=${useRunningBridge ? 'already-running' : 'local-process'}`);
   const sender = await ensureSenderCredentials();
+  await verifyMatrixLinkStatus(sender);
+  await verifyMatrixSparkRoomReuse();
 
   const bridge = useRunningBridge ? null : startBridge('initial');
   try {

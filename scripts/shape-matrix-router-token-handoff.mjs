@@ -1,10 +1,13 @@
 #!/usr/bin/env node
+import { createHmac } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
 const matrixServerUrl = process.env.MATRIX_SERVER_URL || 'https://mtrx.shaperotator.xyz';
 const expectedUserId = process.env.MATRIX_EXPECTED_USER_ID || '@router:mtrx.shaperotator.xyz';
-const token = process.env.MATRIX_ACCESS_TOKEN?.trim();
+let token = process.env.MATRIX_ACCESS_TOKEN?.trim();
+let mintedDeviceId = '';
 const explicitDeviceId = process.env.MATRIX_DEVICE_ID?.trim();
+const loginDeviceId = process.env.MATRIX_LOGIN_DEVICE_ID?.trim();
 const teleportRouterRepo = process.env.TELEPORT_ROUTER_REPO || 'jameslbarnes/teleport-router';
 const routerTeamworkRepo = process.env.ROUTER_TEAMWORK_REPO || 'teleport-computer/router-teamwork';
 const apply = process.env.SHAPE_MATRIX_TOKEN_HANDOFF_APPLY === '1';
@@ -25,8 +28,65 @@ function localpartFromMxid(mxid) {
   return match[1];
 }
 
+function matrixServerName() {
+  const explicit = process.env.MATRIX_SERVER_NAME?.trim();
+  if (explicit) return explicit;
+  try {
+    return new URL(matrixServerUrl).hostname;
+  } catch {
+    return matrixServerUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  }
+}
+
+function matrixPassword() {
+  const direct = process.env.MATRIX_PASSWORD?.trim() || process.env.MATRIX_BOT_PASSWORD?.trim();
+  if (direct) return direct;
+  const secret = process.env.MATRIX_BOT_SECRET_KEY?.trim();
+  if (!secret) return '';
+  return createHmac('sha256', secret)
+    .update(`matrix:${matrixServerName()}`)
+    .digest('base64url');
+}
+
+async function matrixLogin() {
+  const password = matrixPassword();
+  if (!password) fail('MATRIX_ACCESS_TOKEN or MATRIX_BOT_SECRET_KEY/MATRIX_PASSWORD is required');
+  const username = localpartFromMxid(expectedUserId);
+  const body = {
+    type: 'm.login.password',
+    identifier: { type: 'm.id.user', user: username },
+    password,
+    initial_device_display_name: 'shape-router-token-handoff',
+  };
+  if (loginDeviceId) body.device_id = loginDeviceId;
+
+  const res = await fetch(`${matrixServerUrl.replace(/\/$/, '')}/_matrix/client/v3/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    fail(`/login returned non-JSON HTTP ${res.status}`);
+  }
+  if (!res.ok) {
+    const code = data.errcode || data.error || `HTTP ${res.status}`;
+    fail(`/login for ${expectedUserId} failed: ${code}`);
+  }
+  if (data.user_id !== expectedUserId) {
+    fail(`/login returned ${data.user_id || '(missing user_id)'}, expected ${expectedUserId}`);
+  }
+  if (!data.access_token) fail('/login did not return access_token');
+  token = data.access_token;
+  mintedDeviceId = data.device_id || '';
+  return data;
+}
+
 async function matrixWhoami() {
-  if (!token) fail('MATRIX_ACCESS_TOKEN is required');
+  if (!token) await matrixLogin();
   const res = await fetch(`${matrixServerUrl.replace(/\/$/, '')}/_matrix/client/v3/account/whoami`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -80,7 +140,7 @@ function dispatchWorkflow(repo, workflow, ref, fields = []) {
 
 const whoami = await matrixWhoami();
 const botHandle = localpartFromMxid(expectedUserId);
-const deviceId = explicitDeviceId || whoami.device_id || '';
+const deviceId = explicitDeviceId || whoami.device_id || mintedDeviceId;
 
 log(`validated Matrix token for ${whoami.user_id}${deviceId ? ` device=${deviceId}` : ''}`);
 if (!apply) {

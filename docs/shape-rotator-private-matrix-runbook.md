@@ -107,6 +107,24 @@ The script refuses to proceed unless `/whoami` returns
 `@router:mtrx.shaperotator.xyz`. Override `MATRIX_EXPECTED_USER_ID` only for a
 deliberate test account.
 
+If an operator does not have a local token but wants to test the existing
+`MATRIX_BOT_SECRET_KEY` secret without revealing it, run the manual GitHub
+workflow:
+
+```bash
+gh workflow run shape-matrix-token-handoff.yml \
+  --repo jameslbarnes/teleport-router \
+  --ref master \
+  -f apply=false \
+  -f dispatch_deploy=false
+```
+
+That workflow derives the same Matrix password as the deployed bridge, attempts
+to log in as `@router:mtrx.shaperotator.xyz`, and fails closed if the password
+does not match the existing account. If the dry run validates successfully,
+rerun with `apply=true`; add `dispatch_deploy=true` only when ready to roll both
+deployments.
+
 The bridge defaults to the current Shape Rotator Matrix deployment:
 `https://mtrx.shaperotator.xyz`,
 `mtrx.shaperotator.xyz`, and the `#shape-rotator:mtrx.shaperotator.xyz`

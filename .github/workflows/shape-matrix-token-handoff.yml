@@ -1,0 +1,39 @@
+name: Shape Matrix Token Handoff
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Set GitHub secrets after validating @router login'
+        required: true
+        type: boolean
+        default: false
+      dispatch_deploy:
+        description: 'Dispatch both deploy workflows after setting secrets'
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate and optionally install @router Matrix token
+        env:
+          GH_TOKEN: ${{ secrets.ROUTER_AGENT_GITHUB_TOKEN || github.token }}
+          MATRIX_SERVER_URL: https://mtrx.shaperotator.xyz
+          MATRIX_SERVER_NAME: mtrx.shaperotator.xyz
+          MATRIX_EXPECTED_USER_ID: '@router:mtrx.shaperotator.xyz'
+          MATRIX_BOT_SECRET_KEY: ${{ secrets.MATRIX_BOT_SECRET_KEY }}
+          SHAPE_MATRIX_TOKEN_HANDOFF_APPLY: ${{ inputs.apply && '1' || '0' }}
+          SHAPE_MATRIX_TOKEN_HANDOFF_DISPATCH: ${{ inputs.dispatch_deploy && '1' || '0' }}
+        run: node scripts/shape-matrix-router-token-handoff.mjs

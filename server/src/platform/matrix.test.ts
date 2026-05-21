@@ -1,7 +1,7 @@
 import { existsSync, unlinkSync } from 'fs';
 import { ClientEvent, EventType, KnownMembership, RelationType, RoomEvent, RoomMemberEvent } from 'matrix-js-sdk';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MatrixPlatform, ROUTER_CHANNEL_STATE, ROUTER_SPARK_EVENT, buildRouterDiscoBallAvatarPng, deriveMatrixBotPassword, isMatrixMention } from './matrix.js';
+import { MatrixPlatform, ROUTER_CHANNEL_STATE, ROUTER_SPARK_EVENT, buildRouterDiscoBallAvatarPng, deriveMatrixBotPassword, isMatrixMention, shouldCleanupMatrixOrphanDevices } from './matrix.js';
 import { getEventsSince, resetEvents } from '../events.js';
 
 afterEach(() => {
@@ -101,6 +101,15 @@ describe('MatrixPlatform auth mode selection', () => {
       serverName: 'mtrx.example.test',
       botSecretKey: 'password-secret',
     })).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  it('keeps orphan device cleanup enabled unless explicitly disabled', () => {
+    expect(shouldCleanupMatrixOrphanDevices(undefined)).toBe(true);
+    expect(shouldCleanupMatrixOrphanDevices('1')).toBe(true);
+    expect(shouldCleanupMatrixOrphanDevices('true')).toBe(true);
+    expect(shouldCleanupMatrixOrphanDevices('0')).toBe(false);
+    expect(shouldCleanupMatrixOrphanDevices('false')).toBe(false);
+    expect(shouldCleanupMatrixOrphanDevices('never')).toBe(false);
   });
 });
 

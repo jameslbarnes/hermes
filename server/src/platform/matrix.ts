@@ -115,6 +115,12 @@ export function deriveMatrixBotPassword(config: Pick<MatrixPlatformConfig, 'acce
     : null;
 }
 
+export function shouldCleanupMatrixOrphanDevices(raw = process.env.MATRIX_CLEANUP_ORPHAN_DEVICES): boolean {
+  const normalized = raw?.trim().toLowerCase();
+  if (!normalized) return true;
+  return !['0', 'false', 'no', 'off', 'never', 'disabled'].includes(normalized);
+}
+
 // Custom Matrix event types for tight notebook integration
 export const ROUTER_ENTRY_EVENT = 'com.router.entry';
 export const ROUTER_SPARK_EVENT = 'com.router.spark';
@@ -719,12 +725,14 @@ export class MatrixPlatform implements Platform {
     // MUST complete before start() returns, otherwise clients verifying the
     // bot right after boot will still see the ghost devices in their cached
     // device list and SAS MAC validation will fail against phantoms.
-    if (password) {
+    if (password && shouldCleanupMatrixOrphanDevices()) {
       try {
         await this.cleanupOrphanDevices(userId, deviceId, accessToken, username, password);
       } catch (err: any) {
         console.warn('[Matrix] Orphan device cleanup failed (non-fatal):', err.message);
       }
+    } else if (password) {
+      console.log('[Matrix] Skipping orphan device cleanup because MATRIX_CLEANUP_ORPHAN_DEVICES is disabled');
     } else {
       console.log('[Matrix] Skipping password-based orphan device cleanup in access-token mode');
     }

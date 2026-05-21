@@ -40,19 +40,40 @@ else
 fi
 echo "[entrypoint] Existing skills: $(ls $ROUTER_HOME/skills 2>/dev/null || echo none)"
 
-# Bootstrap a stable Router notebook identity.
-# Order of precedence:
-#   1. ROUTER_SECRET_KEY from env
-#   2. persisted key in /data/router-agent/secret_key
-#   3. generate once, register the configured handle, persist to disk
-IDENTITY_ENV=$(mktemp)
-if ! python3 /app/bootstrap_identity.py > "$IDENTITY_ENV"; then
+agent_http_mode_enabled() {
+  case "${ROUTER_AGENT_HTTP_MODE:-${SHAPE_MATRIX_AGENT_HTTP_MODE:-}}" in
+    1|true|TRUE|yes|YES|on|ON)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+if agent_http_mode_enabled; then
+  if [ -z "$ROUTER_SECRET_KEY" ]; then
+    echo "[entrypoint] ROUTER_SECRET_KEY or SHAPE_ROUTER_SECRET_KEY is required in HTTP agent mode"
+    exit 1
+  fi
+  ROUTER_SECRET_KEY_SOURCE="${ROUTER_SECRET_KEY_SOURCE:-env}"
+  ROUTER_AGENT_HANDLE="${ROUTER_AGENT_HANDLE:-$ROUTER_HANDLE}"
+  export ROUTER_SECRET_KEY_SOURCE ROUTER_AGENT_HANDLE
+else
+  # Bootstrap a stable Router notebook identity.
+  # Order of precedence:
+  #   1. ROUTER_SECRET_KEY from env
+  #   2. persisted key in /data/router-agent/secret_key
+  #   3. generate once, register the configured handle, persist to disk
+  IDENTITY_ENV=$(mktemp)
+  if ! python3 /app/bootstrap_identity.py > "$IDENTITY_ENV"; then
+    rm -f "$IDENTITY_ENV"
+    exit 1
+  fi
+  # shellcheck disable=SC1090
+  . "$IDENTITY_ENV"
   rm -f "$IDENTITY_ENV"
-  exit 1
 fi
-# shellcheck disable=SC1090
-. "$IDENTITY_ENV"
-rm -f "$IDENTITY_ENV"
 
 echo "[entrypoint] ROUTER_SECRET_KEY set: $(test -n "$ROUTER_SECRET_KEY" && echo yes || echo no)"
 echo "[entrypoint] ROUTER_SECRET_KEY source: ${ROUTER_SECRET_KEY_SOURCE:-unknown}"

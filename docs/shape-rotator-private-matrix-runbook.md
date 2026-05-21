@@ -65,6 +65,48 @@ access-token mode wins. This lets a pre-provisioned production Matrix device
 ignore stale password/signup env that may still exist in an encrypted deploy
 environment.
 
+For Shape parity, the production service identity should be:
+
+```text
+@router:mtrx.shaperotator.xyz
+```
+
+Both the deployed `shape-matrix-bridge` service in this repo and the private
+Router's direct Matrix mirror/spark path in `router-teamwork` should use the
+same Matrix access token for that account. If they do not, Matrix DM replies
+and Bot Noise mirrors can come from different users even when both services are
+otherwise healthy.
+
+To install an already-minted `@router` Matrix access token into both GitHub
+repos without printing it:
+
+```bash
+MATRIX_ACCESS_TOKEN=<router-matrix-token> \
+  node scripts/shape-matrix-router-token-handoff.mjs
+```
+
+The default dry run validates `/whoami` and shows which secrets would be set.
+To update GitHub secrets after validation:
+
+```bash
+MATRIX_ACCESS_TOKEN=<router-matrix-token> \
+SHAPE_MATRIX_TOKEN_HANDOFF_APPLY=1 \
+  node scripts/shape-matrix-router-token-handoff.mjs
+```
+
+To update secrets and dispatch both deploy workflows:
+
+```bash
+MATRIX_ACCESS_TOKEN=<router-matrix-token> \
+SHAPE_MATRIX_TOKEN_HANDOFF_APPLY=1 \
+SHAPE_MATRIX_TOKEN_HANDOFF_DISPATCH=1 \
+  node scripts/shape-matrix-router-token-handoff.mjs
+```
+
+The script refuses to proceed unless `/whoami` returns
+`@router:mtrx.shaperotator.xyz`. Override `MATRIX_EXPECTED_USER_ID` only for a
+deliberate test account.
+
 The bridge defaults to the current Shape Rotator Matrix deployment:
 `https://mtrx.shaperotator.xyz`,
 `mtrx.shaperotator.xyz`, and the `#shape-rotator:mtrx.shaperotator.xyz`
@@ -293,6 +335,23 @@ SHAPE_MATRIX_SMOKE_RUNNING_BRIDGE=1
 That mode still sends Matrix commands, verifies private Router entries, and runs
 the public Router boundary scan. It skips local startup and restart checks
 because it does not own the deployed process lifecycle.
+
+For final Shape parity, run deployed smoke with the production bot identity:
+
+```bash
+SHAPE_ROUTER_SECRET_KEY=<private Shape Router bot key> \
+SHAPE_MATRIX_SMOKE_RUNNING_BRIDGE=1 \
+MATRIX_BOT_HANDLE=router \
+MATRIX_USER_ID=@router:mtrx.shaperotator.xyz \
+MATRIX_SMOKE_SIGNUP_CODE=<reserved Shape Matrix signup code> \
+SHAPE_MATRIX_SMOKE_VERIFY_SPARKS=1 \
+SHAPE_MATRIX_SMOKE_SENTINEL="shape-router-final-$(date +%s)" \
+  node scripts/shape-matrix-live-smoke.mjs
+```
+
+The live smoke creates a private Router entry and verifies the Bot Noise mirror
+sender. It fails if that mirror comes from any Matrix user other than
+`@router:mtrx.shaperotator.xyz`, which is the expected final-state guard.
 
 Basic unauthenticated private Router checks:
 

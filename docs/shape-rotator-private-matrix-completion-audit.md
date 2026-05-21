@@ -16,12 +16,16 @@ public Router.
 
 ## Current Conclusion
 
-The local implementation, tests, compose topology, CI gates, runbook, and smoke
-tooling are in place. The goal is not complete yet because the updated image has
-not been pushed/deployed to the live public Router deployment, the production
-encrypted env has not been confirmed, and the tightened deployed-bridge Matrix
-smoke has not been run against the already-running `shape-matrix-bridge`
-service.
+The implementation, tests, compose topology, CI gates, runbook, smoke tooling,
+and latest public Router bridge image are deployed. The goal is not complete yet
+because the live bridge still authenticates to Matrix as
+`@shape-router-bridge-20260517:mtrx.shaperotator.xyz`, while final Shape parity
+requires the Matrix bridge and the private Router Bot Noise mirror/spark path to
+use the same `@router:mtrx.shaperotator.xyz` Matrix identity. The remaining
+blocked step is operator credential work: recover or reset the existing
+`@router` Matrix account, mint an access token, install it into both deployment
+secret stores, redeploy, and rerun the expanded live smoke with the Bot Noise
+sender assertion.
 
 ## Prompt-To-Artifact Checklist
 
@@ -38,7 +42,7 @@ service.
 | Private repo/API target is current | `/Users/etherealmachine/router-teamwork` is on `main` at `8424ce3`; `git pull --ff-only` returned `Already up to date.`; `docs/integration/http-api.md` and live `/api` confirm the needed routes | Verified locally |
 | Public Matrix deployment reference is current | `/Users/etherealmachine/shape-rotator-matrix` cloned from `https://github.com/Account-Link/shape-rotator-matrix`; `README.md`, `STATE.md`, and `MATRIX_ONBOARDING.md` confirm `https://mtrx.shaperotator.xyz` and space `!4FL8uL5OEYLATG1VH4wC2CD3pfIV6BMFId9VT7rmm-g`; runbook now points operators there for Matrix onboarding/code rotation | Verified locally at `47df6c5` |
 | Matrix onboarding URLs are captured without leaking codes | `docs/shape-rotator-private-matrix-runbook.md` records the homeserver root, agent signup page, human knock-join URL pattern, and Element space deep link; it explicitly keeps live signup, knock-join, and smoke-test codes out of git and relies on env/secrets for smoke tests | Implemented locally |
-| Matrix auth mode is deterministic with mixed env | `matrixBotSecretKey()` and `deriveMatrixBotPassword()` make `MATRIX_ACCESS_TOKEN` win over stale `MATRIX_BOT_SECRET_KEY`; focused tests cover both helper paths | Unit-tested |
+| Matrix auth mode is deterministic with mixed env | `matrixBotSecretKey()` and `deriveMatrixBotPassword()` make `MATRIX_ACCESS_TOKEN` win over stale `MATRIX_BOT_SECRET_KEY`; focused tests cover both helper paths; `scripts/shape-matrix-router-token-handoff.mjs` validates an operator-provided `@router` access token and can install it into both repo secret stores | Unit-tested for bridge helpers; handoff script syntax-checked |
 | Smoke: health/server-info | `node scripts/shape-router-smoke.mjs` passes live checks | Verified |
 | Smoke: bot account/key | `SHAPE_ROUTER_SECRET_KEY=<test key> node scripts/shape-router-smoke.mjs` | Verified against live private Router as `@testbot` |
 | Smoke: POST/GET entries | `scripts/shape-router-smoke.mjs` creates, publishes when needed, lists, fetches detail, and deletes a smoke entry | Verified against live private Router |

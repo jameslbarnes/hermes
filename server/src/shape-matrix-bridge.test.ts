@@ -635,6 +635,55 @@ describe('Shape Matrix bridge helpers', () => {
     );
   });
 
+  it('falls back to private Router author search when the Hermes agent keyword search reports no results', async () => {
+    process.env.SHAPE_MATRIX_AGENT_URL = 'http://shape-agent.test/matrix/event';
+
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === 'http://shape-agent.test/matrix/event') {
+        const body = JSON.parse(String(init?.body));
+        expect(body.event.data.text).toBe('what about all these posts from whimsy?');
+        return new Response(JSON.stringify({ reply: 'I searched the Router notebook for "whimsy" and did not find any entries.' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+
+    const matrix = {
+      maxMessageLength: 65536,
+      queryRecentMessages: vi.fn(),
+      sendMessage: vi.fn(async () => '$reply'),
+    };
+    const mcpClient = {
+      callTool: vi.fn(async (call: any) => {
+        expect(call).toEqual({
+          name: 'router_search',
+          arguments: { handle: 'whimsy', limit: 5 },
+        });
+        return {
+          content: [{
+            type: 'text',
+            text: 'Found 1 result:\n\n[mpgcq5fa-oy670y] @whimsy · 5/22/2026\nFucory routing note.',
+          }],
+        };
+      }),
+    };
+
+    await handleMention(matrix as any, mcpClient as any, matrixMentionEvent('what about all these posts from whimsy?'));
+
+    expect(matrix.queryRecentMessages).not.toHaveBeenCalled();
+    expect(mcpClient.callTool).toHaveBeenCalledTimes(1);
+    expect(matrix.sendMessage).toHaveBeenCalledWith(
+      '!room:matrix.test',
+      expect.stringContaining('private Router author search for @whimsy found'),
+      expect.objectContaining({ replyTo: '$mention' }),
+    );
+    const reply = (matrix.sendMessage as any).mock.calls[0][1];
+    expect(reply).toContain('Fucory routing note');
+  });
+
   it('falls back to private Router HTTP search when an MCP session expires', async () => {
     process.env.SHAPE_ROUTER_BASE_URL = 'https://shape.test';
     process.env.SHAPE_ROUTER_SECRET_KEY = 'shape-key';

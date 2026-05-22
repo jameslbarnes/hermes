@@ -338,10 +338,17 @@ You received a Matrix message from the private Matrix bridge. The bridge owns Ma
 Event:
 ${JSON.stringify(event, null, 2)}
 
+Current time:
+${new Date().toISOString()}
+
 Behavior:
 - Answer ordinary greetings and questions naturally.
 - For questions about the private Shape Router notebook, use the Router MCP tools available to you, especially router_search.
 - If the user explicitly asks to search, call router_search instead of relying on memory.
+- Interpret "today", "yesterday", and other relative dates against the Current time above.
+- If the user mentions an author like "@whimsy" or says "from whimsy", call router_search with handle="whimsy" instead of only searching query="whimsy".
+- If the user provides Router entry IDs or entry URLs, call router_get_entry for those IDs.
+- Only use room_id Matrix search when the user is asking about Matrix chat/room messages. Do not use Matrix room fallback for Router notebook entries that should be readable from private Router.
 - If router_search has no useful hits, say that plainly and offer a better query.
 - Keep replies concise enough for Matrix.
 

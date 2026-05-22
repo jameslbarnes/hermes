@@ -27,6 +27,8 @@ export type PrivateEntry = {
   id: string;
   summary: string;
   content?: string;
+  handle?: string;
+  pseudonym?: string;
   tags: string[];
   publishAt?: number | null;
 };
@@ -172,6 +174,37 @@ export function relativeSinceMs(text: string): number {
   if (lower.includes('week')) return 7 * 24 * 60 * 60 * 1000;
   if (lower.includes('today')) return 18 * 60 * 60 * 1000;
   return parsePositiveInt('SHAPE_MATRIX_SUMMARY_WINDOW_MS', 24 * 60 * 60 * 1000);
+}
+
+function noResultText(text: string): boolean {
+  const lower = text.toLowerCase();
+  return /\bno (?:notebook )?(?:entries|entry|results|posts|matches?)\b/.test(lower)
+    || /\b(?:didn't|did not|couldn't|could not) find\b/.test(lower)
+    || /\bentry not found\b/.test(lower)
+    || /\bthere (?:are|were) no\b/.test(lower);
+}
+
+function extractedHandleReference(text: string): string | null {
+  const explicit = text.match(/@([a-zA-Z][a-zA-Z0-9_]{2,30})(?!:)/);
+  const raw = explicit?.[1]
+    || text.match(/\b(?:from|by|author|handle|user)\s+@?([a-zA-Z][a-zA-Z0-9_]{2,30})\b/i)?.[1];
+  if (!raw) return null;
+
+  const handle = raw.toLowerCase();
+  if (['today', 'yesterday', 'notebook', 'router', 'matrix', 'room', 'here'].includes(handle)) {
+    return null;
+  }
+  return handle;
+}
+
+function fallbackSearchQuery(text: string): string {
+  const handle = extractedHandleReference(text);
+  if (handle) return handle;
+  return text.replace(/^\s*(search|find|lookup)\s+/i, '').trim();
+}
+
+function extractEntryIds(text: string): string[] {
+  return [...new Set(text.match(/\b[a-z0-9]{8,}-[a-z0-9]{4,}\b/gi) || [])];
 }
 
 function isMatrixRoomSummaryRequest(text: string): boolean {
@@ -450,17 +483,112 @@ async function searchShapeRouter(mcpClient: Client | null, query: string, limit 
     }
   }
 
+  return searchShapeRouterHttp(cleanQuery, limit);
+}
+
+async function getShapeRouterEntry(mcpClient: Client | null, entryId: string): Promise<string> {
+  if (mcpClient) {
+    try {
+      const result = await mcpClient.callTool({
+        name: 'router_get_entry',
+        arguments: { entry_id: entryId },
+      });
+      const contentItems = Array.isArray((result as any).content) ? (result as any).content : [];
+      return contentItems
+        .map((item: any) => item?.type === 'text' ? String(item.text || '') : '')
+        .filter(Boolean)
+        .join('\n')
+        .trim() || `No entry found for ${entryId}.`;
+    } catch (error) {
+      log(`Private MCP get failed; falling back to HTTP get: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const entry = await shapeFetch(`/api/entries/${encodeURIComponent(entryId)}`) as { entry?: PrivateEntry } | PrivateEntry;
+  const normalized = 'entry' in entry && entry.entry ? entry.entry : entry as PrivateEntry;
+  return formatPrivateEntry(normalized);
+}
+
+async function searchShapeRouterByHandle(mcpClient: Client | null, handle: string, limit = 5): Promise<string> {
+  const cleanHandle = handle.replace(/^@/, '').trim().toLowerCase();
+  if (!cleanHandle) return 'Give me an author handle.';
+
+  if (mcpClient) {
+    try {
+      const result = await mcpClient.callTool({
+        name: 'router_search',
+        arguments: { handle: cleanHandle, limit },
+      });
+      const contentItems = Array.isArray((result as any).content) ? (result as any).content : [];
+      return contentItems
+        .map((item: any) => item?.type === 'text' ? String(item.text || '') : '')
+        .filter(Boolean)
+        .join('\n')
+        .trim() || 'No results found.';
+    } catch (error) {
+      log(`Private MCP handle search failed; falling back to HTTP author search: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const fetchLimit = Math.max(limit, parsePositiveInt('SHAPE_MATRIX_HTTP_SEARCH_POOL_LIMIT', 100));
+  const entries = await shapeFetch(`/api/entries?author=${encodeURIComponent(cleanHandle)}&limit=${fetchLimit}`) as { entries?: PrivateEntry[] };
+  const filtered = (entries.entries || []).filter(entry => entry.handle === cleanHandle);
+  if (filtered.length === 0) return 'No results found.';
+  return filtered.slice(0, limit).map(formatPrivateEntry).join('\n\n');
+}
+
+function formatPrivateEntry(entry: PrivateEntry): string {
+  const author = entry.handle ? `@${entry.handle}` : entry.pseudonym;
+  return `[${entry.id}] ${author ? `${author}: ` : ''}${entry.summary}\nTags: ${(entry.tags || []).map(tag => `#${tag}`).join(' ')}`;
+}
+
+async function searchShapeRouterHttp(cleanQuery: string, limit = 5): Promise<string> {
   const fetchLimit = Math.max(limit, parsePositiveInt('SHAPE_MATRIX_HTTP_SEARCH_POOL_LIMIT', 100));
   const entries = await shapeFetch(`/api/entries?limit=${fetchLimit}`) as { entries?: PrivateEntry[] };
   const lower = cleanQuery.toLowerCase();
   const filtered = (entries.entries || []).filter(entry =>
-    [entry.summary, entry.content || '', entry.id, ...(entry.tags || [])].join(' ').toLowerCase().includes(lower),
+    [entry.summary, entry.content || '', entry.handle || '', entry.pseudonym || '', entry.id, ...(entry.tags || [])].join(' ').toLowerCase().includes(lower),
   );
   if (filtered.length === 0) return 'No results found.';
   return filtered
     .slice(0, limit)
-    .map(entry => `[${entry.id}] ${entry.summary}\nTags: ${entry.tags.map(tag => `#${tag}`).join(' ')}`)
+    .map(formatPrivateEntry)
     .join('\n\n');
+}
+
+async function buildNoResultFallbackReply(mcpClient: Client | null, text: string): Promise<string | null> {
+  const ids = extractEntryIds(text);
+  if (ids.length > 0) {
+    const results = await Promise.all(ids.slice(0, 3).map(id => getShapeRouterEntry(mcpClient, id).catch(error => {
+      log(`Private entry lookup fallback failed for ${id}: ${error instanceof Error ? error.message : String(error)}`);
+      return '';
+    })));
+    const found = results.filter(result => result && !noResultText(result));
+    if (found.length > 0) {
+      return `Router MCP search missed this, but direct private Router entry lookup found:\n\n${truncate(found.join('\n\n'), 3000)}`;
+    }
+  }
+
+  const handle = extractedHandleReference(text);
+  if (handle) {
+    const handleResults = await searchShapeRouterByHandle(mcpClient, handle, parsePositiveInt('SHAPE_MATRIX_SEARCH_LIMIT', 5));
+    if (!noResultText(handleResults)) {
+      return `Router MCP keyword search missed this, but private Router author search for @${handle} found:\n\n${truncate(handleResults, 3000)}`;
+    }
+  }
+
+  const query = fallbackSearchQuery(text);
+  if (query.length >= 3) {
+    try {
+      const httpResults = await searchShapeRouterHttp(query, parsePositiveInt('SHAPE_MATRIX_SEARCH_LIMIT', 5));
+      if (!noResultText(httpResults)) {
+        return `Router MCP search missed this, but direct private Router search found:\n\n${truncate(httpResults, 3000)}`;
+      }
+    } catch (error) {
+      log(`Private HTTP no-result fallback failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return null;
 }
 
 async function askShapeMatrixAgent(event: RouterEvent, text: string): Promise<string | null> {
@@ -840,7 +968,13 @@ export async function handleMention(matrix: MatrixPlatform, mcpClient: Client | 
 
   const agentReply = await askShapeMatrixAgent(attributionEvent, text);
   if (agentReply !== null) {
-    await sendReply(matrix, event, agentReply);
+    const fallbackReply = noResultText(agentReply)
+      ? await buildNoResultFallbackReply(mcpClient, text).catch(error => {
+        log(`No-result fallback failed: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+      })
+      : null;
+    await sendReply(matrix, event, fallbackReply || agentReply);
     return;
   }
 

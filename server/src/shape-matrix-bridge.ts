@@ -211,6 +211,68 @@ function isMatrixRoomSummaryRequest(text: string): boolean {
   return /\b(room|conversation|chat|thread|here)\b/i.test(text);
 }
 
+function isNotebookOnlyAgentRequest(text: string): boolean {
+  return /\b(?:notebook|private router|shape router|router notebook|entry|entries)\b/i.test(text)
+    && !/\bmatrix\b/i.test(text);
+}
+
+function shouldAttachMatrixContext(text: string): boolean {
+  if (isNotebookOnlyAgentRequest(text)) return false;
+  return /\b(?:matrix server|matrix rooms?|this room|the room|room|here|above|thread|conversation|chat|what happened|what's happened|what has happened|what did i miss|recap|lately|recently|today|yesterday)\b/i.test(text);
+}
+
+function wantsMatrixWideContext(text: string): boolean {
+  return /\b(?:matrix server|matrix rooms?|across matrix|all rooms|lately|recently)\b/i.test(text);
+}
+
+function serializeMatrixContextMessage(message: MatrixHistoryMessage): Record<string, unknown> {
+  return {
+    room_id: message.roomId,
+    room_name: message.roomName,
+    room_alias: message.roomAlias,
+    event_id: message.eventId,
+    sender_id: message.senderId,
+    sender_handle: message.senderHandle,
+    text: truncate(message.text, 700),
+    timestamp: new Date(message.timestamp).toISOString(),
+    is_dm: message.isDM,
+    permalink: message.permalink,
+  };
+}
+
+async function buildAgentMatrixContext(matrix: MatrixPlatform, event: RouterEvent, text: string): Promise<Record<string, unknown> | null> {
+  if (!shouldAttachMatrixContext(text)) return null;
+
+  const data = event.data || {};
+  const roomId = String(data.room_id || '');
+  const isDM = data.is_dm === true;
+  const matrixWide = wantsMatrixWideContext(text) && !isDM;
+  const windowMs = relativeSinceMs(text) || 48 * 60 * 60 * 1000;
+  const limit = parsePositiveInt('SHAPE_MATRIX_AGENT_CONTEXT_LIMIT', matrixWide ? 60 : 40);
+  const perRoomLimit = parsePositiveInt('SHAPE_MATRIX_AGENT_CONTEXT_PER_ROOM_LIMIT', matrixWide ? 80 : 100);
+
+  const messages = await matrix.queryRecentMessages({
+    roomIds: matrixWide || !roomId ? undefined : [roomId],
+    since: Date.now() - windowMs,
+    limit,
+    perRoomLimit,
+    includeDMs: isDM,
+    viewerUserId: String(data.sender_id || ''),
+  });
+
+  return {
+    source: 'live Matrix search by shape-matrix-bridge',
+    scope: matrixWide ? 'visible Matrix rooms' : 'current Matrix room',
+    room_id: matrixWide ? undefined : roomId,
+    since: new Date(Date.now() - windowMs).toISOString(),
+    search_performed: true,
+    message_count: messages.length,
+    messages: messages
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map(serializeMatrixContextMessage),
+  };
+}
+
 async function loadState(path: string): Promise<BridgeState> {
   try {
     const raw = await readFile(path, 'utf8');
@@ -591,7 +653,7 @@ async function buildNoResultFallbackReply(mcpClient: Client | null, text: string
   return null;
 }
 
-async function askShapeMatrixAgent(event: RouterEvent, text: string): Promise<string | null> {
+async function askShapeMatrixAgent(matrix: MatrixPlatform, event: RouterEvent, text: string): Promise<string | null> {
   const agentUrl = shapeMatrixAgentUrl();
   if (!agentUrl) return null;
 
@@ -601,6 +663,11 @@ async function askShapeMatrixAgent(event: RouterEvent, text: string): Promise<st
     parsePositiveInt('SHAPE_MATRIX_AGENT_TIMEOUT_MS', 180_000),
   );
 
+  const matrixContext = await buildAgentMatrixContext(matrix, event, text).catch(error => {
+    log(`Matrix context search failed for Hermes event: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  });
+
   const agentEvent: RouterEvent = {
     ...event,
     data: {
@@ -608,6 +675,7 @@ async function askShapeMatrixAgent(event: RouterEvent, text: string): Promise<st
       text,
       original_text: event.data?.text,
       handled_by: 'shape-matrix-agent',
+      ...(matrixContext ? { matrix_context: matrixContext } : {}),
     },
   };
 
@@ -966,7 +1034,7 @@ export async function handleMention(matrix: MatrixPlatform, mcpClient: Client | 
     return;
   }
 
-  const agentReply = await askShapeMatrixAgent(attributionEvent, text);
+  const agentReply = await askShapeMatrixAgent(matrix, attributionEvent, text);
   if (agentReply !== null) {
     const fallbackReply = noResultText(agentReply)
       ? await buildNoResultFallbackReply(mcpClient, text).catch(error => {

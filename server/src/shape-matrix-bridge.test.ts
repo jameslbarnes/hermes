@@ -606,6 +606,68 @@ describe('Shape Matrix bridge helpers', () => {
     );
   });
 
+  it('attaches live Matrix context for Matrix-server recap questions sent to Hermes', async () => {
+    process.env.SHAPE_MATRIX_AGENT_URL = 'http://shape-agent.test/matrix/event';
+
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('http://shape-agent.test/matrix/event');
+      const body = JSON.parse(String(init?.body));
+      expect(body.event.data.text).toBe('what has been happening in the matrix server lately?');
+      expect(body.event.data.matrix_context).toEqual(expect.objectContaining({
+        source: 'live Matrix search by shape-matrix-bridge',
+        scope: 'visible Matrix rooms',
+        search_performed: true,
+        message_count: 2,
+      }));
+      expect(body.event.data.matrix_context.messages).toEqual([
+        expect.objectContaining({ text: 'Earlier room context', sender_handle: 'bob' }),
+        expect.objectContaining({ text: 'Later room context', sender_handle: 'carol' }),
+      ]);
+      return new Response(JSON.stringify({ reply: 'I checked Matrix directly: earlier and later context.' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }));
+
+    const matrix = {
+      maxMessageLength: 65536,
+      queryRecentMessages: vi.fn(async () => [
+        {
+          roomId: '!general:matrix.test',
+          roomName: 'General',
+          senderId: '@carol:matrix.test',
+          senderHandle: 'carol',
+          text: 'Later room context',
+          timestamp: 2000,
+          isDM: false,
+        },
+        {
+          roomId: '!general:matrix.test',
+          roomName: 'General',
+          senderId: '@bob:matrix.test',
+          senderHandle: 'bob',
+          text: 'Earlier room context',
+          timestamp: 1000,
+          isDM: false,
+        },
+      ]),
+      sendMessage: vi.fn(async () => '$reply'),
+    };
+
+    await handleMention(matrix as any, null, matrixMentionEvent('what has been happening in the matrix server lately?'));
+
+    expect(matrix.queryRecentMessages).toHaveBeenCalledWith(expect.objectContaining({
+      roomIds: undefined,
+      includeDMs: false,
+      viewerUserId: '@alice:matrix.test',
+    }));
+    expect(matrix.sendMessage).toHaveBeenCalledWith(
+      '!room:matrix.test',
+      'I checked Matrix directly: earlier and later context.',
+      expect.objectContaining({ replyTo: '$mention' }),
+    );
+  });
+
   it('lets the private Hermes agent handle notebook-summary requests', async () => {
     process.env.SHAPE_MATRIX_AGENT_URL = 'http://shape-agent.test/matrix/event';
 

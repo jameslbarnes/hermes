@@ -30,6 +30,16 @@ describe('Skills System', () => {
       expect(skill!.inputSchema?.properties?.include_matrix).toBeDefined();
     });
 
+    it('should have router_search_matrix as a system skill', () => {
+      const skill = SYSTEM_SKILLS.find(s => s.name === 'router_search_matrix');
+      expect(skill).toBeDefined();
+      expect(skill!.handlerType).toBe('builtin');
+      expect(skill!.inputSchema?.properties?.room_id).toBeDefined();
+      expect(skill!.inputSchema?.properties?.since).toBeDefined();
+      expect(skill!.inputSchema?.properties?.query).toBeDefined();
+      expect(skill!.description).toContain('Use this liberally');
+    });
+
     it('should have router_send_dm as a system skill', () => {
       const skill = SYSTEM_SKILLS.find(s => s.name === 'router_send_dm');
       expect(skill).toBeDefined();

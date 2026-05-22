@@ -136,6 +136,7 @@ describe('MCP Tool Integration Tests', () => {
         const names = tools.map(t => t.name);
         expect(names).toContain('router_write_entry');
         expect(names).toContain('router_search');
+        expect(names).toContain('router_search_matrix');
       }
     });
   });

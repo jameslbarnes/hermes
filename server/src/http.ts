@@ -348,6 +348,36 @@ export const SYSTEM_SKILLS: Skill[] = [
     createdAt: 0,
   },
   {
+    id: 'system_router_search_matrix',
+    name: 'router_search_matrix',
+    description: 'Search recent Matrix room messages visible to the caller. When Router is responding in Matrix, pass event.data.room_id to read the current room, including the current DM. Without room_id, Router can search non-DM Matrix rooms it has joined. Use this liberally for conversation context before answering Matrix mentions.',
+    instructions: '',
+    handlerType: 'builtin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Optional keywords to find in Matrix messages. Leave empty with room_id to read recent room context broadly.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of Matrix messages to return (default 10). Use 20-40 when gathering room context.',
+        },
+        since: {
+          type: 'string',
+          description: 'Only return Matrix messages after this date/time. Accepts ISO 8601 (e.g. "2026-02-14") or relative durations (e.g. "2h", "24h", "7d").',
+        },
+        room_id: {
+          type: 'string',
+          description: 'Matrix room ID to read, typically event.data.room_id for the room where Router is responding. Required for current-DM searches.',
+        },
+      },
+      required: [],
+    },
+    createdAt: 0,
+  },
+  {
     id: 'system_router_delete_entry',
     name: 'router_delete_entry',
     description: 'Delete an entry you posted. Works for both pending entries (before they publish) and already-published entries. Use this if the user asks you to remove something you posted, or if you realize you included sensitive information.',
@@ -2273,6 +2303,57 @@ function createMCPServer(secretKey: string) {
         content: [{
           type: 'text' as const,
           text: responseParts.join('\n\n') || 'No results found.',
+        }],
+      };
+    }
+
+    // Handle Matrix search tool
+    if (name === 'router_search_matrix') {
+      const query = (args as { query?: string })?.query?.trim();
+      const limit = (args as { limit?: number })?.limit || 10;
+      const sinceRaw = (args as { since?: string })?.since?.trim();
+      const since = parseToolSince(sinceRaw);
+      const roomId = (args as { room_id?: string })?.room_id?.trim();
+
+      if (!query && !since && !roomId) {
+        return {
+          content: [{ type: 'text' as const, text: 'Provide a Matrix search query, a since parameter, or a Matrix room_id.' }],
+          isError: true,
+        };
+      }
+
+      const toolUser = await getToolUser();
+      const viewerMatrixId = await getVerifiedMatrixUserId(toolUser);
+      const routerHandle = normalizeHandle(process.env.ROUTER_AGENT_HANDLE || process.env.MATRIX_BOT_HANDLE || 'router');
+      const isRouterCaller = toolUser?.handle ? normalizeHandle(toolUser.handle) === routerHandle : false;
+      const canUseRouterMatrix = isRouterCaller;
+
+      if (!viewerMatrixId && !canUseRouterMatrix) {
+        return {
+          content: [{ type: 'text' as const, text: 'Matrix search is unavailable: the caller has no verified linked Matrix account.' }],
+          isError: true,
+        };
+      }
+
+      const matrixMessages = await executeMatrixSearch({
+        query,
+        limit,
+        since,
+        viewerMatrixId: canUseRouterMatrix ? undefined : (viewerMatrixId || undefined),
+        roomId,
+        botScope: canUseRouterMatrix,
+      }).catch(() => []);
+      const matrixText = formatMatrixSearchText(matrixMessages);
+      const matrixAccessLabel = roomId
+        ? 'Recent Matrix messages from the requested room'
+        : (canUseRouterMatrix ? 'Matrix results from rooms Router has joined' : 'Matrix results visible to your linked account');
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: matrixText
+            ? `${matrixAccessLabel}:\n\n${matrixText}`
+            : (roomId ? 'No recent Matrix messages were available for the requested room.' : 'No matching Matrix messages found.'),
         }],
       };
     }

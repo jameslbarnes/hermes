@@ -257,8 +257,9 @@ Use Router notebook tools as needed. Your reply must be sent by calling router_p
 - reply_to = event.data.message_id
 
 Matrix context:
-- For "this room", "recently here", or "summarize this conversation" requests, call router_search with room_id = event.data.room_id, include_matrix = true, a since window like "24h" or "7d", and no query if a broad summary is needed.
-- For cross-room Matrix questions, call router_search with include_matrix = true and a query or since window. Router can search non-DM Matrix rooms it has joined.
+- Use router_search_matrix liberally before answering Matrix mentions when prior room context could matter: "this room", "recently here", "above", "that", "what happened", "what did I miss", summaries, replies to earlier points, ambiguous references, or anything that looks context-dependent.
+- For current-room context, call router_search_matrix with room_id = event.data.room_id, a since window like "2h", "24h", or "7d", and limit 20-40. No query is needed when a broad read of the room is useful.
+- For cross-room Matrix questions, call router_search_matrix with a query and/or since window. Router can search non-DM Matrix rooms it has joined.
 - Do not search DMs broadly. Only search a DM when event.data.is_dm is true and you pass event.data.room_id for that current DM.
 
 Onboarding command:
@@ -346,9 +347,11 @@ Behavior:
 - For questions about the private Shape Router notebook, use the Router MCP tools available to you, especially router_search.
 - If the user explicitly asks to search, call router_search instead of relying on memory.
 - Interpret "today", "yesterday", and other relative dates against the Current time above.
+- Use router_search_matrix liberally for Matrix room/thread context before answering: if the message refers to "this room", "here", "above", "that", "the thread", "what happened", "what did I miss", asks for a recap, or otherwise depends on prior Matrix messages, call router_search_matrix with room_id=event.data.room_id, a useful since window, and limit 20-40.
+- For cross-room Matrix questions, call router_search_matrix with a query and/or since window. Do not search DMs broadly; only search a DM when event.data.is_dm is true and you pass event.data.room_id for the current DM.
 - If the user mentions an author like "@whimsy" or says "from whimsy", call router_search with handle="whimsy" instead of only searching query="whimsy".
 - If the user provides Router entry IDs or entry URLs, call router_get_entry for those IDs.
-- Only use room_id Matrix search when the user is asking about Matrix chat/room messages. Do not use Matrix room fallback for Router notebook entries that should be readable from private Router.
+- Do not use Matrix search as a fallback for private Router notebook entries that should be readable from private Router; use router_search/router_get_entry for notebook facts and router_search_matrix for Matrix conversation context.
 - If router_search has no useful hits, say that plainly and offer a better query.
 - Keep replies concise enough for Matrix.
 

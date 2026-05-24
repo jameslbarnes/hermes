@@ -26,6 +26,8 @@ services:
   shape-matrix-bridge:
     image: docker.io/generalsemantics/teleport-router:${GIT_SHA}@${IMAGE_DIGEST}
     command: ["node", "dist/shape-matrix-bridge.js"]
+    ports:
+      - "8092:8092"
     environment:
       # Matrix is intentionally hosted by this bridge process, not by the
       # public Router server. Notebook reads/writes go to the private Shape
@@ -57,26 +59,6 @@ services:
       - shape-matrix-bridge-data:/data
     depends_on:
       - router-agent
-    restart: unless-stopped
-
-  shape-matrix-service-ingress:
-    image: dstacktee/dstack-ingress:20250929@sha256:2b47b3e538df0b3e7724255b89369194c8c83a7cfba64d2faf0115ad0a586458
-    ports:
-      - "8443:8443"
-    environment:
-      - DOMAIN=shape-matrix-service.teleport.computer
-      - DNS_PROVIDER=cloudflare
-      - CLOUDFLARE_API_TOKEN
-      - GATEWAY_DOMAIN=_.dstack-pha-prod9.phala.network
-      - CERTBOT_EMAIL=james@generalsemantics.nyc
-      - SET_CAA=true
-      - TARGET_ENDPOINT=http://shape-matrix-bridge:8092
-      - PORT=8443
-    volumes:
-      - /var/run/dstack.sock:/var/run/dstack.sock
-      - shape-matrix-service-cert-data-cf:/etc/letsencrypt
-    depends_on:
-      - shape-matrix-bridge
     restart: unless-stopped
 
   router-agent:
@@ -144,4 +126,3 @@ volumes:
   shape-matrix-bridge-data:
   cert-data-cf:
   hermes-cert-data-cf:
-  shape-matrix-service-cert-data-cf:

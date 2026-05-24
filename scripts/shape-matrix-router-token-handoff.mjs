@@ -8,6 +8,8 @@ let token = process.env.MATRIX_ACCESS_TOKEN?.trim();
 let mintedDeviceId = '';
 const explicitDeviceId = process.env.MATRIX_DEVICE_ID?.trim();
 const loginDeviceId = process.env.MATRIX_LOGIN_DEVICE_ID?.trim();
+const registrationToken = process.env.MATRIX_REGISTRATION_TOKEN?.trim();
+const signupUrl = process.env.MATRIX_SIGNUP_URL?.trim() || (registrationToken ? `${matrixServerUrl.replace(/\/$/, '')}/signup/api` : '');
 const teleportRouterRepo = process.env.TELEPORT_ROUTER_REPO || 'jameslbarnes/teleport-router';
 const routerTeamworkRepo = process.env.ROUTER_TEAMWORK_REPO || 'teleport-computer/router-teamwork';
 const apply = process.env.SHAPE_MATRIX_TOKEN_HANDOFF_APPLY === '1';
@@ -73,6 +75,10 @@ async function matrixLogin() {
     fail(`/login returned non-JSON HTTP ${res.status}`);
   }
   if (!res.ok) {
+    if ((data.errcode === 'M_FORBIDDEN' || res.status === 403) && registrationToken && signupUrl) {
+      log(`/login for ${expectedUserId} failed with ${data.errcode || res.status}; trying signup wrapper`);
+      return matrixSignup(username, password);
+    }
     const code = data.errcode || data.error || `HTTP ${res.status}`;
     fail(`/login for ${expectedUserId} failed: ${code}`);
   }
@@ -80,6 +86,38 @@ async function matrixLogin() {
     fail(`/login returned ${data.user_id || '(missing user_id)'}, expected ${expectedUserId}`);
   }
   if (!data.access_token) fail('/login did not return access_token');
+  token = data.access_token;
+  mintedDeviceId = data.device_id || '';
+  return data;
+}
+
+async function matrixSignup(username, password) {
+  const res = await fetch(signupUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      code: registrationToken,
+      username,
+      password,
+      display_name: 'Shape Router',
+      intro: 'Shape Router Matrix bridge bot account',
+    }),
+  });
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    fail(`/signup wrapper returned non-JSON HTTP ${res.status}`);
+  }
+  if (!res.ok) {
+    const code = data.errcode || data.error || `HTTP ${res.status}`;
+    fail(`/signup wrapper for ${expectedUserId} failed: ${code}`);
+  }
+  if (data.user_id !== expectedUserId) {
+    fail(`/signup wrapper returned ${data.user_id || '(missing user_id)'}, expected ${expectedUserId}`);
+  }
+  if (!data.access_token) fail('/signup wrapper did not return access_token');
   token = data.access_token;
   mintedDeviceId = data.device_id || '';
   return data;

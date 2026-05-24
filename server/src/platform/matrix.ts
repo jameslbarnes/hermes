@@ -23,7 +23,7 @@ import {
   type MatrixClient,
   type ICreateClientOpts,
   type Room,
-  type MatrixEvent,
+  MatrixEvent,
   MatrixEventEvent,
   EventType,
   RelationType,
@@ -130,6 +130,7 @@ export const ROUTER_CHANNEL_STATE = 'com.router.channel';
 const MATRIX_AGENT_TRIGGER_REACTION_EMOJI = process.env.MATRIX_AGENT_TRIGGER_REACTION_EMOJI || '🪩';
 
 const ROUTER_DISCO_AVATAR_FILENAME = 'matrix-router-disco-avatar-mxc.txt';
+const ROOM_ENCRYPTION_CONTENT = { algorithm: 'm.megolm.v1.aes-sha2' } as const;
 
 const pngCrcTable = (() => {
   const table = new Uint32Array(256);
@@ -973,6 +974,14 @@ export class MatrixPlatform implements Platform {
     return result.event_id!;
   }
 
+  async sendMessageContent(roomId: string, content: Record<string, unknown>): Promise<string> {
+    if (!this.client) throw new Error('Matrix client not started');
+
+    await this.ensureRoomEncryptionConfigured(roomId);
+    const result = await this.client.sendMessage(roomId, content as any);
+    return result.event_id!;
+  }
+
   async sendDM(userId: string, text: string, opts?: SendMessageOptions): Promise<string> {
     const roomId = await this.findOrCreateDM(userId);
     return this.sendMessage(roomId, text, opts);
@@ -1018,9 +1027,9 @@ export class MatrixPlatform implements Platform {
     const initialState: any[] = [];
     if (opts.encrypted !== false) {
       initialState.push({
-        type: 'm.room.encryption',
+        type: EventType.RoomEncryption,
         state_key: '',
-        content: { algorithm: 'm.megolm.v1.aes-sha2' },
+        content: ROOM_ENCRYPTION_CONTENT,
       });
     }
     if (opts.type === 'channel') {
@@ -1144,6 +1153,8 @@ export class MatrixPlatform implements Platform {
         console.warn(`[Matrix] Failed to apply ${event.type} policy to #${channelId}:`, error);
       }
     }
+
+    await this.ensureRoomEncryptionState(roomId, `#${channelId}`);
   }
 
   private async ensureSpaceMembership(roomId: string, label: string): Promise<void> {
@@ -1203,6 +1214,11 @@ export class MatrixPlatform implements Platform {
       visibility: Visibility.Private,
       preset: Preset.PrivateChat,
       initial_state: [
+        {
+          type: EventType.RoomEncryption,
+          state_key: '',
+          content: ROOM_ENCRYPTION_CONTENT,
+        },
         {
           type: ROUTER_CHANNEL_STATE,
           state_key: '',
@@ -1276,6 +1292,7 @@ export class MatrixPlatform implements Platform {
     // We use m.room.message with custom fields instead of a custom event type
     // because custom types don't render at all in stock Element.
     // The Router Client checks for entry_id to render as a card.
+    await this.ensureRoomEncryptionConfigured(roomId);
     const result = await this.client.sendMessage(roomId, content);
     const eventId = result.event_id!;
 
@@ -1314,11 +1331,7 @@ export class MatrixPlatform implements Platform {
     }, '');
 
     // Also send a visible message
-    const result = await this.client.sendMessage(
-      roomId,
-      await this.createMessageContent(`**🔗 Connected:** ${spark.reason}`),
-    );
-    return result.event_id!;
+    return this.sendMessage(roomId, `**🔗 Connected:** ${spark.reason}`);
   }
 
   async getSparkRoomPair(roomId: string): Promise<{ sourceHandle: string; targetHandle: string } | null> {
@@ -1635,6 +1648,46 @@ export class MatrixPlatform implements Platform {
     if (!room || !encryptionEvent || typeof cryptoBackend?.onCryptoEvent !== 'function') return;
 
     await cryptoBackend.onCryptoEvent(room, encryptionEvent);
+  }
+
+  private async ensureRoomEncryptionState(roomId: string, label: string): Promise<void> {
+    if (!this.client) return;
+
+    const existingRoom = this.client.getRoom?.(roomId) || null;
+    if (this.roomIsEncrypted(existingRoom)) {
+      await this.ensureRoomEncryptionConfigured(roomId);
+      return;
+    }
+
+    try {
+      await this.client.sendStateEvent(
+        roomId,
+        EventType.RoomEncryption,
+        ROOM_ENCRYPTION_CONTENT,
+        '',
+      );
+      console.log(`[Matrix] Enabled encryption for ${label} (${roomId})`);
+    } catch (error) {
+      console.warn(`[Matrix] Failed to enable encryption for ${label} (${roomId}):`, error);
+      return;
+    }
+
+    const room = this.client.getRoom?.(roomId) || existingRoom;
+    if (!room) return;
+
+    const syncedEvent = this.getRoomStateEvent(room, EventType.RoomEncryption, '');
+    const encryptionEvent = syncedEvent || new MatrixEvent({
+      type: EventType.RoomEncryption,
+      state_key: '',
+      room_id: roomId,
+      sender: this.botUserId || undefined,
+      origin_server_ts: Date.now(),
+      content: ROOM_ENCRYPTION_CONTENT,
+    });
+    const cryptoBackend = (this.client as any).cryptoBackend;
+    if (typeof cryptoBackend?.onCryptoEvent === 'function') {
+      await cryptoBackend.onCryptoEvent(room, encryptionEvent);
+    }
   }
 
   private roomIsInConfiguredSpace(room: Room | null): boolean {

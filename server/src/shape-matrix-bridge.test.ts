@@ -23,9 +23,26 @@ import {
   relativeSinceMs,
   remember,
   rememberMessage,
+  startShapeMatrixService,
   stripBotAddressing,
   type BridgeState,
 } from './shape-matrix-bridge.js';
+
+async function withShapeMatrixService(matrix: any, fn: (baseUrl: string) => Promise<void>): Promise<void> {
+  const server = await startShapeMatrixService(matrix, {
+    host: '127.0.0.1',
+    port: 0,
+    serviceKey: 'test-service-key',
+  });
+  if (!server) throw new Error('test service did not start');
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('test service did not bind to a TCP port');
+  try {
+    await fn(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+}
 
 describe('Shape Matrix bridge helpers', () => {
   afterEach(() => {
@@ -40,6 +57,9 @@ describe('Shape Matrix bridge helpers', () => {
     delete process.env.SHAPE_MATRIX_AGENT_URL;
     delete process.env.SHAPE_MATRIX_AGENT_SECRET;
     delete process.env.SHAPE_MATRIX_AGENT_TIMEOUT_MS;
+    delete process.env.SHAPE_MATRIX_SERVICE_HOST;
+    delete process.env.SHAPE_MATRIX_SERVICE_KEY;
+    delete process.env.SHAPE_MATRIX_SERVICE_PORT;
     anthropicCreateMock.mockReset();
     vi.unstubAllGlobals();
   });
@@ -65,6 +85,80 @@ describe('Shape Matrix bridge helpers', () => {
     process.env.MATRIX_ACCESS_TOKEN = 'access-token';
     process.env.MATRIX_BOT_SECRET_KEY = 'stale-password-secret';
     expect(matrixBotSecretKey()).toBeUndefined();
+  });
+
+  it('requires service auth for the private Router Matrix service', async () => {
+    const matrix = {
+      sendMessageContent: vi.fn(async () => '$event'),
+    };
+
+    await withShapeMatrixService(matrix, async baseUrl => {
+      const response = await fetch(`${baseUrl}/rooms/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room_id: '!room:mtrx.test', text: 'hello' }),
+      });
+
+      expect(response.status).toBe(401);
+      expect(matrix.sendMessageContent).not.toHaveBeenCalled();
+    });
+  });
+
+  it('forwards Matrix room message content through the E2EE bridge service', async () => {
+    const matrix = {
+      sendMessageContent: vi.fn(async () => '$encrypted'),
+    };
+    const content = {
+      msgtype: 'm.text',
+      body: 'James Barnes (@specularist): linked entry',
+      'm.mentions': { user_ids: ['@specularist:matrix.org'] },
+      author_display_name: 'James Barnes',
+      author_matrix_user_id: '@specularist:matrix.org',
+    };
+
+    await withShapeMatrixService(matrix, async baseUrl => {
+      const response = await fetch(`${baseUrl}/rooms/message?key=test-service-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          room_id: '!botnoise:mtrx.test',
+          text: 'fallback text',
+          content,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ event_id: '$encrypted' });
+      expect(matrix.sendMessageContent).toHaveBeenCalledWith('!botnoise:mtrx.test', content);
+    });
+  });
+
+  it('exposes recent messages with private Router spark debounce options', async () => {
+    const matrix = {
+      queryRecentMessages: vi.fn(async () => [{
+        roomId: '!room:mtrx.test',
+        roomName: 'Bot Noise',
+        senderId: '@router:mtrx.test',
+        text: 'hello',
+        timestamp: 123,
+        isDM: false,
+      }]),
+    };
+
+    await withShapeMatrixService(matrix, async baseUrl => {
+      const response = await fetch(`${baseUrl}/recent-messages?key=test-service-key&since=100&limit=5&per_room_limit=2`);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        messages: [{ roomId: '!room:mtrx.test', text: 'hello' }],
+      });
+      expect(matrix.queryRecentMessages).toHaveBeenCalledWith({
+        since: 100,
+        limit: 5,
+        perRoomLimit: 2,
+        botScope: true,
+      });
+    });
   });
 
   it('parses summary windows from Matrix text', () => {

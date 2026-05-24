@@ -223,6 +223,12 @@ describe('MatrixPlatform channel rooms', () => {
       { join_rule: 'invite' },
       '',
     );
+    expect(sendStateEvent).toHaveBeenCalledWith(
+      '!books:mtrx.example.test',
+      EventType.RoomEncryption,
+      { algorithm: 'm.megolm.v1.aes-sha2' },
+      '',
+    );
   });
 
   it('attaches existing alias-backed rooms to the configured Matrix space', async () => {
@@ -287,6 +293,10 @@ describe('MatrixPlatform channel rooms', () => {
       visibility: 'private',
       preset: 'private_chat',
       initial_state: expect.arrayContaining([
+        expect.objectContaining({
+          type: EventType.RoomEncryption,
+          content: { algorithm: 'm.megolm.v1.aes-sha2' },
+        }),
         expect.objectContaining({
           type: 'm.room.join_rules',
           content: {
@@ -1579,6 +1589,44 @@ describe('MatrixPlatform post rendering', () => {
     expect(sendMessage).toHaveBeenCalledWith('!room:mtrx.example.test', expect.objectContaining({
       body: expect.stringContaining('@socrates1024:matrix.org'),
       formatted_body: expect.stringContaining('<a href="https://matrix.to/#/%40socrates1024%3Amatrix.org">@socrates1024:matrix.org</a>'),
+    }));
+  });
+
+  it('hydrates encrypted room state before posting custom Router entry messages', async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
+    const isEncryptionEnabledInRoom = vi.fn().mockResolvedValue(false);
+    const onCryptoEvent = vi.fn().mockResolvedValue(undefined);
+    const encryptionEvent = {
+      getContent: () => ({ algorithm: 'm.megolm.v1.aes-sha2' }),
+    };
+    const room = {
+      roomId: '!encrypted:mtrx.example.test',
+      currentState: {
+        getStateEvents: (type: string, stateKey: string) =>
+          type === EventType.RoomEncryption && stateKey === '' ? encryptionEvent : null,
+      },
+    };
+    const platform = createPlatform({ baseUrl: 'https://router.test' });
+    (platform as any).client = {
+      sendMessage,
+      getRoom: vi.fn().mockReturnValue(room),
+      getCrypto: vi.fn().mockReturnValue({ isEncryptionEnabledInRoom }),
+      cryptoBackend: { onCryptoEvent },
+    };
+
+    await expect(platform.postEntry('!encrypted:mtrx.example.test', {
+      id: 'entry-encrypted',
+      handle: 'alice',
+      pseudonym: 'Alice',
+      content: 'Encrypted entry body',
+      timestamp: Date.now(),
+    })).resolves.toBe('$event');
+
+    expect(isEncryptionEnabledInRoom).toHaveBeenCalledWith('!encrypted:mtrx.example.test');
+    expect(onCryptoEvent).toHaveBeenCalledWith(room, encryptionEvent);
+    expect(sendMessage).toHaveBeenCalledWith('!encrypted:mtrx.example.test', expect.objectContaining({
+      entry_id: 'entry-encrypted',
+      body: expect.stringContaining('Encrypted entry body'),
     }));
   });
 

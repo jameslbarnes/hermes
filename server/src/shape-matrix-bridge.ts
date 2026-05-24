@@ -8,6 +8,7 @@
 
 import 'dotenv/config';
 import { mkdir, readFile, writeFile } from 'fs/promises';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import Anthropic from '@anthropic-ai/sdk';
@@ -41,6 +42,23 @@ export type ShapeMatrixLinkStatus = {
     boundAt?: number;
   };
 };
+
+type ShapeMatrixServiceMatrix = Pick<
+  MatrixPlatform,
+  | 'sendMessage'
+  | 'sendMessageContent'
+  | 'sendEncryptedDM'
+  | 'createRoom'
+  | 'postSparkContext'
+  | 'getSparkRoomPair'
+  | 'queryRecentMessages'
+>;
+
+export interface ShapeMatrixServiceOptions {
+  port?: number;
+  host?: string;
+  serviceKey?: string;
+}
 
 const DEFAULT_SHAPE_ROUTER_URL = 'https://shaperotator.teleport.computer';
 const DEFAULT_MATRIX_SERVER_URL = 'https://mtrx.shaperotator.xyz';
@@ -110,6 +128,249 @@ function shapeMatrixAgentSecret(): string | undefined {
     || process.env.SHAPE_MATRIX_AGENT_SHARED_SECRET?.trim()
     || undefined
   );
+}
+
+function shapeMatrixServiceSecret(): string | undefined {
+  return process.env.SHAPE_MATRIX_SERVICE_KEY?.trim() || undefined;
+}
+
+function shapeMatrixServicePort(): number | null {
+  const raw = process.env.SHAPE_MATRIX_SERVICE_PORT?.trim();
+  if (!raw) return null;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
+    throw new Error('SHAPE_MATRIX_SERVICE_PORT must be a TCP port number');
+  }
+  return parsed;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+class ShapeMatrixServiceRequestError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function shapeMatrixServiceAuthKey(req: IncomingMessage, url: URL): string | null {
+  const fromQuery = url.searchParams.get('key')?.trim();
+  if (fromQuery) return fromQuery;
+
+  const authorization = req.headers.authorization || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
+function writeJson(res: ServerResponse, status: number, body: Record<string, unknown>): void {
+  const json = JSON.stringify(body);
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(json),
+  });
+  res.end(json);
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  const raw = Buffer.concat(chunks).toString('utf8').trim();
+  if (!raw) return {};
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new ShapeMatrixServiceRequestError(400, 'Request body must be valid JSON');
+  }
+  if (!isRecord(parsed)) {
+    throw new ShapeMatrixServiceRequestError(400, 'Request body must be a JSON object');
+  }
+  return parsed;
+}
+
+function requiredString(body: Record<string, unknown>, key: string): string {
+  const value = body[key];
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new ShapeMatrixServiceRequestError(400, `${key} is required`);
+  }
+  return value.trim();
+}
+
+function optionalString(body: Record<string, unknown>, key: string): string | undefined {
+  const value = body[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function stringArray(body: Record<string, unknown>, key: string): string[] {
+  const value = body[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter(item => typeof item === 'string' && item.trim()).map(item => item.trim());
+}
+
+function numericSearchParam(url: URL, key: string, fallback: number): number {
+  const raw = url.searchParams.get(key);
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) {
+    throw new ShapeMatrixServiceRequestError(400, `${key} must be a number`);
+  }
+  return parsed;
+}
+
+function roomMessageContent(body: Record<string, unknown>): Record<string, unknown> {
+  const text = optionalString(body, 'text') || '';
+  const rawContent = isRecord(body.content) ? { ...body.content } : {};
+  const content: Record<string, unknown> = rawContent;
+
+  if (typeof content.msgtype !== 'string' || !content.msgtype) {
+    content.msgtype = 'm.text';
+  }
+  if (typeof content.body !== 'string') {
+    content.body = text;
+  }
+  if (typeof content.body !== 'string' || !content.body) {
+    throw new ShapeMatrixServiceRequestError(400, 'text or content.body is required');
+  }
+
+  return content;
+}
+
+export async function handleShapeMatrixServiceRequest(
+  matrix: ShapeMatrixServiceMatrix,
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: Required<Pick<ShapeMatrixServiceOptions, 'serviceKey'>>,
+): Promise<void> {
+  const url = new URL(req.url || '/', 'http://shape-matrix-service.local');
+
+  if (req.method === 'GET' && url.pathname === '/health') {
+    writeJson(res, 200, { ok: true });
+    return;
+  }
+
+  const providedKey = shapeMatrixServiceAuthKey(req, url);
+  if (!providedKey || providedKey !== options.serviceKey) {
+    writeJson(res, 401, { error: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    if (req.method === 'POST' && url.pathname === '/rooms/message') {
+      const body = await readJsonBody(req);
+      const roomId = requiredString(body, 'room_id');
+      const content = roomMessageContent(body);
+      const eventId = await matrix.sendMessageContent(roomId, content);
+      writeJson(res, 200, { event_id: eventId });
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/dm') {
+      const body = await readJsonBody(req);
+      const userId = requiredString(body, 'user_id');
+      const text = requiredString(body, 'text');
+      const eventId = await matrix.sendEncryptedDM(userId, text, { format: 'markdown' });
+      writeJson(res, 200, { event_id: eventId });
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/spark-room') {
+      const body = await readJsonBody(req);
+      const name = requiredString(body, 'name');
+      const topic = optionalString(body, 'topic');
+      const room = await matrix.createRoom(name, {
+        type: 'group',
+        invite: stringArray(body, 'invite_user_ids'),
+        topic,
+        encrypted: true,
+        attachToSpace: true,
+      });
+      writeJson(res, 200, { room_id: room.id });
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/spark-context') {
+      const body = await readJsonBody(req);
+      const roomId = requiredString(body, 'room_id');
+      const eventId = await matrix.postSparkContext(roomId, {
+        sourceHandle: requiredString(body, 'source_handle'),
+        targetHandle: requiredString(body, 'target_handle'),
+        reason: requiredString(body, 'reason'),
+        evidence: Array.isArray(body.evidence) ? body.evidence as any : [],
+      });
+      writeJson(res, 200, { event_id: eventId });
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname.startsWith('/spark-room/')) {
+      const roomId = decodeURIComponent(url.pathname.slice('/spark-room/'.length));
+      if (!roomId) throw new ShapeMatrixServiceRequestError(400, 'room_id is required');
+      const pair = await matrix.getSparkRoomPair(roomId);
+      writeJson(res, 200, pair ? {
+        source_handle: pair.sourceHandle,
+        target_handle: pair.targetHandle,
+      } : {});
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/recent-messages') {
+      const messages = await matrix.queryRecentMessages({
+        since: numericSearchParam(url, 'since', Date.now() - 72 * 60 * 60 * 1000),
+        limit: numericSearchParam(url, 'limit', 160),
+        perRoomLimit: numericSearchParam(url, 'per_room_limit', 80),
+        botScope: true,
+      });
+      writeJson(res, 200, { messages });
+      return;
+    }
+
+    writeJson(res, 404, { error: 'Not found' });
+  } catch (error) {
+    const status = error instanceof ShapeMatrixServiceRequestError ? error.status : 500;
+    const message = error instanceof Error ? error.message : String(error);
+    log(`Matrix service ${req.method || 'GET'} ${url.pathname} failed: ${message}`);
+    writeJson(res, status, { error: message });
+  }
+}
+
+export async function startShapeMatrixService(
+  matrix: ShapeMatrixServiceMatrix,
+  options: ShapeMatrixServiceOptions = {},
+): Promise<Server | null> {
+  const port = options.port ?? shapeMatrixServicePort();
+  if (port == null) return null;
+
+  const serviceKey = options.serviceKey ?? shapeMatrixServiceSecret();
+  if (!serviceKey) {
+    throw new Error('SHAPE_MATRIX_SERVICE_KEY is required when SHAPE_MATRIX_SERVICE_PORT is set');
+  }
+
+  const host = options.host || process.env.SHAPE_MATRIX_SERVICE_HOST?.trim() || '0.0.0.0';
+  const server = createServer((req, res) => {
+    void handleShapeMatrixServiceRequest(matrix, req, res, { serviceKey });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, host, () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  const bound = typeof address === 'object' && address
+    ? `${address.address}:${address.port}`
+    : String(address);
+  log(`Shape Matrix service listening on ${bound}`);
+  return server;
 }
 
 export function matrixBotSecretKey(): string | undefined {
@@ -1117,9 +1378,11 @@ async function main(): Promise<void> {
   const onSigint = () => requestShutdown('SIGINT');
   process.once('SIGTERM', onSigterm);
   process.once('SIGINT', onSigint);
+  let serviceServer: Server | null = null;
 
   try {
     await matrix.start();
+    serviceServer = await startShapeMatrixService(matrix);
 
     const pollMs = parsePositiveInt('SHAPE_MATRIX_BRIDGE_POLL_MS', 1000);
     while (!shuttingDown) {
@@ -1154,6 +1417,11 @@ async function main(): Promise<void> {
   } finally {
     process.off('SIGTERM', onSigterm);
     process.off('SIGINT', onSigint);
+    if (serviceServer) {
+      await new Promise<void>(resolve => serviceServer?.close(() => resolve())).catch(error => {
+        log(`Matrix service close failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
     await mcpClient?.close().catch(error => {
       log(`Private MCP close failed: ${error instanceof Error ? error.message : String(error)}`);
     });

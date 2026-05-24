@@ -37,6 +37,7 @@ function run(command, args) {
 function checkEnv() {
   const missing = [];
   if (!present('SHAPE_ROUTER_SECRET_KEY')) missing.push('SHAPE_ROUTER_SECRET_KEY');
+  if (!present('SHAPE_MATRIX_SERVICE_KEY')) missing.push('SHAPE_MATRIX_SERVICE_KEY');
   if (!present('MATRIX_BOT_SECRET_KEY') && !present('MATRIX_ACCESS_TOKEN')) {
     missing.push('MATRIX_BOT_SECRET_KEY or MATRIX_ACCESS_TOKEN');
   }
@@ -50,6 +51,7 @@ function checkEnv() {
   log('checking environment names only; secret values are not printed');
   for (const name of [
     'SHAPE_ROUTER_SECRET_KEY',
+    'SHAPE_MATRIX_SERVICE_KEY',
     'MATRIX_BOT_SECRET_KEY',
     'MATRIX_ACCESS_TOKEN',
     'MATRIX_USER_ID',

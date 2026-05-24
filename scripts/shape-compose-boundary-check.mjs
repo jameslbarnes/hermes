@@ -16,6 +16,8 @@ const composeFiles = files.length > 0
 const privateShapeUrl = 'https://shaperotator.teleport.computer';
 const matrixUrl = 'https://mtrx.shaperotator.xyz';
 const matrixSpace = '!4FL8uL5OEYLATG1VH4wC2CD3pfIV6BMFId9VT7rmm-g';
+const shapeMatrixServiceDomain = 'shape-matrix-service.teleport.computer';
+const shapeMatrixServicePort = '8443';
 
 function log(message) {
   console.log(`[shape-compose-boundary] ${message}`);
@@ -172,8 +174,10 @@ function checkFile(file) {
   const router = services.router;
   const routerAgent = services['router-agent'];
   const bridge = services['shape-matrix-bridge'];
+  const serviceIngress = services['shape-matrix-service-ingress'];
   if (!router) fail(file, 'missing router service');
   if (!bridge) fail(file, 'missing shape-matrix-bridge service');
+  if (!serviceIngress) fail(file, 'missing shape-matrix-service-ingress service');
   assertNoLatestImages(file, services);
 
   const routerEnv = envOf(router);
@@ -210,6 +214,8 @@ function checkFile(file) {
   assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'SHAPE_MATRIX_ENABLE_ONBOARDING', '0');
   assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'SHAPE_MATRIX_AGENT_URL', 'http://router-agent:8091/matrix/event');
   assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'SHAPE_MATRIX_AGENT_SECRET');
+  assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'SHAPE_MATRIX_SERVICE_PORT', '8092');
+  assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'SHAPE_MATRIX_SERVICE_KEY');
   assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'MATRIX_SERVER_URL', matrixUrl);
   assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'MATRIX_SERVER_NAME', 'mtrx.shaperotator.xyz');
   assertEnv(file, 'shape-matrix-bridge', bridgeEnv, 'MATRIX_SPACE_ROOM_ID', matrixSpace);
@@ -219,6 +225,15 @@ function checkFile(file) {
   ]);
   if (!hasNamedVolume(bridge, 'shape-matrix-bridge-data', '/data')) {
     fail(file, 'shape-matrix-bridge must mount shape-matrix-bridge-data at /data');
+  }
+
+  const serviceIngressEnv = envOf(serviceIngress);
+  assertEnv(file, 'shape-matrix-service-ingress', serviceIngressEnv, 'DOMAIN', shapeMatrixServiceDomain);
+  assertEnv(file, 'shape-matrix-service-ingress', serviceIngressEnv, 'TARGET_ENDPOINT', 'http://shape-matrix-bridge:8092');
+  assertEnv(file, 'shape-matrix-service-ingress', serviceIngressEnv, 'PORT', shapeMatrixServicePort);
+  assertEnv(file, 'shape-matrix-service-ingress', serviceIngressEnv, 'CLOUDFLARE_API_TOKEN');
+  if (!hasNamedVolume(serviceIngress, 'shape-matrix-service-cert-data-cf', '/etc/letsencrypt')) {
+    fail(file, 'shape-matrix-service-ingress must mount shape-matrix-service-cert-data-cf at /etc/letsencrypt');
   }
 
   verifyBridgeImage(file, bridge);

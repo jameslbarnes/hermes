@@ -276,25 +276,31 @@ async function matrixRoomMessages(creds, roomId, limit = 200) {
   return body.chunk || [];
 }
 
-async function waitForBotNoiseMirror(sender, expectedText, timeoutMs = 45_000) {
+async function waitForBotNoiseMirror(sender, expectedText, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 45_000;
   const started = Date.now();
   let matches = [];
   while (Date.now() - started < timeoutMs) {
     const events = await matrixRoomMessages(sender, matrixBotNoiseRoomId);
-    matches = events.filter(event =>
-      event.type === 'm.room.message'
-      && typeof event.content?.body === 'string'
-      && event.content.body.includes(expectedText)
-    );
+    matches = opts.eventId
+      ? events.filter(event => event.event_id === opts.eventId)
+      : events.filter(event =>
+        event.type === 'm.room.message'
+        && typeof event.content?.body === 'string'
+        && event.content.body.includes(expectedText)
+      );
     if (matches.length > 0) break;
     await new Promise(resolve => setTimeout(resolve, 1500));
   }
   if (matches.length !== 1) {
-    throw new Error(`expected exactly one Bot Noise mirror for ${expectedText}, found ${matches.length}`);
+    throw new Error(`expected exactly one Bot Noise mirror for ${opts.eventId || expectedText}, found ${matches.length}`);
   }
   const [event] = matches;
   if (event.sender !== botMxid) {
     throw new Error(`Bot Noise mirror came from ${event.sender}, expected ${botMxid}`);
+  }
+  if (opts.requireEncrypted && event.type !== 'm.room.encrypted') {
+    throw new Error(`Bot Noise mirror ${event.event_id} was ${event.type}, expected m.room.encrypted`);
   }
   return event;
 }
@@ -317,8 +323,11 @@ async function verifyBotNoiseEntryMirror(sender) {
   if (mirrored.matrixMirrorRoomId !== matrixBotNoiseRoomId) {
     throw new Error(`private entry mirrored to ${mirrored.matrixMirrorRoomId || '(none)'}, expected ${matrixBotNoiseRoomId}`);
   }
-  const event = await waitForBotNoiseMirror(sender, marker);
-  log(`Bot Noise entry mirror ok entry=${entry.id} event=${event.event_id}`);
+  const event = await waitForBotNoiseMirror(sender, marker, {
+    eventId: mirrored.matrixMirrorEventId,
+    requireEncrypted: true,
+  });
+  log(`Bot Noise entry mirror ok entry=${entry.id} event=${event.event_id} type=${event.type}`);
 }
 
 async function resolveBotMxid() {

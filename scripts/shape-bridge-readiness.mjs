@@ -9,6 +9,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const requiredEnv = [
   'SHAPE_ROUTER_SECRET_KEY',
+  'SHAPE_MATRIX_SERVICE_KEY',
 ];
 
 const optionalEnv = [

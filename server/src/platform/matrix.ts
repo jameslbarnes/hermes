@@ -106,6 +106,16 @@ export interface MatrixHistoryQueryOptions {
   botScope?: boolean;
 }
 
+export interface MatrixRoomEventSnapshot {
+  roomId: string;
+  eventId: string;
+  sender?: string;
+  type?: string;
+  wireType?: string;
+  content?: Record<string, unknown>;
+  wireContent?: Record<string, unknown>;
+}
+
 export function deriveMatrixBotPassword(config: Pick<MatrixPlatformConfig, 'accessToken' | 'botSecretKey' | 'serverName'>): string | null {
   if (config.accessToken?.trim()) return null;
   return config.botSecretKey
@@ -357,6 +367,12 @@ function isMatrixUserId(value: string): boolean {
 function sameMatrixRoomId(a: string | null | undefined, b: string | null | undefined): boolean {
   if (!a || !b) return false;
   return a.split(':', 1)[0] === b.split(':', 1)[0];
+}
+
+function normalizeEventContent(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }
 
 function normalizeRouterHandle(value: string | undefined | null): string | null {
@@ -980,6 +996,35 @@ export class MatrixPlatform implements Platform {
     await this.ensureRoomEncryptionConfigured(roomId);
     const result = await this.client.sendMessage(roomId, content as any);
     return result.event_id!;
+  }
+
+  async getRoomEventSnapshot(roomId: string, eventId: string): Promise<MatrixRoomEventSnapshot> {
+    if (!this.client) throw new Error('Matrix client not started');
+
+    const localEvent = this.client.getRoom(roomId)?.findEventById?.(eventId) as MatrixEvent | undefined;
+    if (localEvent) {
+      const wireEvent = (localEvent as any).event || {};
+      return {
+        roomId,
+        eventId: localEvent.getId?.() || String(wireEvent.event_id || eventId),
+        sender: localEvent.getSender?.() || wireEvent.sender,
+        type: localEvent.getType?.() || wireEvent.type,
+        wireType: wireEvent.type,
+        content: normalizeEventContent(localEvent.getContent?.()),
+        wireContent: normalizeEventContent(wireEvent.content),
+      };
+    }
+
+    const rawEvent = await this.client.fetchRoomEvent(roomId, eventId);
+    return {
+      roomId,
+      eventId: String(rawEvent.event_id || eventId),
+      sender: rawEvent.sender,
+      type: rawEvent.type,
+      wireType: rawEvent.type,
+      content: normalizeEventContent(rawEvent.content),
+      wireContent: normalizeEventContent(rawEvent.content),
+    };
   }
 
   async sendDM(userId: string, text: string, opts?: SendMessageOptions): Promise<string> {

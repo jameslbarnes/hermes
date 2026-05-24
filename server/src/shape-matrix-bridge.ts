@@ -51,6 +51,7 @@ type ShapeMatrixServiceMatrix = Pick<
   | 'createRoom'
   | 'postSparkContext'
   | 'getSparkRoomPair'
+  | 'getRoomEventSnapshot'
   | 'queryRecentMessages'
 >;
 
@@ -328,6 +329,15 @@ export async function handleShapeMatrixServiceRequest(
         botScope: true,
       });
       writeJson(res, 200, { messages });
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/rooms/event') {
+      const roomId = url.searchParams.get('room_id')?.trim();
+      const eventId = url.searchParams.get('event_id')?.trim();
+      if (!roomId) throw new ShapeMatrixServiceRequestError(400, 'room_id is required');
+      if (!eventId) throw new ShapeMatrixServiceRequestError(400, 'event_id is required');
+      writeJson(res, 200, { ...await matrix.getRoomEventSnapshot(roomId, eventId) });
       return;
     }
 

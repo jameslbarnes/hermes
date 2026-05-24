@@ -161,6 +161,35 @@ describe('Shape Matrix bridge helpers', () => {
     });
   });
 
+  it('exposes authenticated Matrix event snapshots for live mirror verification', async () => {
+    const matrix = {
+      getRoomEventSnapshot: vi.fn(async () => ({
+        roomId: '!botnoise:mtrx.test',
+        eventId: '$event',
+        sender: '@router:mtrx.test',
+        type: 'm.room.message',
+        wireType: 'm.room.encrypted',
+        content: {
+          body: 'James Barnes (@specularist): linked entry',
+          author_matrix_user_id: '@specularist:matrix.org',
+          'm.mentions': { user_ids: ['@specularist:matrix.org'] },
+        },
+      })),
+    };
+
+    await withShapeMatrixService(matrix, async baseUrl => {
+      const response = await fetch(`${baseUrl}/rooms/event?key=test-service-key&room_id=${encodeURIComponent('!botnoise:mtrx.test')}&event_id=${encodeURIComponent('$event')}`);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        sender: '@router:mtrx.test',
+        wireType: 'm.room.encrypted',
+        content: { author_matrix_user_id: '@specularist:matrix.org' },
+      });
+      expect(matrix.getRoomEventSnapshot).toHaveBeenCalledWith('!botnoise:mtrx.test', '$event');
+    });
+  });
+
   it('parses summary windows from Matrix text', () => {
     expect(relativeSinceMs('summarize this room 15m')).toBe(15 * 60 * 1000);
     expect(relativeSinceMs('summarize this room 7d')).toBe(7 * 24 * 60 * 60 * 1000);

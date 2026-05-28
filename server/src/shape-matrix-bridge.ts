@@ -493,11 +493,24 @@ function isNotebookOnlyAgentRequest(text: string): boolean {
 
 function shouldAttachMatrixContext(text: string): boolean {
   if (isNotebookOnlyAgentRequest(text)) return false;
-  return /\b(?:matrix server|matrix rooms?|this room|the room|room|here|above|thread|conversation|chat|what happened|what's happened|what has happened|what did i miss|recap|lately|recently|today|yesterday)\b/i.test(text);
+  return referencesNamedMatrixRoom(text)
+    || /\b(?:matrix server|matrix rooms?|this room|the room|room|here|above|thread|conversation|chat|messages?|what happened|what's happened|what has happened|what did i miss|recap|lately|recently|today|yesterday)\b/i.test(text);
 }
 
 function wantsMatrixWideContext(text: string): boolean {
+  if (referencesNamedMatrixRoom(text)) return true;
   return /\b(?:matrix server|matrix rooms?|across matrix|all rooms|lately|recently)\b/i.test(text);
+}
+
+function referencesNamedMatrixRoom(text: string): boolean {
+  const lower = text.toLowerCase();
+  if (/\B#[a-z0-9][a-z0-9_-]{1,40}\b/.test(lower)) return true;
+  if (/\b(?:room|channel|chat)\s+(?:called|named)\s+["']?[a-z0-9][a-z0-9 _-]{1,80}["']?/i.test(text)) return true;
+  if (/\b(?:in|inside)\s+(?!this\b|the\b|current\b|our\b|a\b|an\b|matrix\b|router\b|notebook\b)[a-z0-9][a-z0-9_-]*(?:\s+[a-z0-9][a-z0-9_-]*){0,4}\b/.test(lower)) {
+    return /\b(?:matrix|room|channel|chat|conversation|thread|messages?|posts?|posted|said)\b/i.test(text);
+  }
+
+  return false;
 }
 
 function serializeMatrixContextMessage(message: MatrixHistoryMessage): Record<string, unknown> {
@@ -521,9 +534,10 @@ async function buildAgentMatrixContext(matrix: MatrixPlatform, event: RouterEven
   const data = event.data || {};
   const roomId = String(data.room_id || '');
   const isDM = data.is_dm === true;
+  const namedRoomReference = referencesNamedMatrixRoom(text);
   const matrixWide = wantsMatrixWideContext(text);
   const windowMs = relativeSinceMs(text) || 48 * 60 * 60 * 1000;
-  const limit = parsePositiveInt('SHAPE_MATRIX_AGENT_CONTEXT_LIMIT', matrixWide ? 60 : 40);
+  const limit = parsePositiveInt('SHAPE_MATRIX_AGENT_CONTEXT_LIMIT', namedRoomReference ? 120 : (matrixWide ? 60 : 40));
   const perRoomLimit = parsePositiveInt('SHAPE_MATRIX_AGENT_CONTEXT_PER_ROOM_LIMIT', matrixWide ? 80 : 100);
 
   const messages = await matrix.queryRecentMessages({
@@ -539,6 +553,14 @@ async function buildAgentMatrixContext(matrix: MatrixPlatform, event: RouterEven
 
   return {
     source: 'live Matrix search by shape-matrix-bridge',
+    tool_description: matrixWide
+      ? 'Recent Matrix history search across non-DM rooms the Matrix bot has joined. This is not limited to the current DM. DMs are never searched broadly; current-DM history is only included for current-room DM requests.'
+      : 'Recent Matrix history search for the current Matrix room. If the current room is a DM, only that current DM is included.',
+    instructions: [
+      'Use room_name and room_alias to answer requests about named rooms or channels.',
+      'If search_performed is true, do not say you lack Matrix room search access; use the attached results and say when no relevant recent messages were found.',
+      'Use private Router notebook tools for notebook entries; use this Matrix context for raw Matrix room conversation.',
+    ],
     scope: matrixWide ? 'joined non-DM Matrix rooms' : 'current Matrix room',
     room_id: matrixWide ? undefined : roomId,
     since: new Date(Date.now() - windowMs).toISOString(),

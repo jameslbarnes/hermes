@@ -871,6 +871,76 @@ describe('Shape Matrix bridge helpers', () => {
     }));
   });
 
+  it('treats named room references as joined-room Matrix searches instead of current-DM context', async () => {
+    process.env.SHAPE_MATRIX_AGENT_URL = 'http://shape-agent.test/matrix/event';
+
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.event.data.matrix_context).toEqual(expect.objectContaining({
+        scope: 'joined non-DM Matrix rooms',
+        message_count: 2,
+        tool_description: expect.stringContaining('non-DM rooms the Matrix bot has joined'),
+      }));
+      expect(body.event.data.matrix_context).not.toHaveProperty('room_filter');
+      expect(body.event.data.matrix_context.messages).toEqual([
+        expect.objectContaining({
+          room_name: 'General',
+          sender_handle: 'carol',
+          text: 'Unrelated General post.',
+        }),
+        expect.objectContaining({
+          room_name: 'Design Lab',
+          sender_handle: 'albi',
+          text: 'Recent Design Lab post from Albi.',
+        }),
+      ]);
+      return new Response(JSON.stringify({ reply: 'I found Albi in Design Lab.' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }));
+
+    const matrix = {
+      maxMessageLength: 65536,
+      queryRecentMessages: vi.fn(async () => [
+        {
+          roomId: '!general:matrix.test',
+          roomName: 'General',
+          senderId: '@carol:matrix.test',
+          senderHandle: 'carol',
+          text: 'Unrelated General post.',
+          timestamp: 1000,
+          isDM: false,
+        },
+        {
+          roomId: '!designlab:matrix.test',
+          roomName: 'Design Lab',
+          senderId: '@albi:matrix.test',
+          senderHandle: 'albi',
+          text: 'Recent Design Lab post from Albi.',
+          timestamp: 2000,
+          isDM: false,
+        },
+      ]),
+      sendMessage: vi.fn(async () => '$reply'),
+    };
+
+    await handleMention(matrix as any, null, matrixMentionEvent("can you find Albi's recent post in design lab?", true));
+
+    expect(matrix.queryRecentMessages).toHaveBeenCalledWith(expect.objectContaining({
+      roomIds: undefined,
+      includeDMs: false,
+      viewerUserId: undefined,
+      spaceOnly: false,
+      botScope: true,
+    }));
+    expect(matrix.sendMessage).toHaveBeenCalledWith(
+      '!room:matrix.test',
+      'I found Albi in Design Lab.',
+      expect.objectContaining({ replyTo: '$mention' }),
+    );
+  });
+
   it('lets the private Hermes agent handle notebook-summary requests', async () => {
     process.env.SHAPE_MATRIX_AGENT_URL = 'http://shape-agent.test/matrix/event';
 

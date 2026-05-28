@@ -311,6 +311,20 @@ jobs:
           export EXPECTED_GIT_SHA="$(echo "$EXPECTED_GIT_SHA" | cut -c1-7)"
           bash scripts/verify-phala-deploy.sh
 
+      - name: Run deployed Shape Matrix DM smoke
+        env:
+          SHAPE_ROUTER_SECRET_KEY: ${{ secrets.SHAPE_ROUTER_SECRET_KEY }}
+          SHAPE_MATRIX_SMOKE_RUNNING_BRIDGE: '1'
+          SHAPE_MATRIX_SMOKE_PROVISION_SENDER: '1'
+          SHAPE_MATRIX_SMOKE_SENTINEL: shape-router-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+          SHAPE_MATRIX_SMOKE_WORKDIR: /tmp/shape-matrix-live-smoke-${{ github.run_id }}
+          MATRIX_SERVER_URL: https://mtrx.shaperotator.xyz
+          MATRIX_SERVER_NAME: mtrx.shaperotator.xyz
+          MATRIX_USER_ID: ${{ secrets.MATRIX_USER_ID }}
+          MATRIX_BOT_HANDLE: ${{ secrets.MATRIX_BOT_HANDLE }}
+          MATRIX_SMOKE_SIGNUP_CODE: ${{ secrets.MATRIX_REGISTRATION_TOKEN }}
+        run: node scripts/shape-matrix-live-smoke.mjs
+
       - name: Archive evidences
         run: |
           TEE_HOST="${{ secrets.PHALA_APP_ID }}-8090.dstack-pha-prod9.phala.network"

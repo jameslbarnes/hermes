@@ -1223,6 +1223,8 @@ describe('MatrixPlatform agent trigger reactions', () => {
           getStateEvents: vi.fn((eventType: string, stateKey: string) =>
             eventType === EventType.SpaceParent && stateKey === '!space:mtrx.example.test'
               ? { getContent: () => ({ via: ['mtrx.example.test'] }) }
+              : eventType === EventType.RoomName && stateKey === ''
+                ? { getContent: () => ({ name: 'Shape Router mention smoke' }) }
               : null,
           ),
         },
@@ -1253,6 +1255,50 @@ describe('MatrixPlatform agent trigger reactions', () => {
         message_id: '$structured-mention',
         text: '@router search shape-matrix-live-smoke',
         is_dm: false,
+      },
+    });
+  });
+
+  it('treats unnamed two-member space-child rooms as DMs when m.direct metadata is missing', async () => {
+    resetEvents();
+    const sendEvent = vi.fn().mockResolvedValue({ event_id: '$reaction' });
+    const platform = createPlatform({ spaceRoomId: '!space:mtrx.example.test' });
+    (platform as any).botUserId = '@router:mtrx.example.test';
+    (platform as any).client = {
+      getRoom: vi.fn().mockReturnValue({
+        ...fakeRoom(['@router:mtrx.example.test', '@alice:mtrx.example.test']),
+        currentState: {
+          getStateEvents: vi.fn((eventType: string, stateKey: string) =>
+            eventType === EventType.SpaceParent && stateKey === '!space:mtrx.example.test'
+              ? { getContent: () => ({ via: ['mtrx.example.test'] }) }
+              : null,
+          ),
+        },
+      }),
+      getAccountData: vi.fn().mockReturnValue(undefined),
+      setAccountData: vi.fn().mockResolvedValue({}),
+      sendEvent,
+    };
+
+    (platform as any).handleIncomingMessageEvent(fakeIncomingEvent({
+      id: '$space-child-dm',
+      text: 'help',
+    }));
+
+    await vi.waitFor(() => {
+      expect(sendEvent).toHaveBeenCalled();
+    });
+
+    const events = getEventsSince(0);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'platform_mention',
+      data: {
+        platform: 'matrix',
+        room_id: '!room:mtrx.example.test',
+        message_id: '$space-child-dm',
+        text: 'help',
+        is_dm: true,
       },
     });
   });

@@ -1649,10 +1649,26 @@ export class MatrixPlatform implements Platform {
     }
 
     if (this.roomIsInConfiguredSpace(room)) {
-      return false;
+      return this.roomLooksLikeUnnamedDirectPair(senderId, room);
     }
 
     return room ? room.getJoinedMemberCount() === 2 : false;
+  }
+
+  private roomHasExplicitNameOrAlias(room: Room | null): boolean {
+    if (!room) return false;
+    const nameEvent = this.getRoomStateEvent(room, EventType.RoomName, '');
+    if (nameEvent) return true;
+    return !!this.getRoomAlias(room);
+  }
+
+  private roomLooksLikeUnnamedDirectPair(senderId: string, room: Room | null): boolean {
+    if (!room) return false;
+    if (room.getJoinedMemberCount() !== 2) return false;
+    if (this.roomHasExplicitNameOrAlias(room)) return false;
+    if (!this.roomHasMember(room, senderId)) return false;
+    if (!this.roomHasMember(room, this.botUserId)) return false;
+    return true;
   }
 
   private roomHasMember(room: Room | null, userId: string | null | undefined): boolean {

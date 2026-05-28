@@ -15,7 +15,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { getEventsSince, getLatestCursor, type RouterEvent } from './events.js';
-import { MatrixPlatform, type MatrixHistoryMessage } from './platform/matrix.js';
+import { MatrixPlatform, type MatrixHistoryMessage, type MatrixJoinedRoom } from './platform/matrix.js';
 
 export type BridgeState = {
   cursor: number;
@@ -52,6 +52,7 @@ type ShapeMatrixServiceMatrix = Pick<
   | 'postSparkContext'
   | 'getSparkRoomPair'
   | 'getRoomEventSnapshot'
+  | 'listJoinedRooms'
   | 'queryRecentMessages'
 >;
 
@@ -506,11 +507,34 @@ function referencesNamedMatrixRoom(text: string): boolean {
   const lower = text.toLowerCase();
   if (/\B#[a-z0-9][a-z0-9_-]{1,40}\b/.test(lower)) return true;
   if (/\b(?:room|channel|chat)\s+(?:called|named)\s+["']?[a-z0-9][a-z0-9 _-]{1,80}["']?/i.test(text)) return true;
+  const explicitNamedRoom = lower.match(/\b(?:in|inside|from|within)\s+(?:the\s+)?([a-z0-9][a-z0-9_-]*(?:\s+[a-z0-9][a-z0-9_-]*){0,5})\s+(?:room|channel|chat)\b/);
+  if (explicitNamedRoom) {
+    const name = explicitNamedRoom[1].trim();
+    if (!/^(?:this|current|our|matrix|router|notebook)$/.test(name)) return true;
+  }
   if (/\b(?:in|inside)\s+(?!this\b|the\b|current\b|our\b|a\b|an\b|matrix\b|router\b|notebook\b)[a-z0-9][a-z0-9_-]*(?:\s+[a-z0-9][a-z0-9_-]*){0,4}\b/.test(lower)) {
     return /\b(?:matrix|room|channel|chat|conversation|thread|messages?|posts?|posted|said)\b/i.test(text);
   }
 
   return false;
+}
+
+function serializeJoinedRoom(room: MatrixJoinedRoom): Record<string, unknown> {
+  return {
+    room_id: room.roomId,
+    room_name: room.roomName,
+    room_alias: room.roomAlias,
+    is_dm: room.isDM,
+    in_space: room.inSpace,
+  };
+}
+
+function joinedRoomsDescription(rooms: MatrixJoinedRoom[]): string {
+  if (rooms.length === 0) return 'No joined non-DM Matrix rooms are currently visible to the bridge.';
+  return rooms
+    .slice(0, 40)
+    .map(room => `${room.roomName}${room.roomAlias ? ` (${room.roomAlias})` : ''} [${room.roomId}]`)
+    .join('; ');
 }
 
 function serializeMatrixContextMessage(message: MatrixHistoryMessage): Record<string, unknown> {
@@ -539,6 +563,9 @@ async function buildAgentMatrixContext(matrix: MatrixPlatform, event: RouterEven
   const windowMs = relativeSinceMs(text) || 48 * 60 * 60 * 1000;
   const limit = parsePositiveInt('SHAPE_MATRIX_AGENT_CONTEXT_LIMIT', namedRoomReference ? 120 : (matrixWide ? 60 : 40));
   const perRoomLimit = parsePositiveInt('SHAPE_MATRIX_AGENT_CONTEXT_PER_ROOM_LIMIT', matrixWide ? 80 : 100);
+  const joinedRooms = typeof matrix.listJoinedRooms === 'function'
+    ? matrix.listJoinedRooms({ includeDMs: false, spaceOnly: false })
+    : [];
 
   const messages = await matrix.queryRecentMessages({
     roomIds: matrixWide || !roomId ? undefined : [roomId],
@@ -554,13 +581,15 @@ async function buildAgentMatrixContext(matrix: MatrixPlatform, event: RouterEven
   return {
     source: 'live Matrix search by shape-matrix-bridge',
     tool_description: matrixWide
-      ? 'Recent Matrix history search across non-DM rooms the Matrix bot has joined. This is not limited to the current DM. DMs are never searched broadly; current-DM history is only included for current-room DM requests.'
+      ? `Recent Matrix history search across non-DM rooms the Matrix bot has joined. This is not limited to the current DM. Joined non-DM rooms visible to Hermes: ${joinedRoomsDescription(joinedRooms)}. DMs are never searched broadly; current-DM history is only included for current-room DM requests.`
       : 'Recent Matrix history search for the current Matrix room. If the current room is a DM, only that current DM is included.',
     instructions: [
+      'The available_rooms field is the list of non-DM Matrix rooms the bot is currently joined to and can search for recent history.',
       'Use room_name and room_alias to answer requests about named rooms or channels.',
       'If search_performed is true, do not say you lack Matrix room search access; use the attached results and say when no relevant recent messages were found.',
       'Use private Router notebook tools for notebook entries; use this Matrix context for raw Matrix room conversation.',
     ],
+    available_rooms: joinedRooms.map(serializeJoinedRoom),
     scope: matrixWide ? 'joined non-DM Matrix rooms' : 'current Matrix room',
     room_id: matrixWide ? undefined : roomId,
     since: new Date(Date.now() - windowMs).toISOString(),

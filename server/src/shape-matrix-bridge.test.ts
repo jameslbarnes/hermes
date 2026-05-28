@@ -879,7 +879,17 @@ describe('Shape Matrix bridge helpers', () => {
       expect(body.event.data.matrix_context).toEqual(expect.objectContaining({
         scope: 'joined non-DM Matrix rooms',
         message_count: 2,
-        tool_description: expect.stringContaining('non-DM rooms the Matrix bot has joined'),
+        tool_description: expect.stringContaining('Joined non-DM rooms visible to Hermes: Design Lab'),
+        available_rooms: [
+          expect.objectContaining({
+            room_name: 'Design Lab',
+            room_id: '!designlab:matrix.test',
+          }),
+          expect.objectContaining({
+            room_name: 'General',
+            room_id: '!general:matrix.test',
+          }),
+        ],
       }));
       expect(body.event.data.matrix_context).not.toHaveProperty('room_filter');
       expect(body.event.data.matrix_context.messages).toEqual([
@@ -902,6 +912,20 @@ describe('Shape Matrix bridge helpers', () => {
 
     const matrix = {
       maxMessageLength: 65536,
+      listJoinedRooms: vi.fn(() => [
+        {
+          roomId: '!designlab:matrix.test',
+          roomName: 'Design Lab',
+          isDM: false,
+          inSpace: true,
+        },
+        {
+          roomId: '!general:matrix.test',
+          roomName: 'General',
+          isDM: false,
+          inSpace: true,
+        },
+      ]),
       queryRecentMessages: vi.fn(async () => [
         {
           roomId: '!general:matrix.test',
@@ -925,8 +949,12 @@ describe('Shape Matrix bridge helpers', () => {
       sendMessage: vi.fn(async () => '$reply'),
     };
 
-    await handleMention(matrix as any, null, matrixMentionEvent("can you find Albi's recent post in design lab?", true));
+    await handleMention(matrix as any, null, matrixMentionEvent("can you look in the design lab room for Albi's recent post?", true));
 
+    expect(matrix.listJoinedRooms).toHaveBeenCalledWith({
+      includeDMs: false,
+      spaceOnly: false,
+    });
     expect(matrix.queryRecentMessages).toHaveBeenCalledWith(expect.objectContaining({
       roomIds: undefined,
       includeDMs: false,

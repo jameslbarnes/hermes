@@ -1037,6 +1037,39 @@ describe('MatrixPlatform history queries', () => {
     });
   });
 
+  it('lists joined non-DM rooms for Hermes Matrix tool context', async () => {
+    const platform = createPlatform();
+    (platform as any).botUserId = '@router:mtrx.example.test';
+    const joinedRoom = fakeHistoryRoom('!outside:mtrx.example.test', {
+      name: 'Design Lab',
+      alias: '#design-lab:mtrx.example.test',
+      members: ['@router:mtrx.example.test', '@alice:mtrx.example.test', '@bob:mtrx.example.test'],
+    });
+    const dmRoom = fakeHistoryRoom('!dm-visible:mtrx.example.test', {
+      name: 'James DM',
+      members: ['@router:mtrx.example.test', '@james:matrix.org'],
+    });
+    const spaceRoom = fakeHistoryRoom('!space:mtrx.example.test', {
+      members: ['@router:mtrx.example.test'],
+    });
+
+    (platform as any).client = {
+      getRooms: vi.fn().mockReturnValue([joinedRoom, dmRoom, spaceRoom]),
+      getRoom: vi.fn().mockReturnValue(null),
+      getAccountData: vi.fn().mockReturnValue(undefined),
+    };
+
+    expect(platform.listJoinedRooms({ includeDMs: false, spaceOnly: false })).toEqual([
+      {
+        roomId: '!outside:mtrx.example.test',
+        roomName: 'Design Lab',
+        roomAlias: '#design-lab:mtrx.example.test',
+        isDM: false,
+        inSpace: false,
+      },
+    ]);
+  });
+
   it('allows Router bot scope to read a specific current DM room only when requested', async () => {
     const platform = createPlatform();
     const now = Date.now();

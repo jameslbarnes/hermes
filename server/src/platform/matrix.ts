@@ -92,6 +92,14 @@ export interface MatrixHistoryMessage {
   permalink?: string;
 }
 
+export interface MatrixJoinedRoom {
+  roomId: string;
+  roomName: string;
+  roomAlias?: string | null;
+  isDM: boolean;
+  inSpace: boolean;
+}
+
 export interface MatrixHistoryQueryOptions {
   query?: string;
   since?: number;
@@ -104,6 +112,11 @@ export interface MatrixHistoryQueryOptions {
   roomIds?: string[];
   perRoomLimit?: number;
   botScope?: boolean;
+}
+
+export interface MatrixJoinedRoomListOptions {
+  includeDMs?: boolean;
+  spaceOnly?: boolean;
 }
 
 export interface MatrixRoomEventSnapshot {
@@ -1827,6 +1840,41 @@ export class MatrixPlatform implements Platform {
       if (after <= before) return;
       attempts++;
     }
+  }
+
+  listJoinedRooms(opts: MatrixJoinedRoomListOptions = {}): MatrixJoinedRoom[] {
+    if (!this.client) return [];
+
+    const includeDMs = opts.includeDMs === true;
+    const spaceOnly = opts.spaceOnly === true;
+    const rooms = this.client.getRooms?.() || [];
+    const joinedRooms: MatrixJoinedRoom[] = [];
+
+    for (const room of rooms) {
+      if (room.getMyMembership?.() !== KnownMembership.Join) continue;
+      if (room.roomId === this.config.spaceRoomId) continue;
+
+      const inSpace = this.roomIsInConfiguredSpace(room);
+      if (spaceOnly && !inSpace) continue;
+
+      const otherMember = (room.getJoinedMembers?.() || [])
+        .map(member => member.userId)
+        .find(userId => userId && userId !== this.botUserId);
+      const isDM = otherMember ? this.isDirectMessageRoom(otherMember, room.roomId, room) : false;
+      if (isDM && !includeDMs) continue;
+
+      joinedRooms.push({
+        roomId: room.roomId,
+        roomName: this.getRoomDisplayName(room),
+        roomAlias: this.getRoomAlias(room),
+        isDM,
+        inSpace,
+      });
+    }
+
+    return joinedRooms.sort((a, b) =>
+      (a.roomName || a.roomAlias || a.roomId).localeCompare(b.roomName || b.roomAlias || b.roomId),
+    );
   }
 
   async queryRecentMessages(opts: MatrixHistoryQueryOptions = {}): Promise<MatrixHistoryMessage[]> {

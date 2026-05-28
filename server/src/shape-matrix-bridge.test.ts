@@ -784,7 +784,7 @@ describe('Shape Matrix bridge helpers', () => {
       expect(body.event.data.text).toBe('what has been happening in the matrix server lately?');
       expect(body.event.data.matrix_context).toEqual(expect.objectContaining({
         source: 'live Matrix search by shape-matrix-bridge',
-        scope: 'visible Matrix rooms',
+        scope: 'joined non-DM Matrix rooms',
         search_performed: true,
         message_count: 2,
       }));
@@ -828,13 +828,47 @@ describe('Shape Matrix bridge helpers', () => {
     expect(matrix.queryRecentMessages).toHaveBeenCalledWith(expect.objectContaining({
       roomIds: undefined,
       includeDMs: false,
-      viewerUserId: '@alice:matrix.test',
+      viewerUserId: undefined,
+      spaceOnly: false,
+      botScope: true,
     }));
     expect(matrix.sendMessage).toHaveBeenCalledWith(
       '!room:matrix.test',
       'I checked Matrix directly: earlier and later context.',
       expect.objectContaining({ replyTo: '$mention' }),
     );
+  });
+
+  it('does not include DMs when Hermes asks for Matrix-server context from a DM', async () => {
+    process.env.SHAPE_MATRIX_AGENT_URL = 'http://shape-agent.test/matrix/event';
+
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.event.data.matrix_context).toEqual(expect.objectContaining({
+        scope: 'joined non-DM Matrix rooms',
+        message_count: 0,
+      }));
+      return new Response(JSON.stringify({ reply: 'No broad DM history included.' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }));
+
+    const matrix = {
+      maxMessageLength: 65536,
+      queryRecentMessages: vi.fn(async () => []),
+      sendMessage: vi.fn(async () => '$reply'),
+    };
+
+    await handleMention(matrix as any, null, matrixMentionEvent('what happened on the matrix server lately?', true));
+
+    expect(matrix.queryRecentMessages).toHaveBeenCalledWith(expect.objectContaining({
+      roomIds: undefined,
+      includeDMs: false,
+      viewerUserId: undefined,
+      spaceOnly: false,
+      botScope: true,
+    }));
   });
 
   it('lets the private Hermes agent handle notebook-summary requests', async () => {

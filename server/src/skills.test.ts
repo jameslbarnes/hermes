@@ -1,7 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MemoryStorage, type Skill, type SkillParameter } from './storage.js';
 import { hashSecretKey } from './identity.js';
-import { SYSTEM_SKILLS, validateSkillName, buildSkillInputSchema, buildSkillDescription, generateSkillId } from './http.js';
+import {
+  SYSTEM_SKILLS,
+  validateSkillName,
+  buildSkillInputSchema,
+  buildSkillDescription,
+  generateSkillId,
+  canUseMatrixBotScopeSearch,
+  getMatrixBotScopeSearchHandles,
+} from './http.js';
 
 describe('Skills System', () => {
   let storage: MemoryStorage;
@@ -38,6 +46,24 @@ describe('Skills System', () => {
       expect(skill!.inputSchema?.properties?.since).toBeDefined();
       expect(skill!.inputSchema?.properties?.query).toBeDefined();
       expect(skill!.description).toContain('Use this liberally');
+    });
+
+    it('allows configured Router/Hermes agent handles to use Matrix bot-scope search', () => {
+      const env = {
+        ROUTER_AGENT_HANDLE: 'router',
+        HERMES_AGENT_HANDLE: 'hermes',
+        ROUTER_MATRIX_BOT_SCOPE_HANDLES: 'matrix_agent',
+      };
+
+      expect(getMatrixBotScopeSearchHandles(env)).toEqual([
+        'matrix_agent',
+        'router',
+        'hermes',
+        'router_agent',
+      ]);
+      expect(canUseMatrixBotScopeSearch({ handle: 'hermes' }, env)).toBe(true);
+      expect(canUseMatrixBotScopeSearch({ handle: 'router_agent' }, env)).toBe(true);
+      expect(canUseMatrixBotScopeSearch({ handle: 'alice' }, env)).toBe(false);
     });
 
     it('should have router_send_dm as a system skill', () => {

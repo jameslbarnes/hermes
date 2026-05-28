@@ -521,7 +521,7 @@ async function buildAgentMatrixContext(matrix: MatrixPlatform, event: RouterEven
   const data = event.data || {};
   const roomId = String(data.room_id || '');
   const isDM = data.is_dm === true;
-  const matrixWide = wantsMatrixWideContext(text) && !isDM;
+  const matrixWide = wantsMatrixWideContext(text);
   const windowMs = relativeSinceMs(text) || 48 * 60 * 60 * 1000;
   const limit = parsePositiveInt('SHAPE_MATRIX_AGENT_CONTEXT_LIMIT', matrixWide ? 60 : 40);
   const perRoomLimit = parsePositiveInt('SHAPE_MATRIX_AGENT_CONTEXT_PER_ROOM_LIMIT', matrixWide ? 80 : 100);
@@ -531,13 +531,15 @@ async function buildAgentMatrixContext(matrix: MatrixPlatform, event: RouterEven
     since: Date.now() - windowMs,
     limit,
     perRoomLimit,
-    includeDMs: isDM,
-    viewerUserId: String(data.sender_id || ''),
+    includeDMs: !matrixWide && isDM,
+    viewerUserId: matrixWide ? undefined : String(data.sender_id || ''),
+    spaceOnly: matrixWide ? false : undefined,
+    botScope: matrixWide,
   });
 
   return {
     source: 'live Matrix search by shape-matrix-bridge',
-    scope: matrixWide ? 'visible Matrix rooms' : 'current Matrix room',
+    scope: matrixWide ? 'joined non-DM Matrix rooms' : 'current Matrix room',
     room_id: matrixWide ? undefined : roomId,
     since: new Date(Date.now() - windowMs).toISOString(),
     search_performed: true,

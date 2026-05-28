@@ -112,6 +112,36 @@ const MODERATOR_HANDLES = new Set(
   (process.env.MODERATOR_HANDLES || '').split(',').map(h => h.trim()).filter(Boolean)
 );
 
+type MatrixBotScopeEnv = Record<string, string | undefined>;
+
+function normalizeHandleList(raw: string | undefined): string[] {
+  return (raw || '')
+    .split(',')
+    .map(handle => normalizeHandle(handle.trim()))
+    .filter(Boolean);
+}
+
+export function getMatrixBotScopeSearchHandles(env: MatrixBotScopeEnv = process.env): string[] {
+  return [...new Set([
+    ...normalizeHandleList(env.ROUTER_MATRIX_BOT_SCOPE_HANDLES),
+    ...normalizeHandleList(env.ROUTER_AGENT_MATRIX_SEARCH_HANDLES),
+    ...normalizeHandleList(env.ROUTER_AGENT_HANDLE),
+    ...normalizeHandleList(env.HERMES_AGENT_HANDLE),
+    ...normalizeHandleList(env.HERMES_HANDLE),
+    ...normalizeHandleList(env.MATRIX_BOT_HANDLE),
+    'router',
+    'router_agent',
+  ].filter(Boolean))];
+}
+
+export function canUseMatrixBotScopeSearch(
+  user: Pick<User, 'handle'> | null | undefined,
+  env: MatrixBotScopeEnv = process.env,
+): boolean {
+  const handle = user?.handle ? normalizeHandle(user.handle) : '';
+  return !!handle && getMatrixBotScopeSearchHandles(env).includes(handle);
+}
+
 // Tool description - single source of truth
 export const TOOL_DESCRIPTION = `Write to the shared notebook.
 
@@ -312,7 +342,7 @@ export const SYSTEM_SKILLS: Skill[] = [
   {
     id: 'system_router_search',
     name: 'router_search',
-    description: 'Search the shared notebook for entries matching a query. If the caller has a verified linked Matrix account, this may also include matching recent Matrix room messages visible to that Matrix account. Router can search all non-DM Matrix rooms it has joined, and can pass event.data.room_id to read the current room, including the current DM.',
+    description: 'Search the shared notebook for entries matching a query. If the caller has a verified linked Matrix account, this may also include matching recent Matrix room messages visible to that Matrix account. The Router/Hermes agent can search all non-DM Matrix rooms it has joined, and can pass event.data.room_id to read the current room, including the current DM.',
     instructions: '',
     handlerType: 'builtin',
     inputSchema: {
@@ -350,7 +380,7 @@ export const SYSTEM_SKILLS: Skill[] = [
   {
     id: 'system_router_search_matrix',
     name: 'router_search_matrix',
-    description: 'Search recent Matrix room messages visible to the caller. When Router is responding in Matrix, pass event.data.room_id to read the current room, including the current DM. Without room_id, Router can search non-DM Matrix rooms it has joined. Use this liberally for conversation context before answering Matrix mentions.',
+    description: 'Search recent Matrix room messages visible to the caller. When Router/Hermes is responding in Matrix, pass event.data.room_id to read the current room, including the current DM. Without room_id, the Router/Hermes agent can search non-DM Matrix rooms it has joined. Use this liberally for conversation context before answering Matrix mentions.',
     instructions: '',
     handlerType: 'builtin',
     inputSchema: {
@@ -2268,9 +2298,7 @@ function createMCPServer(secretKey: string) {
       if (includeMatrix && (query || roomId || since)) {
         const toolUser = await getToolUser();
         const viewerMatrixId = await getVerifiedMatrixUserId(toolUser);
-        const routerHandle = normalizeHandle(process.env.ROUTER_AGENT_HANDLE || process.env.MATRIX_BOT_HANDLE || 'router');
-        const isRouterCaller = toolUser?.handle ? normalizeHandle(toolUser.handle) === routerHandle : false;
-        const canUseRouterMatrix = isRouterCaller;
+        const canUseRouterMatrix = canUseMatrixBotScopeSearch(toolUser);
 
         if (viewerMatrixId || canUseRouterMatrix) {
           matrixMessages = await executeMatrixSearch({
@@ -2283,7 +2311,7 @@ function createMCPServer(secretKey: string) {
           }).catch(() => []);
           matrixAccessLabel = roomId
             ? 'Recent Matrix messages from the requested room'
-            : (canUseRouterMatrix ? 'Matrix results from rooms Router has joined' : 'Matrix results visible to your linked account');
+            : (canUseRouterMatrix ? 'Matrix results from non-DM rooms Router/Hermes has joined' : 'Matrix results visible to your linked account');
         }
       }
 
@@ -2324,9 +2352,7 @@ function createMCPServer(secretKey: string) {
 
       const toolUser = await getToolUser();
       const viewerMatrixId = await getVerifiedMatrixUserId(toolUser);
-      const routerHandle = normalizeHandle(process.env.ROUTER_AGENT_HANDLE || process.env.MATRIX_BOT_HANDLE || 'router');
-      const isRouterCaller = toolUser?.handle ? normalizeHandle(toolUser.handle) === routerHandle : false;
-      const canUseRouterMatrix = isRouterCaller;
+      const canUseRouterMatrix = canUseMatrixBotScopeSearch(toolUser);
 
       if (!viewerMatrixId && !canUseRouterMatrix) {
         return {
@@ -2346,7 +2372,7 @@ function createMCPServer(secretKey: string) {
       const matrixText = formatMatrixSearchText(matrixMessages);
       const matrixAccessLabel = roomId
         ? 'Recent Matrix messages from the requested room'
-        : (canUseRouterMatrix ? 'Matrix results from rooms Router has joined' : 'Matrix results visible to your linked account');
+        : (canUseRouterMatrix ? 'Matrix results from non-DM rooms Router/Hermes has joined' : 'Matrix results visible to your linked account');
 
       return {
         content: [{

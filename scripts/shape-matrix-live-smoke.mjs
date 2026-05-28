@@ -144,7 +144,8 @@ async function ensureSenderCredentials() {
 }
 
 function smokeHandle(prefix, value) {
-  const suffix = value
+  const localpart = String(value).match(/^@([^:]+):/)?.[1] || String(value);
+  const suffix = localpart
     .toLowerCase()
     .replace(/[^a-z0-9_]/g, '')
     .slice(-8);

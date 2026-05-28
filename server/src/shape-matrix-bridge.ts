@@ -474,6 +474,10 @@ function fallbackSearchQuery(text: string): string {
   return text.replace(/^\s*(search|find|lookup)\s+/i, '').trim();
 }
 
+function isSearchCommand(command: string): boolean {
+  return command === 'search' || command === 'find' || command === 'lookup';
+}
+
 function extractEntryIds(text: string): string[] {
   return [...new Set(text.match(/\b[a-z0-9]{8,}-[a-z0-9]{4,}\b/gi) || [])];
 }
@@ -1305,6 +1309,18 @@ export async function handleMention(matrix: MatrixPlatform, mcpClient: Client | 
     return;
   }
 
+  if (isSearchCommand(command)) {
+    const query = text.replace(/^\S+\s*/, '').trim();
+    if (query.length < 3) {
+      await sendReply(matrix, event, 'Ask `help`, `search <query>`, or `summarize this room`.');
+      return;
+    }
+
+    const results = await searchShapeRouter(mcpClient, query, parsePositiveInt('SHAPE_MATRIX_SEARCH_LIMIT', 5));
+    await sendReply(matrix, event, `Private Shape Router search results:\n\n${truncate(results, 3500)}`);
+    return;
+  }
+
   const agentReply = await askShapeMatrixAgent(matrix, attributionEvent, text);
   if (agentReply !== null) {
     const fallbackReply = noResultText(agentReply)
@@ -1317,9 +1333,7 @@ export async function handleMention(matrix: MatrixPlatform, mcpClient: Client | 
     return;
   }
 
-  const query = command === 'search'
-    ? text.replace(/^\S+\s*/, '').trim()
-    : text;
+  const query = text;
   if (query.length < 3) {
     await sendReply(matrix, event, 'Ask `help`, `search <query>`, or `summarize this room`.');
     return;

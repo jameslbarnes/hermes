@@ -696,6 +696,52 @@ describe('Shape Matrix bridge helpers', () => {
     );
   });
 
+  it('bypasses the private Hermes agent for explicit Matrix search commands', async () => {
+    process.env.SHAPE_ROUTER_BASE_URL = 'https://shape.test';
+    process.env.SHAPE_ROUTER_SECRET_KEY = 'shape-key';
+    process.env.SHAPE_MATRIX_AGENT_URL = 'http://shape-agent.test/matrix/event';
+
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.startsWith('https://shape.test/api/entries')) {
+        return new Response(JSON.stringify({
+          entries: [
+            {
+              id: 'entry-command-search',
+              summary: 'Command search smoke note',
+              content: 'Contains explicit-search-sentinel detail.',
+              tags: ['shape-rotator', 'matrix'],
+            },
+          ],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const matrix = {
+      maxMessageLength: 65536,
+      sendMessage: vi.fn(async () => '$reply'),
+    };
+
+    await handleMention(matrix as any, null, matrixMentionEvent('search explicit-search-sentinel'));
+
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'http://shape-agent.test/matrix/event',
+      expect.anything(),
+    );
+    expect(matrix.sendMessage).toHaveBeenCalledWith(
+      '!room:matrix.test',
+      expect.stringContaining('Private Shape Router search results'),
+      expect.objectContaining({ replyTo: '$mention' }),
+    );
+    expect(matrix.sendMessage).toHaveBeenCalledWith(
+      '!room:matrix.test',
+      expect.stringContaining('[entry-command-search] Command search smoke note'),
+      expect.anything(),
+    );
+  });
+
   it('routes ordinary Matrix questions to the private Hermes agent when configured', async () => {
     process.env.SHAPE_MATRIX_AGENT_URL = 'http://shape-agent.test/matrix/event';
     process.env.SHAPE_MATRIX_AGENT_SECRET = 'agent-shared-secret';

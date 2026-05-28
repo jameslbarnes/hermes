@@ -466,6 +466,7 @@ async function waitForReply(creds, roomId, expected, command, timeoutMs = 90_000
   const afterEventId = typeof command === 'string' ? command : command?.eventId;
   const sentAt = typeof command === 'object' ? command.sentAt : 0;
   const started = Date.now();
+  let lastBotReplies = [];
   while (Date.now() - started < timeoutMs) {
     const body = await matrixRequest(
       creds,
@@ -473,6 +474,14 @@ async function waitForReply(creds, roomId, expected, command, timeoutMs = 90_000
       `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=30`,
     );
     const events = body.chunk || [];
+    lastBotReplies = events
+      .filter(event => event.type === 'm.room.message' && event.sender === botMxid && typeof event.content?.body === 'string')
+      .map(event => ({
+        event_id: event.event_id,
+        relates_to: event.content?.['m.relates_to']?.['m.in_reply_to']?.event_id || event.content?.['m.relates_to']?.event_id,
+        body: String(event.content.body).slice(0, 700),
+      }))
+      .slice(0, 5);
     const reply = events.find(event => {
       if (event.type !== 'm.room.message') return false;
       if (event.sender !== botMxid) return false;
@@ -490,7 +499,7 @@ async function waitForReply(creds, roomId, expected, command, timeoutMs = 90_000
     if (reply) return reply;
     await new Promise(resolve => setTimeout(resolve, 1500));
   }
-  throw new Error(`timed out waiting for bot reply containing ${JSON.stringify(expectedParts)}`);
+  throw new Error(`timed out waiting for bot reply containing ${JSON.stringify(expectedParts)}; recent bot replies: ${JSON.stringify(lastBotReplies)}`);
 }
 
 async function countPrivateEntriesContaining(text) {

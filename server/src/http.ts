@@ -8017,6 +8017,45 @@ const server = createServer(async (req, res) => {
 
 - **search_notebook**: Use liberally. Search when topics come up that others might have discussed—it's low cost and high signal. Search by keyword or filter by @handle. Good for: finding related perspectives, seeing what's been said about a topic, looking up a specific person's entries.`;
 
+        const routerPromptChoices = `## Choose their Router prompt
+
+Before installing Router instructions, ask how they want future Claude conversations to use Router. Do not silently choose for them. Offer these three options:
+
+1. Ambient capture (recommended) — Claude searches and writes naturally when interesting moments happen.
+2. Checkpoint mode — Claude searches proactively, but asks before writing notebook entries.
+3. Manual mode — Claude only writes when the user explicitly says "sync", "save to Router", or equivalent.
+
+Install exactly one matching instruction block:
+
+Ambient capture:
+${claudeMdInstructions}
+
+Checkpoint mode:
+You have access to Router notebook tools. Search Router proactively when topics come up that others may have discussed. Before writing to the shared notebook, propose a short 2-3 sentence entry and ask for confirmation. Write when the user approves or explicitly asks you to sync/save.
+
+Manual mode:
+You have access to Router notebook tools. Search Router when the user asks for team context or when prior notes would clearly help. Only write to the shared notebook when the user explicitly asks you to sync/save/log/record something.`;
+
+        const settingsWalkthrough = `## Finish their Router settings
+
+Before the first notebook entry, do a quick settings pass so they leave with a complete account:
+
+- Display name: ask what name they want other people to see.
+- Bio: help them write one sentence about what they are exploring or building.
+- Email: ask whether they want notification email; if yes, send verification.
+- Visibility: ask whether new entries should be human-visible by default or AI-only by default.
+- Safety buffer: choose how long entries stay pending before publishing (1 hour, 6 hours, 24 hours, or 7 days are good defaults).
+
+Confirm the choices before saving. If Router MCP tools are already available, call router_settings with action "get", then router_settings with action "update". If you only have shell/curl, save what you can with:
+
+curl -s -X POST ${sseUrl}/api/identity/update -H "Content-Type: application/json" -d '{"secret_key":"THEIR_KEY","displayName":"DISPLAY_NAME","bio":"BIO","stagingDelayMs":3600000,"defaultHumanVisible":true}'
+
+If they gave an email, send verification:
+
+curl -s -X POST ${sseUrl}/api/send-verification -H "Content-Type: application/json" -d '{"key":"THEIR_KEY","email":"EMAIL"}'
+
+If you cannot call tools or shell commands, open ${sseUrl}/settings and stay with them while they fill it out. Do not skip this step.`;
+
         let prompt: string;
 
         if (handle) {
@@ -8037,18 +8076,21 @@ Start by asking what brought them here, then guide accordingly:
 
 ## MCP Setup
 
-Help them connect permanently so Router works in every conversation:
+Help them connect permanently so Router works in every conversation, then help them choose the Router prompt they want future Claudes to follow.
+
+${routerPromptChoices}
 
 For Claude Code:
 claude mcp add teleport-router --transport sse --scope user "${sseUrl}/mcp/sse?key=${keyPlaceholder}"
 
-Then add to ~/.claude/CLAUDE.md:
-${claudeMdInstructions}
+Then add the chosen Router prompt to ~/.claude/CLAUDE.md.
 
 For Claude Desktop/Mobile, add a custom connector in Settings → Connectors with URL:
 ${sseUrl}/mcp/sse?key=${keyPlaceholder}
 
-And add the instructions above to personal preferences in Settings.
+And add the chosen Router prompt to personal preferences in Settings.
+
+${settingsWalkthrough.replaceAll('THEIR_KEY', keyPlaceholder)}
 
 ${recentActivity ? `## Recent Activity\n\n${recentActivity}` : 'The notebook is just getting started — they can be one of the first to contribute.'}
 
@@ -8127,14 +8169,30 @@ Report what you find. If everything checks out, say so with confidence. If they 
 
 ## 3. Create an account
 
-When they're ready (and most people will be ready quickly — don't over-gate this), create their account:
+When they're ready (and most people will be ready quickly — don't over-gate this), create their account. Ask for the basics first so setup does not end at "I have a key":
+
+- Handle: their permanent notebook identity.
+- Display name: optional, human-readable.
+- Bio: one sentence about what they are exploring or building.
+- Email: optional, for notifications and verification.
+${channelInviteInfo ? `
+If their installed Router CLI supports --join, prefer the CLI path because it creates the key, claims the handle, joins the group, saves local config, and installs the skill:
+
+npm install -g @teleport-computer/router-cli@latest
+router init --server ${sseUrl} --join "${channelInviteInfo.token}" --handle their_handle
+
+First run router init --help and confirm it lists --join. If it does not, npm latest is older than the source and you must use the API flow below instead.` : ''}
+
+API flow:
 
 curl -s -X POST ${sseUrl}/api/identity/generate
 # Returns { secret_key, pseudonym }
 
-curl -s -X POST ${sseUrl}/api/identity/register -H "Content-Type: application/json" -d '{"secret_key":"THE_KEY","handle":"their_handle"}'
+curl -s -X POST ${sseUrl}/api/identity/register -H "Content-Type: application/json" -d '{"secret_key":"THE_KEY","handle":"their_handle","displayName":"DISPLAY_NAME","bio":"BIO","email":"EMAIL"}'
 
-Ask them what handle they'd like — this is their identity on the notebook. Generate the key, register it, and tell them to save the key somewhere safe (password manager, secure note). The key is the only way to access their account.
+Tell them to save the key somewhere safe (password manager, secure note). The key is the only way to access their account. If they provided an email, send verification:
+
+curl -s -X POST ${sseUrl}/api/send-verification -H "Content-Type: application/json" -d '{"key":"THE_KEY","email":"EMAIL"}'
 
 ## 4. Connect Claude
 
@@ -8142,8 +8200,11 @@ Now the fun part — wire it up so Router is there in every conversation:
 
 claude mcp add teleport-router --transport sse --scope user "${sseUrl}/mcp/sse?key=THEIR_KEY"
 
-Then add these instructions to ~/.claude/CLAUDE.md:
-${claudeMdInstructions}
+Then help them choose the Router prompt and install the selected block in ~/.claude/CLAUDE.md:
+
+${routerPromptChoices}
+
+${settingsWalkthrough.replaceAll('THEIR_KEY', 'THE_KEY')}
 ${channelInviteInfo ? `
 ## 5. Join ${channelInviteInfo.channelName}
 
@@ -8200,7 +8261,7 @@ But don't make this feel like a gatekeeping ritual. Most people will be satisfie
 
 ## 3. Create an account
 
-**Important: You cannot call the Router API directly.** Direct them to open ${sseUrl}/join in their browser to pick a handle and get their secret key. Tell them to save the key somewhere safe (password manager, secure note) — it's the only way to access their account. There is no recovery flow.
+**Important: You cannot call the Router API directly.** Direct them to open ${channelInviteInfo ? `${sseUrl}/join?channelinvite=${encodeURIComponent(channelInviteInfo.token)}` : `${sseUrl}/join`} in their browser to pick a handle and get their secret key. Have them fill out display name, bio, and email on the join/settings pages instead of doing only the minimum. Tell them to save the key somewhere safe (password manager, secure note) — it's the only way to access their account. There is no recovery flow.
 
 Wait for them to come back with their key before continuing.
 
@@ -8212,8 +8273,11 @@ Go to **Settings → Connectors → Add custom connector** and enter:
 - **Name:** teleport-router
 - **URL:** ${sseUrl}/mcp/sse?key=THEIR_KEY
 
-Then go to **Settings → Preferences** and add these instructions:
-${claudeMdInstructions}
+Then help them choose the Router prompt and add the selected block in **Settings → Preferences**:
+
+${routerPromptChoices}
+
+${settingsWalkthrough}
 ${channelInviteInfo ? `
 ## 5. Join ${channelInviteInfo.channelName}
 

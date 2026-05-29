@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryStorage, type JournalEntry } from '../storage.js';
-import { MatrixPlatform, ROUTER_SPARK_EVENT, type MatrixHistoryMessage } from '../platform/matrix.js';
+import { MatrixPlatform, type MatrixHistoryMessage } from '../platform/matrix.js';
 import type { Platform } from '../platform/types.js';
 import {
   findRecentMatrixSparkConversation,
@@ -498,19 +498,17 @@ describe('spark Matrix debounce guard', () => {
 });
 
 describe('triggerManualSpark', () => {
-  it('does not reuse a stored spark room whose Matrix state belongs to another pair', async () => {
+  it('forwards the source entry into #sparks and replies with the warm message', async () => {
     const storage = new MemoryStorage();
-    await storage.createUser({
+    await storage.createUser({ handle: 'socrates1024', secretKeyHash: 'hash-s' });
+    await storage.createUser({ handle: 'ggg', secretKeyHash: 'hash-g' });
+    const sourceEntry = await storage.addEntry({
+      pseudonym: 'socrates1024',
       handle: 'socrates1024',
-      secretKeyHash: 'hash-s',
-      linkedAccounts: [{ platform: 'matrix', platformUserId: '@socrates1024:matrix.org', linkedAt: Date.now(), verified: true }],
+      client: 'code' as const,
+      content: 'Hit the same wall around boundary design again — chasing what makes provenance load-bearing.',
+      timestamp: Date.now(),
     });
-    await storage.createUser({
-      handle: 'ggg',
-      secretKeyHash: 'hash-g',
-      linkedAccounts: [{ platform: 'matrix', platformUserId: '@ggg:matrix.org', linkedAt: Date.now(), verified: true }],
-    });
-    await storage.setSparkPairRoom('socrates1024', 'ggg', '!sxysun-room:mtrx.example.test');
 
     const platform = new MatrixPlatform({
       serverUrl: 'https://mtrx.example.test',
@@ -520,37 +518,44 @@ describe('triggerManualSpark', () => {
       resolveLinkedPlatformId: async (_platform, handle) => `@${handle}:matrix.org`,
     });
 
-    const createRoom = vi.fn().mockResolvedValue({ room_id: '!correct-room:mtrx.example.test' });
-    const sendMessage = vi.fn().mockResolvedValue({ event_id: '$event' });
-    const sendStateEvent = vi.fn().mockResolvedValue({ event_id: '$state' });
+    const sparksRoomId = '!sparks:mtrx.example.test';
+    (platform as any).channelRooms.set('sparks', sparksRoomId);
+    (platform as any).ensureRoomEncryptionConfigured = vi.fn().mockResolvedValue(undefined);
+
+    const createRoom = vi.fn();
+    const sendMessage = vi.fn()
+      .mockResolvedValueOnce({ event_id: '$forwarded-entry' })
+      .mockResolvedValueOnce({ event_id: '$warm-reply' });
 
     (platform as any).client = {
       createRoom,
       sendMessage,
-      sendStateEvent,
-      getRoom: vi.fn((roomId: string) => roomId === '!sxysun-room:mtrx.example.test'
-        ? {
-          currentState: {
-            getStateEvents: (eventType: string) => eventType === ROUTER_SPARK_EVENT
-              ? { getContent: () => ({ source_handle: 'sxysun', target_handle: 'socrates1024' }) }
-              : null,
-          },
-        }
-        : null),
+      getRoom: vi.fn(() => null),
     };
 
+    const warmMessage = 'Hey @socrates1024 and @ggg, you both keep landing on the same wall — compare notes?';
     await triggerManualSpark(
       'socrates1024',
       'ggg',
       'Manual test for the correct pair.',
       [platform],
       storage,
-      'Hey @socrates1024 and @ggg, compare notes here.',
+      warmMessage,
     );
 
-    expect(createRoom).toHaveBeenCalledWith(expect.objectContaining({
-      name: '@socrates1024 ↔ @ggg',
-    }));
-    await expect(storage.getSparkPairRoom('socrates1024', 'ggg')).resolves.toBe('!correct-room:mtrx.example.test');
+    expect(createRoom).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+
+    const [forwardRoomId, forwardContent] = sendMessage.mock.calls[0];
+    expect(forwardRoomId).toBe(sparksRoomId);
+    expect(forwardContent.entry_id).toBe(sourceEntry.id);
+
+    const [replyRoomId, replyContent] = sendMessage.mock.calls[1];
+    expect(replyRoomId).toBe(sparksRoomId);
+    expect(replyContent.body).toContain('keep landing on the same wall — compare notes?');
+    // @-handles get rendered as Matrix MXIDs once the linked-platform resolver runs.
+    expect(replyContent.body).toContain('@socrates1024:matrix.org');
+    expect(replyContent.body).toContain('@ggg:matrix.org');
+    expect(replyContent['m.relates_to']?.['m.in_reply_to']?.event_id).toBe('$forwarded-entry');
   });
 });

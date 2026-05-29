@@ -916,7 +916,7 @@ export const SYSTEM_SKILLS: Skill[] = [
   {
     id: 'system_router_trigger_spark',
     name: 'router_trigger_spark',
-    description: 'Moderator-only: manually create or reuse a private spark room between two users for testing or facilitation.',
+    description: 'Moderator-only: manually post a spark message in the #sparks channel pinging two users, for testing or facilitation.',
     instructions: '',
     handlerType: 'builtin',
     inputSchema: {
@@ -925,7 +925,7 @@ export const SYSTEM_SKILLS: Skill[] = [
         source_handle: { type: 'string', description: 'First Router handle' },
         target_handle: { type: 'string', description: 'Second Router handle' },
         reason: { type: 'string', description: 'Why these two should talk' },
-        message: { type: 'string', description: 'Optional message to post into the spark room' },
+        message: { type: 'string', description: 'Optional message to post in #sparks' },
       },
       required: ['source_handle', 'target_handle', 'reason'],
     },
@@ -4659,20 +4659,11 @@ function createMCPServer(secretKey: string) {
           };
         }
 
-        const { triggerManualSpark, hasLinkedPlatformAccount } = await import('./hooks/agent.js');
-        if (!hasLinkedPlatformAccount(sourceUser, 'matrix') || !hasLinkedPlatformAccount(targetUser, 'matrix')) {
-          return {
-            content: [{ type: 'text' as const, text: `Both @${sourceHandle} and @${targetHandle} need linked Matrix accounts for a spark room.` }],
-            isError: true,
-          };
-        }
+        const { triggerManualSpark } = await import('./hooks/agent.js');
         await triggerManualSpark(sourceHandle, targetHandle, reason, getAllPlatforms(), storage, message);
 
-        const roomId = await storage.getSparkPairRoom(sourceHandle, targetHandle);
         return {
-          content: [{ type: 'text' as const, text: roomId
-            ? `Spark triggered for @${sourceHandle} ↔ @${targetHandle} (${roomId})`
-            : `Spark trigger completed for @${sourceHandle} ↔ @${targetHandle}` }],
+          content: [{ type: 'text' as const, text: `Spark posted in #sparks for @${sourceHandle} ↔ @${targetHandle}` }],
         };
       } catch (err: any) {
         return { content: [{ type: 'text' as const, text: `Trigger spark failed: ${err.message}` }], isError: true };
@@ -8448,7 +8439,7 @@ Keep the energy up. Follow their curiosity. This is the beginning of something.`
       }
 
       // Map routes to HTML files
-      if (['/setup', '/prompt', '/dashboard', '/join', '/settings', '/connect', '/tutorial'].includes(filePath)) {
+      if (['/setup', '/prompt', '/dashboard', '/join', '/settings', '/connect', '/tutorial', '/cohort'].includes(filePath)) {
         filePath = `${filePath}.html`;
       }
 

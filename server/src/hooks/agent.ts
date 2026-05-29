@@ -27,6 +27,9 @@ const MIN_PLATFORM_CONTENT_LENGTH = 50;
 const MATRIX_DEFAULT_FIREHOSE_CHANNEL_ID = 'bot-noise';
 const MATRIX_DEFAULT_FIREHOSE_CHANNEL_NAME = 'Bot Noise';
 const MATRIX_DEFAULT_FIREHOSE_DESCRIPTION = 'Router firehose for public notebook entries';
+const MATRIX_SPARKS_CHANNEL_ID = 'sparks';
+const MATRIX_SPARKS_CHANNEL_NAME = 'Sparks';
+const MATRIX_SPARKS_CHANNEL_DESCRIPTION = 'Router-curated overlaps and connections from the notebook';
 const SPARK_MATRIX_DEBOUNCE_WINDOW_MS = process.env.SPARK_MATRIX_DEBOUNCE_WINDOW_MS
   ? parseInt(process.env.SPARK_MATRIX_DEBOUNCE_WINDOW_MS)
   : 72 * 60 * 60 * 1000;
@@ -795,12 +798,13 @@ async function findKeyHashForHandle(handle: string, storage: import('../storage.
   }
 }
 
-// ── Spark Execution with Rich Context ────────────────────────
+// ── Spark Execution ──────────────────────────────────────────
 
 /**
- * Execute a spark action with full notebook context.
- * On Matrix, this creates rooms with structured spark state events
- * that the Router Client renders as introduction cards.
+ * Forward the source entry into #sparks, then post the warm message as a
+ * reply to that forwarded entry — so anchor and commentary always live in
+ * the same curated room. Linked-Matrix isn't required: the room is public
+ * to subscribers and unlinked @handles still render as text mentions.
  */
 async function executeSparkWithContext(
   action: SparkAction,
@@ -811,30 +815,12 @@ async function executeSparkWithContext(
   options: { debounceMatrix?: boolean } = {},
 ): Promise<void> {
   if (action.action === 'skip') return;
+  if (!action.message) return;
 
   const matrixPlatform = platforms.find(p => p instanceof MatrixPlatform) as MatrixPlatform | undefined;
 
-  if (matrixPlatform && storage) {
-    const [sourceUser, targetUser] = await Promise.all([
-      storage.getUser(action.sourceHandle),
-      storage.getUser(action.targetHandle),
-    ]);
-    const sourceLinked = hasLinkedPlatformAccount(sourceUser, 'matrix');
-    const targetLinked = hasLinkedPlatformAccount(targetUser, 'matrix');
-
-    if (!sourceLinked || !targetLinked) {
-      console.log(
-        `[Agent] Skipping spark outreach for @${action.sourceHandle} ↔ @${action.targetHandle}: ` +
-        `linked Matrix required (source=${sourceLinked}, target=${targetLinked})`,
-      );
-      return;
-    }
-  }
-
-  let warmMessage = action.message;
-
   const unexpectedHandles = getUnexpectedSparkHandles(
-    [action.reason, warmMessage].filter(Boolean).join('\n'),
+    [action.reason, action.message].filter(Boolean).join('\n'),
     action.sourceHandle,
     action.targetHandle,
   );
@@ -863,30 +849,23 @@ async function executeSparkWithContext(
     }
   }
 
-  if (matrixPlatform && storage && (action.action === 'introduce' || action.action === 'nudge')) {
-    const pairRoom = await ensureSparkPairRoom(
-      action,
-      sourceEntry,
-      candidate,
-      matrixPlatform,
-      storage,
-    );
-
-    if (warmMessage) {
-      await matrixPlatform.sendMessage(pairRoom.id, warmMessage);
-    }
-
-    if (pairRoom.created) {
-      console.log(`[Agent] Spark room created: ${pairRoom.id}`);
-    }
+  if (!matrixPlatform) {
+    console.warn('[Agent] No Matrix platform available; cannot post spark to #sparks');
     return;
   }
 
-  // For suggest/nudge, use the warm message if available
-  if (warmMessage) {
-    action = { ...action, message: warmMessage };
-  }
-  await executeSpark(action, platforms, 'router');
+  const sparksRoomId = await matrixPlatform.ensureChannelRoom(
+    MATRIX_SPARKS_CHANNEL_ID,
+    MATRIX_SPARKS_CHANNEL_NAME,
+    MATRIX_SPARKS_CHANNEL_DESCRIPTION,
+  );
+
+  const forwardedEventId = await matrixPlatform.postEntry(sparksRoomId, sourceEntry);
+
+  await executeSpark(action, platforms, {
+    roomId: sparksRoomId,
+    replyToEventId: forwardedEventId,
+  });
 }
 
 export async function triggerManualSpark(
@@ -927,63 +906,4 @@ export async function triggerManualSpark(
   };
 
   await executeSparkWithContext(action, candidate, sourceEntry, platforms, storage, { debounceMatrix: false });
-}
-
-async function ensureSparkPairRoom(
-  action: SparkAction,
-  sourceEntry: JournalEntry,
-  candidate: SparkCandidate,
-  matrixPlatform: MatrixPlatform,
-  storage: Storage,
-): Promise<{ id: string; created: boolean }> {
-  const existingRoomId = action.existingRoomId
-    || await storage.getSparkPairRoom(action.sourceHandle, action.targetHandle);
-  if (existingRoomId) {
-    const matchesPair = await matrixPlatform.isSparkRoomForPair(
-      existingRoomId,
-      action.sourceHandle,
-      action.targetHandle,
-    );
-    if (matchesPair) {
-      await matrixPlatform.attachRoomToSpace(existingRoomId, `@${action.sourceHandle} ↔ @${action.targetHandle}`);
-      return { id: existingRoomId, created: false };
-    }
-    console.warn(
-      `[Agent] Ignoring stale spark room ${existingRoomId} for ` +
-      `@${action.sourceHandle} ↔ @${action.targetHandle}: Matrix room state does not match pair`,
-    );
-  }
-
-  const room = await matrixPlatform.createRoom(
-    `@${action.sourceHandle} ↔ @${action.targetHandle}`,
-    {
-      type: 'group',
-      invite: [action.sourceHandle, action.targetHandle],
-      topic: action.reason,
-      encrypted: true,
-      attachToSpace: true,
-    },
-  );
-
-  await storage.setSparkPairRoom(action.sourceHandle, action.targetHandle, room.id);
-
-  await matrixPlatform.postSparkContext(room.id, {
-    sourceHandle: action.sourceHandle,
-    targetHandle: action.targetHandle,
-    reason: action.reason,
-    evidence: [
-      {
-        entryId: sourceEntry.id,
-        author: `@${action.sourceHandle}`,
-        snippet: sourceEntry.content.substring(0, 200),
-      },
-      ...candidate.matchingEntries.slice(0, 2).map(e => ({
-        entryId: e.id,
-        author: `@${candidate.handle}`,
-        snippet: e.content.substring(0, 200),
-      })),
-    ],
-  });
-
-  return { id: room.id, created: true };
 }

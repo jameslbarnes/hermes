@@ -36,8 +36,13 @@ export interface SparkAction {
   targetHandle: string;
   reason: string;
   message?: string;
-  /** If they're already connected, the room to nudge in */
-  existingRoomId?: string;
+}
+
+export interface SparkReplyTarget {
+  /** Bot-noise room ID where the warm message should be posted. */
+  roomId: string;
+  /** Optional source-entry event in the room to reply to. */
+  replyToEventId?: string;
 }
 
 export interface ConnectionInfo {
@@ -193,7 +198,6 @@ export async function evaluateSpark(
           sourceHandle,
           targetHandle: candidate.handle,
           reason: evaluationReason,
-          existingRoomId: connectionInfo.sharedRoomIds[0],
         };
         return await withSparkCopy(sourceEntry, candidate, connectionInfo, action, anthropic);
       }
@@ -377,55 +381,28 @@ export async function getConnectionInfo(
 // ── Execution ────────────────────────────────────────────────
 
 /**
- * Execute a spark action using the available platforms.
+ * Post the spark's warm message in bot-noise — threaded as a reply to the
+ * source entry's bot-noise post when an event id is available.
  */
 export async function executeSpark(
   action: SparkAction,
   platforms: Platform[],
-  agentHandle: string,
+  target: SparkReplyTarget,
 ): Promise<void> {
   if (action.action === 'skip') return;
+  if (!action.message) return;
 
-  // Use the first available platform (prefer Matrix)
   const platform = platforms.find(p => p.name === 'matrix') || platforms[0];
   if (!platform) {
     console.warn('[Intelligence/Sparks] No platform available to execute spark');
     return;
   }
 
-  switch (action.action) {
-    case 'introduce': {
-      console.log(`[Sparks] Creating introduction room: @${action.sourceHandle} ↔ @${action.targetHandle}`);
-      const room = await platform.createRoom(
-        `${action.sourceHandle} ↔ ${action.targetHandle}`,
-        {
-          type: 'group',
-          invite: [action.sourceHandle, action.targetHandle],
-          topic: action.reason,
-          encrypted: true,
-        },
-      );
-      if (action.message) {
-        await platform.sendMessage(room.id, action.message);
-      }
-      break;
-    }
+  console.log(
+    `[Sparks] Posting ${action.action} in #sparks: @${action.sourceHandle} ↔ @${action.targetHandle}`,
+  );
 
-    case 'suggest': {
-      console.log(`[Sparks] Suggesting introduction to @${action.sourceHandle}: meet @${action.targetHandle}`);
-      const sourceId = await platform.resolvePlatformId(action.sourceHandle);
-      if (sourceId && action.message) {
-        await platform.sendDM(sourceId, action.message);
-      }
-      break;
-    }
-
-    case 'nudge': {
-      console.log(`[Sparks] Nudging in existing room: @${action.sourceHandle} and @${action.targetHandle}`);
-      if (action.existingRoomId && action.message) {
-        await platform.sendMessage(action.existingRoomId, action.message);
-      }
-      break;
-    }
-  }
+  await platform.sendMessage(target.roomId, action.message, {
+    replyTo: target.replyToEventId,
+  });
 }

@@ -85,9 +85,11 @@ Respond with a JSON object:
   "reason": "1-2 sentence internal explanation of the connection"
 }
 
-"high" = create an introduction room immediately
-"moderate" = suggest via DM, let them decide
-"low" = note it but don't act yet
+All non-skip confidences result in the source entry being forwarded into the curated #sparks channel, with a single reply posted under it. Only the tone of the warm reply differs by confidence.
+
+"high" = post a confident "you two should compare notes" reply
+"moderate" = post a hedged "interesting overlap, fwiw" reply
+"low" = note it but don't post
 "skip" = not worth pursuing`;
 
 export const SPARK_COPY_PROMPT = `You are the Router — a precise, socially careful mutual friend.
@@ -101,14 +103,16 @@ Hard constraints:
 - Do not overstate certainty or imply the people have already agreed to talk.
 - Keep it concise and natural.
 
-Action guidance:
-- "introduce": the message will be posted in a private Matrix room containing both people. Address both users.
-- "nudge": the message will be posted in an existing private spark room. Address both users.
-- "suggest": the message will be sent as a DM to the source user. Mention the target user, but do not write as if the target is present.
+The message will be posted in the curated #sparks Matrix channel, as a reply to the source user's notebook entry (which the bot forwards into the same room). Address both users by @handle so they're pinged when they're on Matrix; other channel members read along regardless.
+
+Action guidance (affects tone, not delivery):
+- "introduce": the two users haven't connected before. Frame it as a first introduction.
+- "nudge": the two users already know each other. Frame it as "here's a fresh overlap worth noticing", not an introduction.
+- "suggest": moderate-confidence overlap between two strangers. Hedge slightly — name what you saw, let them decide whether to engage.
 
 Respond with a JSON object:
 {
-  "topic": "A concise room topic or context sentence, suitable for Matrix room metadata",
+  "topic": "A concise one-line tagline summarising the overlap (used for internal logging)",
   "message": "The final message to send"
 }`;
 

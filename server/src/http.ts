@@ -8438,8 +8438,12 @@ Keep the energy up. Follow their curiosity. This is the beginning of something.`
         return;
       }
 
-      // Map routes to HTML files
-      if (['/setup', '/prompt', '/dashboard', '/join', '/settings', '/connect', '/tutorial', '/cohort'].includes(filePath)) {
+      // Map routes to HTML files.
+      // The published Router CLI opens /setup/cli?port=...&nonce=... and
+      // waits for the browser flow to POST the generated key back to localhost.
+      if (filePath === '/setup/cli') {
+        filePath = '/join.html';
+      } else if (['/setup', '/prompt', '/dashboard', '/join', '/settings', '/connect', '/tutorial', '/cohort'].includes(filePath)) {
         filePath = `${filePath}.html`;
       }
 

@@ -599,10 +599,54 @@
         const baseUrl = window.location.origin;
         const urlParams = new URLSearchParams(window.location.search);
         const nextParam = urlParams.get('next');
-        const channelInviteToken = urlParams.get('channelinvite');
+        const channelInviteToken = urlParams.get('channelinvite')
+            || urlParams.get('invite')
+            || urlParams.get('joincode')
+            || urlParams.get('join_code')
+            || urlParams.get('code');
+        const cliPortParam = urlParams.get('port');
+        const cliNonce = urlParams.get('nonce');
         let handleCheckTimeout = null;
         let handleValid = false;
         let pendingChannelInvite = null; // { channelId, token } to join after registration
+
+        function getCliPort() {
+            if (!cliPortParam || !cliNonce) return null;
+            const port = Number(cliPortParam);
+            if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+            return port;
+        }
+
+        function isCliSetup() {
+            return getCliPort() !== null;
+        }
+
+        async function sendKeyToCli(secretKey) {
+            const port = getCliPort();
+            if (!port || !cliNonce) return { attempted: false, ok: false };
+
+            const body = JSON.stringify({ key: secretKey, nonce: cliNonce });
+            const urls = [
+                `http://127.0.0.1:${port}/key`,
+                `http://localhost:${port}/key`
+            ];
+
+            for (const url of urls) {
+                try {
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        mode: 'cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        body
+                    });
+                    if (res.ok) return { attempted: true, ok: true };
+                } catch (err) {
+                    console.warn('Failed to send key to Router CLI:', err);
+                }
+            }
+
+            return { attempted: true, ok: false };
+        }
 
         function getSafeNextPath() {
             if (!nextParam) return null;
@@ -687,8 +731,13 @@
 
         // Redirect existing users to settings (or join channel if they have an account)
         document.addEventListener('DOMContentLoaded', async () => {
+            if (isCliSetup() && !channelInviteToken) {
+                document.getElementById('header-title').textContent = 'Finish Router CLI setup';
+                document.getElementById('header-subtitle').textContent = 'Pick a handle. We will send the generated key back to your terminal.';
+            }
+
             // Start resolving invite in parallel with key check
-            resolveChannelInvite();
+            const invitePromise = resolveChannelInvite();
 
             const savedKey = localStorage.getItem('router_key');
             if (savedKey) {
@@ -701,14 +750,23 @@
                     const data = await res.json();
                     if (data.hasAccount) {
                         // If there's a channel invite, join it first then go to channel
+                        let joinedChannel = null;
                         if (channelInviteToken) {
                             // Wait for resolve to finish
-                            await new Promise(r => setTimeout(r, 500));
+                            await invitePromise;
                             if (pendingChannelInvite) {
-                                await joinPendingChannel(savedKey);
-                                window.location.href = `/?view=channel&id=${encodeURIComponent(pendingChannelInvite.channelId)}`;
-                                return;
+                                const joined = await joinPendingChannel(savedKey);
+                                if (joined) joinedChannel = pendingChannelInvite.channelId;
                             }
+                        }
+                        if (isCliSetup()) {
+                            const cliResult = await sendKeyToCli(savedKey);
+                            showSuccess(data.handle, joinedChannel, cliResult);
+                            return;
+                        }
+                        if (joinedChannel) {
+                            window.location.href = `/?view=channel&id=${encodeURIComponent(joinedChannel)}`;
+                            return;
                         }
                         window.location.href = getSafeNextPath() || '/settings';
                         return;
@@ -829,9 +887,11 @@
                     if (joined) joinedChannel = pendingChannelInvite.channelId;
                 }
 
+                const cliResult = await sendKeyToCli(keyData.secret_key);
+
                 // For non-invite ?next= redirects, redirect immediately
                 const safeNext = getSafeNextPath();
-                if (safeNext && !pendingChannelInvite) {
+                if (safeNext && !pendingChannelInvite && !isCliSetup()) {
                     window.location.href = safeNext;
                     return;
                 }
@@ -853,7 +913,7 @@
                 }
 
                 // Show success state (always show MCP setup, even for invite flows)
-                showSuccess(registerData.handle, joinedChannel);
+                showSuccess(registerData.handle, joinedChannel, cliResult);
 
             } catch (err) {
                 alert(err.message || 'Failed to create account. Please try again.');
@@ -864,7 +924,7 @@
 
         const sseBaseUrl = 'https://db82f581256a3c9244c4d7129a67336990d08cdf-3000.dstack-pha-prod9.phala.network';
 
-        async function showSuccess(handle, joinedChannel) {
+        async function showSuccess(handle, joinedChannel, cliResult = { attempted: false, ok: false }) {
             document.getElementById('form-state').classList.add('hidden');
             document.getElementById('success-state').classList.add('visible');
 
@@ -881,6 +941,24 @@
             const mcpCmd = `claude mcp add teleport-router --transport sse --scope user "${sseBaseUrl}/mcp/sse?key=${savedKey}"`;
             document.getElementById('mcp-cmd-text').textContent = mcpCmd;
             document.getElementById('sse-url-text').textContent = `${sseBaseUrl}/mcp/sse?key=${savedKey}`;
+
+            if (cliResult.attempted) {
+                document.querySelector('.client-tabs').style.display = 'none';
+                document.getElementById('client-desktop').style.display = 'none';
+                document.getElementById('step-connect-label').textContent = cliResult.ok
+                    ? 'Step 1 — Finish in your terminal'
+                    : 'Step 1 — Finish CLI setup manually';
+                document.getElementById('step-connect-subtitle').textContent = cliResult.ok
+                    ? 'Your key was sent to router init. Return to your terminal and choose where to install the Router skill.'
+                    : 'The account was created, but this browser could not reach router init. Copy the command below, or run router login with the key from this page.';
+                document.querySelector('#client-code p').textContent = cliResult.ok
+                    ? 'Terminal setup is waiting for you:'
+                    : 'Manual Claude Code command:';
+                document.getElementById('mcp-cmd-text').textContent = cliResult.ok
+                    ? 'Return to the router init terminal window to finish.'
+                    : mcpCmd;
+                document.getElementById('step-connect-next-btn').textContent = 'Continue';
+            }
 
             // Update Step 2 link for channel invite flows
             if (joinedChannel) {

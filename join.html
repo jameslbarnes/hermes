@@ -487,6 +487,29 @@
             </div>
 
             <form id="join-form" onsubmit="handleSubmit(event)">
+                <div class="form-group" id="join-code-box" style="display:none;">
+                    <label for="join-code-input">Join code</label>
+                    <div style="display:flex;gap:0.5rem;">
+                        <input
+                            type="text"
+                            id="join-code-input"
+                            class="text-input mono"
+                            placeholder="Paste invite code"
+                            autocomplete="off"
+                            style="margin-bottom:0;"
+                        >
+                        <button
+                            type="button"
+                            class="copy-btn"
+                            onclick="applyJoinCode()"
+                            style="width:auto;white-space:nowrap;padding:0.6rem 0.9rem;"
+                        >
+                            Apply
+                        </button>
+                    </div>
+                    <div class="status" id="join-code-status"></div>
+                </div>
+
                 <div class="form-group">
                     <label for="handle">Choose your handle</label>
                     <div class="handle-input-wrapper">
@@ -599,7 +622,7 @@
         const baseUrl = window.location.origin;
         const urlParams = new URLSearchParams(window.location.search);
         const nextParam = urlParams.get('next');
-        const channelInviteToken = urlParams.get('channelinvite')
+        let channelInviteToken = urlParams.get('channelinvite')
             || urlParams.get('invite')
             || urlParams.get('joincode')
             || urlParams.get('join_code')
@@ -660,17 +683,20 @@
         }
 
         // Resolve channel invite and show banner
-        async function resolveChannelInvite() {
-            if (!channelInviteToken) return;
+        async function resolveChannelInvite(token = channelInviteToken) {
+            if (!token) return false;
             try {
-                const res = await fetch(`/api/invites/${encodeURIComponent(channelInviteToken)}/resolve`);
-                if (!res.ok) return;
+                const res = await fetch(`/api/invites/${encodeURIComponent(token)}/resolve`);
+                if (!res.ok) return false;
                 const data = await res.json();
-                pendingChannelInvite = { channelId: data.channelId, token: channelInviteToken };
+                channelInviteToken = token;
+                pendingChannelInvite = { channelId: data.channelId, token };
 
                 // Update header
                 document.getElementById('header-title').textContent = `You're invited`;
-                document.getElementById('header-subtitle').textContent = 'Get set up with Claude in one step.';
+                document.getElementById('header-subtitle').textContent = isCliSetup()
+                    ? 'Create an account, join the channel, and finish CLI setup.'
+                    : 'Get set up with Claude in one step.';
 
                 // Show banner
                 document.getElementById('invite-channel-name').textContent = `#${data.channelId}` + (data.channelName ? ` — ${data.channelName}` : '');
@@ -679,11 +705,43 @@
                 }
                 document.getElementById('invite-banner').style.display = '';
 
-                // Show Claude-guided onboarding, hide manual form
-                document.getElementById('invite-onboard').style.display = '';
-                document.getElementById('join-form').style.display = 'none';
+                // Show Claude-guided onboarding unless the browser is already
+                // inside the CLI setup callback, where the form must stay open
+                // so the generated key can be returned to router init.
+                if (isCliSetup()) {
+                    document.getElementById('invite-onboard').style.display = 'none';
+                    document.getElementById('join-form').style.display = '';
+                    document.getElementById('join-code-box').style.display = 'none';
+                } else {
+                    document.getElementById('invite-onboard').style.display = '';
+                    document.getElementById('join-form').style.display = 'none';
+                }
+                return true;
             } catch (e) {
                 console.error('Failed to resolve channel invite:', e);
+                return false;
+            }
+        }
+
+        async function applyJoinCode() {
+            const input = document.getElementById('join-code-input');
+            const status = document.getElementById('join-code-status');
+            const token = input.value.trim();
+            if (!token) {
+                status.textContent = 'Paste a join code first';
+                status.className = 'status error';
+                return;
+            }
+
+            status.textContent = 'Checking...';
+            status.className = 'status checking';
+            const ok = await resolveChannelInvite(token);
+            if (ok) {
+                status.textContent = 'Join code applied';
+                status.className = 'status available';
+            } else {
+                status.textContent = 'Invalid or expired join code';
+                status.className = 'status error';
             }
         }
 
@@ -733,7 +791,8 @@
         document.addEventListener('DOMContentLoaded', async () => {
             if (isCliSetup() && !channelInviteToken) {
                 document.getElementById('header-title').textContent = 'Finish Router CLI setup';
-                document.getElementById('header-subtitle').textContent = 'Pick a handle. We will send the generated key back to your terminal.';
+                document.getElementById('header-subtitle').textContent = 'Paste a join code if you have one, then pick a handle. We will send the generated key back to your terminal.';
+                document.getElementById('join-code-box').style.display = '';
             }
 
             // Start resolving invite in parallel with key check

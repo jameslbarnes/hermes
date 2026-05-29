@@ -11,6 +11,7 @@ on:
         options:
           - status
           - restart
+          - api-cancel-operation
           - api-force-restart
           - api-stop
           - api-start
@@ -59,6 +60,17 @@ jobs:
         run: |
           set -euo pipefail
           timeout 900s phala cvms restart "${PHALA_APP_ID}" --json
+
+      - name: Cancel in-progress CVM operation through API
+        if: inputs.action == 'api-cancel-operation'
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_API_KEY }}
+          PHALA_APP_ID: ${{ secrets.PHALA_APP_ID }}
+        run: |
+          set -euo pipefail
+          phala api "/cvms/${PHALA_APP_ID}/operations/cancel" \
+            -X POST \
+            -i
 
       - name: Force restart CVM through API
         if: inputs.action == 'api-force-restart'

@@ -1045,6 +1045,12 @@
             text-align: center;
         }
 
+        .error-state {
+            padding: 4rem 0;
+            color: #e53935;
+            text-align: center;
+        }
+
         .load-more-container {
             padding: 2rem 0;
             text-align: center;
@@ -1069,13 +1075,6 @@
         .load-more-btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
-        }
-
-        /* Loading */
-        .loading {
-            padding: 4rem 0;
-            color: var(--fg-muted);
-            font-style: italic;
         }
 
         /* Summaries - thread style */
@@ -1895,7 +1894,7 @@
 
         <div class="feed-container">
             <main class="feed" id="feed">
-                <div class="loading">Loading...</div>
+                <div class="loading-state">Loading...</div>
             </main>
         </div>
     </div>
@@ -2037,11 +2036,9 @@
                 } else {
                     const data = await res.json();
                     showJoinStatus(data.error || 'Failed to join channel', 'error', 4000);
-                    alert(data.error || 'Failed to join channel');
                 }
             } catch (err) {
                 showJoinStatus('Failed to join channel', 'error', 4000);
-                alert('Failed to join channel');
             }
         }
 
@@ -2346,7 +2343,7 @@
                         badge.style.display = 'none';
                     }
                 }
-            } catch (err) {}
+            } catch (err) { console.warn('Inbox badge update failed:', err); }
         }
 
         function markInboxSeen() {
@@ -2712,7 +2709,7 @@
                                 isMember = channel.subscribers.some(s => s.handle === identityData.handle);
                             }
                         }
-                    } catch {}
+                    } catch (err) { console.warn('Identity lookup failed:', err); }
                 }
 
                 const memberCount = channel.subscribers ? channel.subscribers.length : 0;
@@ -2791,11 +2788,9 @@
                 } else {
                     const data = await res.json();
                     showJoinStatus(data.error || 'Failed to join channel', 'error', 4000);
-                    alert(data.error || 'Failed to join channel');
                 }
             } catch (err) {
                 showJoinStatus('Failed to join channel', 'error', 4000);
-                alert('Failed to join channel');
             }
         }
 
@@ -3040,7 +3035,7 @@
                     <p class="summary-content">${escapeHtml(summary.content)}</p>
                     <div class="summary-meta">${meta.join(' Â· ')}</div>
                     <div class="summary-entries" id="summary-entries-${summary.id}">
-                        <div class="loading">Loading...</div>
+                        <div class="loading-state">Loading...</div>
                     </div>
                 </div>
             `;
@@ -3661,10 +3656,13 @@ Use get_notebook_entry to fetch each one, then let's talk about what's interesti
             const seconds = Math.floor((now - date) / 1000);
 
             if (seconds < 60) return 'just now';
-            if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
-            if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+            const minutes = Math.floor(seconds / 60);
+            if (seconds < 3600) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
+            const hours = Math.floor(seconds / 3600);
+            if (seconds < 86400) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
             if (seconds < 172800) return 'yesterday';
-            if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
+            const days = Math.floor(seconds / 86400);
+            if (seconds < 604800) return `${days} ${days === 1 ? 'day' : 'days'} ago`;
 
             return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         }

@@ -532,7 +532,7 @@
             if (!effectiveKey) {
                 return `<div class="reply-section">
                     <div class="reply-signin">
-                        <a href="/setup.html">Get an identity key</a> to reply to entries.
+                        <a href="/join">Get an identity key</a> to reply to entries.
                     </div>
                 </div>`;
             }
@@ -651,7 +651,7 @@
                         const repliesData = await repliesRes.json();
                         replies = repliesData.replies || [];
                     }
-                } catch (e) {}
+                } catch (err) { console.warn('Failed to load replies:', err); }
 
                 document.getElementById('content').innerHTML =
                     renderEntry(entry) +

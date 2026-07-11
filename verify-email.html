@@ -15,24 +15,55 @@
         }
 
         :root {
-            --bg: #faf9f7;
-            --surface: #ffffff;
-            --border: #e8e6e3;
-            --fg: #1a1a1a;
-            --fg-muted: #6b6b6b;
+            --bg: #e8e4db;
+            --surface: #f4f2ec;
+            --surface-raised: #fdfcf9;
+            --border: #c9c3b8;
+            --border-subtle: #dbd6cc;
+            --fg: #1c1917;
+            --fg-muted: #57534e;
+            --fg-faint: #78716c;
             --accent: #7c5cbf;
-            --success: #4caf50;
+            --accent-hover: #6b4dab;
+            --accent-subtle: rgba(124, 92, 191, 0.08);
+            --accent-surface: rgba(124, 92, 191, 0.04);
+            --color-success: #16a34a;
+            --color-error: #dc2626;
+        }
+
+        :root[data-theme="dark"] {
+            --bg: #0e0d0b;
+            --surface: #161513;
+            --surface-raised: #1e1d1a;
+            --border: #2e2c28;
+            --border-subtle: #232220;
+            --fg: #e7e5e0;
+            --fg-muted: #a8a49d;
+            --fg-faint: #6b6860;
+            --accent: #a78bfa;
+            --accent-hover: #b9a0fc;
+            --accent-subtle: rgba(167, 139, 250, 0.1);
+            --accent-surface: rgba(167, 139, 250, 0.04);
+            --color-success: #4ade80;
+            --color-error: #f87171;
         }
 
         @media (prefers-color-scheme: dark) {
-            :root {
-                --bg: #0a0a0b;
-                --surface: #111113;
-                --border: #2a2a2e;
-                --fg: #e4e4e7;
-                --fg-muted: #8b8b8b;
+            :root:not([data-theme]) {
+                --bg: #0e0d0b;
+                --surface: #161513;
+                --surface-raised: #1e1d1a;
+                --border: #2e2c28;
+                --border-subtle: #232220;
+                --fg: #e7e5e0;
+                --fg-muted: #a8a49d;
+                --fg-faint: #6b6860;
                 --accent: #a78bfa;
-                --success: #81c784;
+                --accent-hover: #b9a0fc;
+                --accent-subtle: rgba(167, 139, 250, 0.1);
+                --accent-surface: rgba(167, 139, 250, 0.04);
+                --color-success: #4ade80;
+                --color-error: #f87171;
             }
         }
 
@@ -42,6 +73,7 @@
             color: var(--fg);
             min-height: 100vh;
             padding: 3rem 2rem;
+            -webkit-font-smoothing: antialiased;
         }
 
         .container {
@@ -73,13 +105,13 @@
         }
 
         .status.success {
-            border-color: rgba(129, 199, 132, 0.5);
-            background: rgba(129, 199, 132, 0.1);
+            border-color: color-mix(in srgb, var(--color-success) 50%, transparent);
+            background: color-mix(in srgb, var(--color-success) 10%, transparent);
         }
 
         .status.error {
-            border-color: rgba(229, 115, 115, 0.5);
-            background: rgba(229, 115, 115, 0.1);
+            border-color: color-mix(in srgb, var(--color-error) 50%, transparent);
+            background: color-mix(in srgb, var(--color-error) 10%, transparent);
         }
 
         .status.loading {
@@ -113,6 +145,13 @@
             margin-bottom: 1rem;
         }
     </style>
+    <script>
+        // Apply saved theme before paint to prevent flash
+        (function() {
+            const saved = document.cookie.match(/(?:^|; )hermes_theme=(\w+)/);
+            if (saved) document.documentElement.setAttribute('data-theme', saved[1]);
+        })();
+    </script>
 </head>
 <body>
     <div class="container">

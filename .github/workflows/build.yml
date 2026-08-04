@@ -164,7 +164,9 @@ jobs:
           node-version: '22'
 
       - name: Install Phala CLI
-        run: npm install -g phala
+        # Pinned: phala 1.1.20 fails against this CVM with
+        # "CVM encrypted_env_pubkey is required for centralized KMS"
+        run: npm install -g phala@1.1.19
 
       - name: Generate compose file
         env:

@@ -84,6 +84,19 @@ services:
 
   dstack-ingress:
     image: dstacktee/dstack-ingress:20250929@sha256:2b47b3e538df0b3e7724255b89369194c8c83a7cfba64d2faf0115ad0a586458
+    # Stale hermes.teleport.computer certbot state in this volume makes every
+    # `certbot renew` exit nonzero (hermes CAA pins the other ingress's ACME
+    # account), which blocks nginx from starting/reloading. Purge it first.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        rm -rf /etc/letsencrypt/renewal/hermes.teleport.computer.conf
+        /etc/letsencrypt/live/hermes.teleport.computer
+        /etc/letsencrypt/archive/hermes.teleport.computer
+        && exec /scripts/entrypoint.sh "$$@"
+      - --
+    command: ["nginx", "-g", "daemon off;"]
     ports:
       - "443:443"
     environment:
